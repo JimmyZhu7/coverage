@@ -30,6 +30,7 @@ from directory.management.commands.refresh_grad_facts import (
     classify_change, refreshed_grad_fact,
 )
 from directory.models import Firm, Opportunity
+from directory import recommend as R
 from directory.recommend import (
     Candidate, Profile, _class_fit, _stated_grad_window, stated_class_mismatch,
 )
@@ -255,7 +256,12 @@ def test_the_scorer_reads_an_open_window_as_open():
     """`Candidate` carries the years alone, so an open window reaches the
     scorer as its enumeration up to the extractor's horizon. A window that
     touches the horizon is "and everyone after": nobody later than the
-    floor is a mismatch, including a student past the horizon itself."""
+    floor is a mismatch, including a student past the horizon itself.
+
+    REWRITTEN 2026-09-01 (S3). Eligibility is unchanged — every student at or
+    after the floor is still included, still not vetoed, still chipped with
+    the floor — but the SCORE no longer treats all of them alike. See
+    `test_an_open_window_years_below_the_student_is_a_near_miss` below."""
     c = _cand(grad_years=tuple(_open_years(2028)))
     for cy in (2028, 2029, 2032, GRAD_YEAR_MAX, GRAD_YEAR_MAX + 3):
         p = Profile(class_year=cy)
@@ -263,11 +269,51 @@ def test_the_scorer_reads_an_open_window_as_open():
         assert lo == 2028 and hi >= cy, cy
         assert stated_class_mismatch(p, c) is False, cy
         points, reasons = _class_fit(p, c)
-        assert points > 0 and reasons[0].text.endswith("— you"), cy
+        assert points > 0 and reasons[0].text.startswith("For 2028+ grads"), cy
+        assert "—" not in reasons[0].text and "–" not in reasons[0].text, cy
     p = Profile(class_year=2027)
     assert _stated_grad_window(p, c) == (2028, GRAD_YEAR_MAX)
     assert stated_class_mismatch(p, c) is True
     assert _class_fit(p, c)[0] < 0
+
+
+def test_an_open_window_years_below_the_student_is_a_near_miss():
+    """S3, 2026-09-01. "Graduation date must be after January 2026" is a
+    sentence about who is not excluded, not a sentence about who the
+    programme is for — and containment could not tell the two apart, so it
+    paid `W_CLASS_STATED` (30), the same as a posting that names the
+    student's class outright. Three of the founder's top five rode it: two
+    Bank of America London off-cycles with a floor three years back, and a
+    year-round Baird internship.
+
+    ONE YEAR is the line, the same line the rest of this axis draws. A floor
+    at or within a year below the student is the firm describing this
+    cohort with a tolerance and keeps the full bonus; a floor further back is
+    the firm describing four cohorts at once and pays
+    `W_CLASS_DERIVED_NEAR`, the product's standing "worth a look, not a fit"
+    weight. The chip still prints the floor either way, because that floor is
+    exactly the fact that tells the student whose programme this is."""
+    c = _cand(grad_years=tuple(_open_years(2026)))
+    far = Profile(class_year=2029)
+    assert stated_class_mismatch(far, c) is False       # still not blocked
+    points, reasons = _class_fit(far, c)
+    assert points == R.W_CLASS_DERIVED_NEAR
+    assert reasons[0].text == "For 2026+ grads"
+    assert "(yours)" not in reasons[0].text
+    assert "3 years before you" in reasons[0].detail
+
+    # Floor within one year: still the firm naming this cohort.
+    for cy, floor in ((2026, 2026), (2027, 2026), (2028, 2028), (2029, 2028)):
+        p, near = Profile(class_year=cy), _cand(grad_years=tuple(_open_years(floor)))
+        assert _class_fit(p, near)[0] == R.W_CLASS_STATED, (cy, floor)
+        assert _class_fit(p, near)[1][0].text == f"For {floor}+ grads (yours)"
+
+    # A CLOSED window is untouched however wide it is: a firm that named both
+    # ends of it named the cohorts it meant.
+    wide = _cand(grad_years=("2026", "2027", "2028", "2029"))
+    assert _class_fit(Profile(class_year=2029), wide)[0] == R.W_CLASS_STATED
+    assert _class_fit(Profile(class_year=2029), wide)[1][0].text == (
+        "For 2026-2029 grads (yours)")
 
 
 def test_a_closed_window_in_the_scorer_is_unchanged():

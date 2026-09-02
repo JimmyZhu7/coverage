@@ -311,8 +311,15 @@ def test_profile_from_user_reads_study_level_through_getattr():
     # The IB programmes under the same prefix still read as IB.
     ("2027 Commercial & Investment Bank - Global Investment Banking Program - Summer Analyst - Tokyo", "ib"),
     ("2027 Commercial & Investment Bank - Global Investment Banking Working Student Program - Off-Cycle Internship – Madrid", "ib"),
-    # Silent after the strip: the firm's coverage speaks, as for any silent title.
-    ("2027 Commercial & Investment Bank - Global Corporate Banking Program - Summer Analyst - Tokyo", ""),
+    # REWRITTEN 2026-09-01 (S4) from "": Global Corporate Banking is not
+    # silent any more. `\bcorporate bank(ing|er)?\b` names a function outside
+    # the six tracks, and until the `cb` track clears its supply gate (18
+    # rows across 7 firms in the founder's markets, measured 2026-09-01, two
+    # short) the honest answer for a corporate banking programme is "not one
+    # of your tracks" rather than the investment bank's coverage inherited by
+    # silence. 64 of the 66 open corporate-banking rows were silent this way,
+    # and Barclays' fourteen GTB rows all read "matches IB".
+    ("2027 Commercial & Investment Bank - Global Corporate Banking Program - Summer Analyst - Tokyo", "none"),
     # The documented behaviour that must not regress.
     ("2027 Commercial & Investment Bank Risk Management Summer Analyst Program", "none"),
     # Not a prefix: "Investment Bank" elsewhere in a title is still the job.
@@ -324,7 +331,13 @@ def test_profile_from_user_reads_study_level_through_getattr():
     ("2027 APAC Markets Summer Analyst - Hong Kong", "st"),
     ("Capital Markets Summer Analyst", "ib"),
     ("Private Markets Summer Analyst", "pe"),
-    ("2027 Summer Intern - Global Wealth Management, Growth Markets Analyst, US", "am"),
+    # REWRITTEN 2026-09-01 (S4/D5) from "am". `\bwealth management\b` sat in
+    # the am pattern, so 72 open campus rows of retail wealth advisory
+    # answered "Asset Management" for every student who picked AM — the exact
+    # conflation the corporate-banking/wealth research warns about. It now
+    # answers "none"; the GS/JPM division name "Asset & Wealth Management"
+    # keeps answering "am" and is tested in test_recommend.py.
+    ("2027 Summer Intern - Global Wealth Management, Growth Markets Analyst, US", "none"),
     ("Global Markets Operations Summer Analyst", "none"),
 ])
 def test_the_division_prefix_is_stripped_before_the_job_is_read(title, expected):
@@ -359,11 +372,24 @@ def test_a_blank_region_costs_nothing_when_no_regions_were_named():
 
 def test_a_blank_region_can_no_longer_tie_a_located_twin():
     """The founder's #1: an unlocated Nomura programme level with the Hong
-    Kong roles beside it on every other axis."""
+    Kong roles beside it on every other axis.
+
+    REWRITTEN 2026-09-01 (S1). The old order was located, elsewhere, blank —
+    Japan ahead of the unread location, because a stated market outside the
+    student's cost nothing at all while the unread one cost 8. That ordering
+    said the product would rather recommend a role it knows is in the wrong
+    place than one it could not place, which is backwards. The ladder now
+    runs located > unread > elsewhere, and the two negatives are ordered the
+    way the evidence is: our ignorance is cheaper than the posting's own
+    statement that the job is somewhere the student did not name."""
     located = _cand(1, region="hk")
     blank = _cand(2, region="")
     elsewhere = _cand(3, region="jp")
-    assert _ids(recommend(SOPHOMORE, [blank, located, elsewhere], max_per_firm=9)) == [1, 3, 2]
+    ranked = recommend(SOPHOMORE, [blank, located, elsewhere], max_per_firm=9)
+    assert _ids(ranked) == [1, 2, 3]
+    assert (score_candidate(SOPHOMORE, located)[0]
+            > score_candidate(SOPHOMORE, blank)[0]
+            > score_candidate(SOPHOMORE, elsewhere)[0])
 
 
 def test_the_penalty_cannot_hide_a_role_two_statements_vouch_for():

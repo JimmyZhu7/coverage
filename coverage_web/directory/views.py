@@ -169,10 +169,13 @@ def confidence_marker(value):
 
 # Where a deadline came from. `Opportunity.confidence` is 1.0 when the
 # provider handed us the date in a structured field and 0.6 when
-# `enrich_postings` read it out of the posting's own prose — and 92 of the 121
-# dated open roles are the second kind. Both are worth showing; only one of
-# them is a quotation of a field, and a page that renders them identically is
-# claiming a certainty it does not have.
+# `enrich_postings` read it out of the posting's own prose — and 327 of the 341
+# dated open campus roles are the second kind (measured 2026-09-01). This said
+# "92 of the 121" until tonight, from the board as it stood when the comment
+# was written; the board has nearly trebled since and the share has gone from
+# 76% to 96%, which is a stronger case for the marker than the old number made.
+# Both are worth showing; only one of them is a quotation of a field, and a
+# page that renders them identically is claiming a certainty it does not have.
 #
 # "Reported" rather than "unconfirmed": the date IS what the posting says. The
 # word is about the reading being ours, not about doubting the firm.

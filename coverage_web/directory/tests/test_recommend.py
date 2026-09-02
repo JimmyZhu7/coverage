@@ -30,10 +30,23 @@ from directory.classify import DERIVED_SUMMER
 from directory.models import Firm, Opportunity
 from directory.recommend import (
     MIN_SCORE, Candidate, Profile, parse_target_cycle, recommend,
-    role_function, school_region, score_candidate,
+    role_function, role_function_cached, school_region, score_candidate,
 )
 
 from .test_tracking import _user
+
+
+@pytest.fixture(autouse=True)
+def _clear_role_function_cache():
+    """`role_function` is memoised on the title (see `role_function_cached`).
+    The cache is process-local and the classifier is pure, so it can only go
+    stale when a test reaches into the vocabulary itself — and a stale entry
+    then reads as a vocabulary bug rather than as the leak it is. Cleared
+    before AND after every test in this file so neither direction can carry."""
+    role_function_cached.cache_clear()
+    yield
+    role_function_cached.cache_clear()
+
 
 # Jimmy's real profile shape, which is what the feature was specified against.
 JIMMY = Profile(
@@ -47,16 +60,22 @@ JIMMY = Profile(
 
 
 def _cand(cid, **kw):
-    # `region="other"` and not the blank it used to be (2026-09-01). A STATED
-    # market outside the profile's scores exactly zero on the region axis,
-    # which is what a blank scored before `W_REGION_UNKNOWN` existed; a blank
-    # now costs a profiled student 8 points, and every test here that moves
-    # ONE axis and watches the ranking must not have a second axis moving
-    # underneath it. The tests about the blank itself set it explicitly.
+    # `region="global"`, REWRITTEN 2026-09-01 from the `region="other"` that
+    # replaced the original blank. The default exists to make the region axis
+    # SILENT, so that every test here that moves one axis and watches the
+    # ranking does not have a second axis moving underneath it — and the value
+    # that is silent has changed twice as the axis learned to speak. A blank
+    # costs `W_REGION_UNKNOWN` (-8) once the student names regions; "other"
+    # now costs `W_REGION_MISMATCH` (-16), because a location we read and
+    # placed outside the student's markets is the posting stating a market and
+    # it binds. "global" is the one remaining value that scores exactly zero
+    # for every profile: the posting saying it has no single place, which is
+    # not a market to be right or wrong about. The tests about the blank and
+    # about a mismatch set their region explicitly.
     base = dict(
         id=cid, firm_id=99, firm_name=f"Firm {cid}", firm_slug=f"firm{cid}",
         title="Summer Analyst", url=f"https://x/{cid}", bucket="internship",
-        region="other",
+        region="global",
     )
     base.update(kw)
     return Candidate(**base)
@@ -318,11 +337,65 @@ def test_industry_preference_moves_the_ranking():
 
 def test_university_location_moves_the_ranking():
     """USC is in the US, so a US role outranks an otherwise identical HK one
-    even though HK is also on the profile's region list."""
+    even though HK is also on the profile's region list.
+
+    REWRITTEN 2026-09-01. The old ladder ended at `eu` scoring zero and
+    ranking third; a stated market outside the student's now costs
+    `W_REGION_MISMATCH`, so the London role does not merely come last, it
+    goes negative and stops being recommendable at all. Three of the
+    founder's six live picks were European on the day this was written."""
     us = _cand(1, region="us")
     hk = _cand(2, region="hk")
     eu = _cand(3, region="eu")
-    assert _order(JIMMY, [eu, hk, us]) == [1, 2, 3]
+    # `_order` already floors at zero, and London is now BELOW zero on this
+    # axis alone, so it does not merely sort last: it leaves the list.
+    assert _order(JIMMY, [eu, hk, us]) == [1, 2]
+    assert (score_candidate(JIMMY, us)[0] > score_candidate(JIMMY, hk)[0]
+            > 0 > score_candidate(JIMMY, eu)[0])
+    assert recommend(JIMMY, [eu], min_score=MIN_SCORE) == []
+
+
+def test_a_stated_market_outside_the_profile_costs_more_than_an_unread_one():
+    """S1, 2026-09-01. The two "not one of your markets" answers are not the
+    same answer, and the scorer must not price them the same.
+
+    A blank region is Coverage failing to read a location and is charged
+    against Coverage (`W_REGION_UNKNOWN`, -8). A region we DID read and that
+    sits outside the student's markets is the posting stating where the job is
+    (`W_REGION_MISMATCH`, -16). Evidence outranks absence, so the stated miss
+    costs strictly more — and before it existed it cost strictly LESS, which
+    is how a London off-cycle at a tier-1 bank outranked every Hong Kong role
+    on a Hong Kong student's rail."""
+    unread = score_candidate(JIMMY, _cand(1, region=""))[0]
+    stated = score_candidate(JIMMY, _cand(2, region="eu"))[0]
+    assert stated < unread < 0
+    chip = next(r for r in score_candidate(JIMMY, _cand(2, region="eu"))[1]
+                if r.kind == "region")
+    assert chip.text == "Not in your regions (EU)"
+    assert "Europe" in chip.detail and "US, HK" in chip.detail
+
+
+def test_an_untracked_stated_market_is_a_mismatch_but_a_placeless_one_is_not():
+    """"other" is `normalize_region` saying it read a location and placed it
+    outside all six tracked markets — a stated place, so it binds. "global" is
+    the posting saying it has no single place, which is nothing to be wrong
+    about and must stay at zero, or the fix re-runs the bug it corrects in the
+    other direction."""
+    assert score_candidate(JIMMY, _cand(1, region="other"))[0] < 0
+    assert score_candidate(JIMMY, _cand(2, region="global"))[0] == 0
+    assert [r for r in score_candidate(JIMMY, _cand(2, region="global"))[1]
+            if r.kind == "region"] == []
+
+
+def test_a_student_who_named_no_regions_pays_no_mismatch():
+    """P3, degrade to today's behaviour on thin data. With no market named,
+    there is no market for a London posting to be outside of, and the axis
+    scores exactly what it scored before this weight existed: zero, for every
+    region value there is."""
+    regionless = replace(JIMMY, regions=(), school="")
+    for region in ("eu", "other", "hk", "us", ""):
+        points, reasons = score_candidate(regionless, _cand(1, region=region))
+        assert [r for r in reasons if r.kind == "region"] == [], region
 
 
 def test_region_tooltips_read_as_english():
@@ -740,7 +813,50 @@ def _p(**kw):
     ("Investment Banking Financial Analyst | Boston Technology (Class of 2027)", "ib"),
     ("M&A intern - Large Cap Generalist / Technology team - Paris", "ib"),
     ("Investment Banking - Corporate Finance Associate", "ib"),
-    ("Capital Markets, Corporate Banking Summer Analyst", "ib"),
+    # REWRITTEN 2026-09-01 (S4) from "ib". "Corporate Banking" now names a
+    # function outside the vocabulary, so this title carries an IB phrase
+    # ("Capital Markets") AND a non-track one, and this file's standing rule
+    # for that shape is to decline rather than guess. Corporate banking was
+    # measured for its own `cb` track on 2026-09-01 and HELD (18 rows across
+    # 7 firms in the founder's markets, two short of the supply gate), so
+    # until it ships the honest answer is "not one of your tracks" rather
+    # than the investment bank's. The tie-break the research warns about
+    # ("Investment Banking must win over Commercial") decides nothing live:
+    # across the whole 26,492-row board TEN titles carry both an IB phrase
+    # and a retail/corporate banking one, nine of them experienced-hire reqs
+    # and the tenth — RBC's "2027 Capital Markets, Corporate Banking Summer
+    # Analyst", this very title — closed.
+    ("Capital Markets, Corporate Banking Summer Analyst", "none"),
+    # ...and the support functions that were reading as their bank's
+    # track by silence until the vocabulary was extended (S4): 439 of the
+    # 1,316 silent open campus titles, 227 of them at ib/st firms.
+    ("Off-Cycle Actuarial Student Work Placement", "none"),
+    ("Personal Banking Associate Trainee", "none"),
+    ("College to Corporate IT Internship", "none"),
+    ("Hardware Engineer Intern", "none"),
+    ("AI Data Analyst - Summer 2027", "none"),
+    # Wealth management is not asset management (S4/D5): 72 open campus rows
+    # answered `am` off `\bwealth management\b` and put retail advisory under
+    # the AM label for anyone who picked it.
+    ("Internship – Private Wealth Management (Louisville, KY Summer 2027)", "none"),
+    ("AMP Financial Advisor Trainee", "none"),
+    ("Relationship Management - Private Bank - Internship", "none"),
+    ("Internship - Securities Processing (Year-Round)", "none"),
+    # ...but the DIVISION name that covers both businesses still answers
+    # `am`, because it genuinely covers asset management. Eight open campus
+    # rows; without the explicit phrase the blocklist would swallow them.
+    ("Asset and Wealth Management Quantitative Strats — Summer Analyst", "am"),
+    ("2027 Asset & Wealth Management Risk Summer Analyst Program", "am"),
+    ("Investment Management Summer Analyst", "am"),
+    # Bare "advisory" no longer names consulting (S4): it is the Big 4's word
+    # for their whole non-audit half and the boutiques' word for investment
+    # banking, so 56 of the 83 open campus rows carrying it answered
+    # "consulting" on that word alone. Silent now, and the firm speaks.
+    ("2027 Summer Analyst (Strategic Advisory & Restructuring) Hong Kong", ""),
+    ("Advisory Associate", ""),
+    # ...and a real consulting title is untouched, because the word that
+    # names the function is still there.
+    ("PwC Graduate Programme - Advisory (Consulting) - Auckland", "consulting"),
     # Nothing stated: the firm's coverage is allowed to speak.
     ("Intern", ""),
     ("Summer Analyst Program", ""),
@@ -888,10 +1004,90 @@ def test_a_stated_track_outranks_one_inferred_from_the_firm():
 
 
 def test_a_non_track_function_claims_no_track_match():
-    """The card must not say "matches IB" about an audit job."""
-    from directory.recommend import score_candidate
+    """The card must not say "matches IB" about an audit job.
+
+    REWRITTEN 2026-09-01 (S2). The old assertion was "no track reason at
+    all", which is how the axis stayed SILENT on these rows — and silence is
+    not neutrality here, because every other axis on a `none` row belongs to
+    the firm, so tier and warmth carried Nomura's "2027 Operations Summer
+    Analyst Program" to 90 points and second place on the founder's live
+    rail. There is a track reason now; what it must never do is claim a
+    match, and what it must always do is cost points."""
+    from directory.recommend import W_TRACK_NONE, score_candidate
     score, reasons = score_candidate(_p(), _c("2027 Internal Audit Analyst Program"))
-    assert not any(r.kind == "track" for r in reasons), [r.text for r in reasons]
+    track = [r for r in reasons if r.kind == "track"]
+    assert [r.text for r in track] == ["Not your tracks"]
+    assert not any("matches" in r.text or "role" in r.text for r in track)
+    # The tooltip is the only place the student is told WHICH tracks it
+    # missed, so it lists them as English rather than as "IB or S&T or PE".
+    assert "it is not IB, S&T or PE." in track[0].detail
+    silent = score_candidate(_p(), _c("2027 Summer Analyst Program"))[0]
+    assert score - silent <= W_TRACK_NONE
+
+
+def test_a_stated_non_track_function_costs_more_than_silence_earns():
+    """S2's calibration, stated as arithmetic rather than as a feeling.
+
+    `W_TRACK_NONE` is minus `W_TRACK_CAP` exactly: 20 is the most an INFERRED
+    match can earn, so a title that says Operations must not merely forfeit
+    that 20, it must cost the same again. The swing between "silent at a bank
+    that covers your tracks" and "states Operations at the same bank" is the
+    whole width of the inherited-track axis, twice."""
+    from directory.recommend import W_TRACK_CAP, W_TRACK_NONE, score_candidate
+    assert W_TRACK_NONE == -W_TRACK_CAP
+    silent = score_candidate(_p(), _c("2027 Summer Analyst Program"))[0]
+    stated = score_candidate(_p(), _c("2027 Operations Summer Analyst Program"))[0]
+    assert silent - stated == W_TRACK_CAP * 2
+
+
+def test_a_false_none_can_still_be_outvoted_by_the_evidence():
+    """WHY A PENALTY AND NOT A SKIP. This blocklist has been wrong before and
+    will be again — `\\brecruit(ing|ment)\\b` once answered "none" for five
+    Piper Sandler investment banking summer associate reqs. A row this
+    function mis-reads must still be recoverable by evidence: tier 1, the
+    student's own market and a stated class year outvote the penalty and keep
+    the row visible. A skip would delete it with nothing able to argue."""
+    from directory.recommend import MIN_SCORE, score_candidate
+    misread = _c("2027 Internal Audit Analyst Program", class_year="2029",
+                 region="us")
+    assert score_candidate(_p(), misread)[0] >= MIN_SCORE
+
+
+def test_a_student_who_named_no_tracks_pays_no_non_track_penalty():
+    """P3, degrade to today's behaviour on thin data. With no track named,
+    there is no track for the posting's function to be outside of, and the
+    axis scores exactly what it scored before this weight existed."""
+    from directory.recommend import score_candidate
+    trackless = _p(tracks=())
+    for title in ("2027 Internal Audit Analyst Program",
+                  "2027 Summer Analyst Program",
+                  "Investment Banking Summer Analyst"):
+        points, reasons = score_candidate(trackless, _c(title))
+        assert [r for r in reasons if r.kind == "track"] == [], title
+
+
+def test_role_function_is_memoised_on_the_title_alone():
+    """The cache `_track_fit` and `role_matches_tracks` read through. It is
+    safe only because the key is the title and the classifier is pure: no
+    profile, no request, no clock, so one student's answer is every student's
+    answer and nothing can cross a tenant boundary. A second call with the
+    same title is a hit; a different title is a miss."""
+    from directory.recommend import role_function, role_function_cached
+    role_function_cached.cache_clear()
+    assert role_function_cached("2027 Operations Summer Analyst") == "none"
+    assert role_function_cached.cache_info().misses == 1
+    assert role_function_cached("2027 Operations Summer Analyst") == "none"
+    info = role_function_cached.cache_info()
+    assert (info.hits, info.misses) == (1, 1)
+    assert role_function_cached("Investment Banking Summer Analyst") == "ib"
+    assert role_function_cached.cache_info().misses == 2
+    # The cache is a memo of the pure function and nothing else: every answer
+    # it hands back is the answer `role_function` computes from scratch. That
+    # is the invariant that makes "a vocabulary edit restarts the process"
+    # a sufficient invalidation story.
+    for title in ("Personal Banking Associate Trainee", "Intern",
+                  "Asset and Wealth Management Quantitative Strats"):
+        assert role_function_cached(title) == role_function(title)
 
 
 def test_a_blocked_role_can_never_be_picked():
@@ -923,7 +1119,12 @@ def test_a_body_stated_window_containing_the_student_scores_as_stated():
     silent = _score(JIMMY, bucket="insight")
     assert hit - silent == 30  # W_CLASS_STATED, the strongest signal
     texts = _reasons(JIMMY, bucket="insight", grad_years=("2028", "2029"))
-    assert any("2028–2029" in t and "you" in t for t in texts)
+    # A PLAIN HYPHEN and "(yours)", 2026-09-01: `Recommendation.why` joins
+    # these chips and `crm.digest` prints the join into an email, where "For
+    # 2027–2028 grads — you" wrapped at the em dash and left "— you" alone on
+    # its own line. No em dashes anywhere a student reads.
+    assert any("2028-2029" in t and "(yours)" in t for t in texts)
+    assert not any("—" in t or "–" in t for t in texts)
 
 
 def test_a_body_stated_window_excluding_the_student_is_a_veto():
@@ -1291,12 +1492,24 @@ def test_the_blocklist_additions_read_the_department_not_the_desk(title, expecte
 def test_a_risk_or_it_req_never_inherits_its_banks_track_coverage():
     """The end-to-end claim, which is the one that reached the founder's
     screen: a universal bank's `Firm.tracks` must not put "matches IB + S&T"
-    on the card of its risk and IT requisitions."""
+    on the card of its risk and IT requisitions.
+
+    REWRITTEN 2026-09-01 (S2), same reason as
+    `test_a_non_track_function_claims_no_track_match`: the axis no longer
+    stays silent on a stated non-track function, it argues. What must hold is
+    that no chip claims the row matches anything, and that the row is worse
+    off for having said what it is than a row that said nothing."""
     for title in ("2027 - Risk - Industrial Placement - London",
                   "2027 - Information Technology - Industrial Placement - London"):
         points, reasons = score_candidate(
             JIMMY, _cand(1, title=title, firm_tracks=("ib", "st")))
-        assert [r for r in reasons if r.kind == "track"] == [], title
+        track = [r for r in reasons if r.kind == "track"]
+        assert [r.text for r in track] == ["Not your tracks"], title
+        assert not any("matches" in r.text for r in track), title
+        silent = score_candidate(
+            JIMMY, _cand(1, title="2027 - Industrial Placement - London",
+                         firm_tracks=("ib", "st")))[0]
+        assert points < silent, title
 
 
 @pytest.mark.parametrize("track,expected", [

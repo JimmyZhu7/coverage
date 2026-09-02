@@ -46,13 +46,18 @@ ALL_REGIONS = ("", "us", "eu", "hk", "sg", "jp", "cn", "other", "global")
 
 
 def cand(cid, **kw):
-    # `region="other"`, not blank (2026-09-01): a stated market outside the
-    # profile's scores zero on the region axis, which is what a blank scored
-    # before `W_REGION_UNKNOWN`. The invariants here move one input at a
-    # time; the blank's own new behaviour is tested where `ALL_REGIONS` is
-    # iterated explicitly and in test_picks_personalization.py.
+    # `region="global"`, REWRITTEN 2026-09-01 from the `region="other"` that
+    # replaced the original blank. The invariants here move one input at a
+    # time, so the default has to be the value the region axis is SILENT
+    # about, and that value has changed as the axis learned to speak: a blank
+    # costs `W_REGION_UNKNOWN`, and "other" — a location we read and placed
+    # outside the student's markets — now costs `W_REGION_MISMATCH`. "global"
+    # is the posting saying it has no single place, which is the one thing
+    # left that is not a market to be right or wrong about. The blank and the
+    # mismatch are tested where `ALL_REGIONS` is iterated explicitly and in
+    # test_recommend.py / test_picks_personalization.py.
     base = dict(id=cid, firm_id=1, firm_name="Acme Partners", firm_slug="acme",
-                title="Summer Analyst", url=f"https://x/{cid}", region="other")
+                title="Summer Analyst", url=f"https://x/{cid}", region="global")
     base.update(kw)
     return R.Candidate(**base)
 
