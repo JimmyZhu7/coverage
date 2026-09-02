@@ -19,6 +19,7 @@ be occupied.
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 import pytest
@@ -29,6 +30,10 @@ from analytics.models import UserOpportunity
 from directory.models import Firm, Opportunity
 from directory.views import _urgency_band
 
+# `_rule` is a pure function over rendered CSS text and the suite already has
+# exactly one of it. Reused rather than copied, per the plan's one-definition
+# rule; the page it reads is this file's own business.
+from .test_board_surface import _rule
 from .test_tracking import _user
 
 TODAY = timezone.localdate()
@@ -553,3 +558,164 @@ def test_a_posting_the_scraper_never_rechecked_is_untouched(client):
     assert len(lenses["closing"]["items"]) == 1
     assert lenses["posting_closed"]["items"] == []
     assert "This posting is closed" not in _rendered(client)
+
+
+# ---------------------------------------------------------------------------
+# THE REVERSAL LIST, which is a ledger and was rendering as boxes.
+#
+# The founder's screenshot: thirteen full-width bordered boxes, each holding a
+# firm and a role on one line with its control stacked on a second line
+# underneath, and the text occupying the left third of a very wide page. Two
+# defects met in it.
+#
+# ONE: the rules that would have laid the row out — content left, action right
+# — were written in `directory/_styles.html`, and that file is the FEED's
+# page-scoped stylesheet. This page does not include it. So the rules never
+# reached the markup, every part fell back to block layout, and the control
+# dropped to its own line. The tests below assert against the page's OWN
+# rendered <style> blocks for exactly that reason: a rule that moves back out
+# to a stylesheet this page does not carry fails them. That is the regression;
+# where a declaration is typed is not otherwise a test's business.
+#
+# TWO: four of the thirteen read as two postings listed twice. See
+# `test_two_cities_of_one_role_stay_two_rows_that_can_be_told_apart`.
+# ---------------------------------------------------------------------------
+
+_STYLE_BLOCK_RE = re.compile(r"<style[^>]*>(.*?)</style>", re.S)
+
+
+def _page_css(client):
+    """Every <style> block the page renders, joined, comments stripped.
+
+    ALL of them, not the first: this page carries its own block and the base
+    template carries others, and a helper that took the first would assert
+    against whichever the layout happened to emit earliest. Comments go
+    because they are prose with braces and commas in it, which a regex over
+    selectors would otherwise sweep into the next rule's prelude.
+    """
+    html = client.get(reverse("my_applications")).content.decode()
+    return re.sub(r"/\*.*?\*/", "",
+                  "\n".join(_STYLE_BLOCK_RE.findall(html)), flags=re.S)
+
+
+def _hidden_section(client):
+    """Just the reversal list, so an assertion about it is not answered by the
+    pipeline above it or by the inlined stylesheet elsewhere on the page."""
+    html = client.get(reverse("my_applications")).content.decode()
+    return html[html.index('id="hidden"'):]
+
+
+def _hide(user, *, firm, title, location="", n=0):
+    o = Opportunity.objects.create(
+        firm=firm, url=f"https://x/hidden/{firm.slug}/{n}", title=title,
+        location=location, bucket="internship", status="open",
+    )
+    UserOpportunity.all_objects.create(user=user, opportunity=o, dismissed=True)
+    return o
+
+
+@pytest.mark.django_db
+def test_the_reversal_lists_rows_are_the_ledger_form(client):
+    """`.frow`'s form, on the last list still shaped as boxes: a hairline
+    between rows, a flat ground, the content in one column and the single
+    action in the other.
+
+    The `_rule` lookups are the load-bearing half. They read the page's own
+    rendered stylesheet, so they fail if these rules go back to living in a
+    stylesheet this page does not include — which is what had the row
+    rendering as stacked blocks.
+    """
+    user = _user()
+    firm = Firm.objects.create(name="Optiver", slug="optiver")
+    _hide(user, firm=firm, title="Quantitative Intern", n=1)
+    client.force_login(user)
+
+    css = _page_css(client)
+    row = _rule(css, ".apps-hidden-row")
+    assert "grid-template-columns: minmax(0, 1fr) auto" in row
+    assert "border-top: 1px solid var(--line)" in row
+    # Not a box any more: no panel lift, and neither the panel corner nor the
+    # control corner.
+    assert "var(--shadow" not in row
+    assert "--r-panel" not in row and "--r-ctl" not in row
+    assert ".apps-hidden-row:first-child" in css
+    # Nor a box in the markup. Anchored on the class NAME rather than on the
+    # whole attribute, which would break the moment the row takes any further
+    # class.
+    classes = re.findall(r'class="(apps-hidden-row[^"]*)"', _hidden_section(client))
+    assert classes and all("panel" not in c.split() for c in classes)
+
+
+@pytest.mark.django_db
+def test_put_back_is_toned_as_a_reversal_not_a_deletion(client):
+    """It shared `.apps-remove` with the control that deletes a saved row, and
+    inherited that control's red hover. Restoring a row the student hid is not
+    a warning — the same call `.apps-undo` and the feed's own undo control
+    already make."""
+    user = _user()
+    firm = Firm.objects.create(name="SIG", slug="sig")
+    _hide(user, firm=firm, title="Discovery Program", n=1)
+    client.force_login(user)
+
+    hover = _rule(_page_css(client), ".apps-putback:hover")
+    assert "var(--accent" in hover
+    assert "var(--danger" not in hover
+
+
+@pytest.mark.django_db
+def test_two_cities_of_one_role_stay_two_rows_that_can_be_told_apart(client):
+    """Four of the founder's thirteen hidden rows were two pairs sharing a
+    firm and a title, and read as one posting listed twice.
+
+    They are two postings. Each Optiver pair is two live requisitions under
+    different Greenhouse ids in two different cities, which is why
+    `fold_duplicates` folds none of them — `_cluster_by_location` treats a
+    stated city as a hard divider — and why this list must not fold them
+    either even though the pipeline above it does (see
+    `test_a_tracked_identity_duplicate_folds_to_one_row`). The pipeline can
+    fold, because a folded copy is still reachable from the feed. A dismissed
+    row is reachable from nowhere else, so a fold here would be a dismissal
+    with no way back. What was missing was never a fold. It was the fact that
+    tells the two apart.
+    """
+    user = _user()
+    firm = Firm.objects.create(name="Optiver", slug="optiver")
+    a = _hide(user, firm=firm, title="Quantitative Intern (Summer 2027)",
+              location="Chicago, Illinois, United States", n=1)
+    b = _hide(user, firm=firm, title="Quantitative Intern (Summer 2027)",
+              location="Austin, Texas, United States", n=2)
+    client.force_login(user)
+
+    section = _hidden_section(client)
+    assert section.count("Quantitative Intern (Summer 2027)") == 2
+    assert "Chicago, Illinois, United States" in section
+    assert "Austin, Texas, United States" in section
+    # One working Put back per row, each aimed at its own posting.
+    for opp in (a, b):
+        assert reverse("track_opportunity", args=[opp.id]) in section
+
+    # One row's Put back acts on that row alone. `undismiss` deletes the
+    # UserOpportunity outright rather than clearing a flag, so the assertion
+    # is the row's absence.
+    client.post(reverse("track_opportunity", args=[a.id]),
+                {"status": "undismiss", "next": reverse("my_applications")})
+
+    assert not UserOpportunity.all_objects.filter(user=user, opportunity=a).exists()
+    assert UserOpportunity.all_objects.get(user=user, opportunity=b).dismissed is True
+    assert _hidden_section(client).count("Quantitative Intern (Summer 2027)") == 1
+
+
+@pytest.mark.django_db
+def test_a_hidden_row_states_no_place_the_posting_did_not(client):
+    """P1, on the column this list just gained. Three of the founder's
+    thirteen state no location at all (SIG's whole iCIMS board), and a row
+    that filled that in from the firm's market would be inventing the one fact
+    the list now leans on to tell two rows apart."""
+    user = _user()
+    firm = Firm.objects.create(name="SIG", slug="sig")
+    _hide(user, firm=firm, title="Discovery Program: Growth Equity", n=1)
+    client.force_login(user)
+
+    section = _hidden_section(client)
+    assert "Discovery Program: Growth Equity" in section
+    assert "apps-loc" not in section
