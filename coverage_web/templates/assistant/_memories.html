@@ -1,29 +1,53 @@
 {% comment %}
-The memory dialog's list, swapped as a whole after a "forget" — same
-pattern as _history.html, just a much simpler row (no rename, no move,
-nothing to click through to; forgetting is the only action there is).
+The memory dialog's body: the list, and the one input that writes to it.
+Swapped as a whole after either write — same pattern as _history.html, just
+a much simpler row (no rename, no move, nothing to click through to).
+
+WHY THE FORM IS INSIDE THE SWAPPED FRAGMENT rather than beside it: a save
+re-renders this node, which empties the box and appends the new row in the
+same response. The alternative is JS that resets the form after the
+request, and this dialog has none.
 {% endcomment %}
-<div class="as-memory-list" id="as-memory-list">
-  {% if memories %}
-    {% for m in memories %}
-      <div class="as-memory-row">
-        <span class="as-memory-text">{{ m.text }}</span>
-        <form method="post" action="{% url 'assistant:forget_memory' %}" hx-post="{% url 'assistant:forget_memory' %}"
-              hx-target="#as-memory-list" hx-swap="outerHTML">
-          {% csrf_token %}
-          <input type="hidden" name="memory" value="{{ m.id }}">
-          <button type="submit" class="as-memory-forget" aria-label="Forget this">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-            </svg>
-          </button>
-        </form>
-      </div>
-    {% endfor %}
-  {% else %}
-    {% comment %}One line only: the dialog's own subtitle right above this
-    already explains what a memory is, so an empty state that explains it
-    again is the same sentence twice on one small screen.{% endcomment %}
-    <p class="as-memory-empty">Nothing yet.</p>
+<div class="as-memory-panel" id="as-memory-panel">
+  <div class="as-memory-list">
+    {% if memories %}
+      {% for m in memories %}
+        <div class="as-memory-row">
+          <span class="as-memory-text">{{ m.text }}</span>
+          <form method="post" action="{% url 'assistant:forget_memory' %}" hx-post="{% url 'assistant:forget_memory' %}"
+                hx-target="#as-memory-panel" hx-swap="outerHTML">
+            {% csrf_token %}
+            <input type="hidden" name="memory" value="{{ m.id }}">
+            <button type="submit" class="as-memory-forget" aria-label="Forget this">
+              <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </form>
+        </div>
+      {% endfor %}
+    {% else %}
+      {% comment %}One line only: the dialog's own subtitle right above this
+      already explains what a memory is, so an empty state that explains it
+      again is the same sentence twice on one small screen.{% endcomment %}
+      <p class="as-memory-empty">Nothing yet.</p>
+    {% endif %}
+  </div>
+
+  {% comment %}
+  The input the feature was missing. `maxlength` matches AdvisorMemory.text
+  and the tool's own cap, so the box refuses what the column would truncate
+  instead of silently dropping the end of a sentence.
+  {% endcomment %}
+  <form class="as-memory-add" method="post" action="{% url 'assistant:remember_fact' %}"
+        hx-post="{% url 'assistant:remember_fact' %}" hx-target="#as-memory-panel" hx-swap="outerHTML">
+    {% csrf_token %}
+    <label class="vh" for="as-memory-input">Something to remember</label>
+    <input id="as-memory-input" type="text" name="fact"
+           maxlength="200" autocomplete="off" placeholder="Ruled out PE.">
+    <button type="submit" class="btn btn-primary">Remember</button>
+  </form>
+  {% if memory_full %}
+    <p class="as-memory-note" role="status">Holding {{ memory_max }}, the most this page keeps. Forget one first.</p>
   {% endif %}
 </div>

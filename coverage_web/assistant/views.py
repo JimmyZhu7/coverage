@@ -50,6 +50,7 @@ from . import agent
 from . import attachments as attachments_mod
 from . import drafts as drafts_mod
 from . import plans
+from . import tools as tools_mod
 from .client import is_configured
 from .models import (
     AdvisorMemory, ChatConversation, ChatFolder, ChatMessage, DailyBrief,
@@ -979,6 +980,53 @@ def forget_memory(request: HttpRequest) -> HttpResponse:
         AdvisorMemory.objects.for_user(request.user), pk=_posted_int(request, "memory") or 0
     )
     memory.delete()
+    return _memory_panel(request)
+
+
+@login_required
+@require_POST
+def remember_fact(request: HttpRequest) -> HttpResponse:
+    """The student writes a memory themselves.
+
+    Until now the model was the only writer, and it wrote nothing: the table
+    held zero rows for every user and `remember` was 0 of the founder's 31
+    tool calls, so every conversation started from the preamble alone. The
+    read half of this dialog (list, forget) was already built; this is the
+    missing input.
+
+    NOTHING IS SEEDED HERE OR ANYWHERE ELSE. A memory is a fact the student
+    stated, never one the product derived from their settings or their
+    behaviour (P1), which is why there is no onboarding path into this table
+    and no place that writes one on their behalf.
+
+    The cap and the write itself belong to `tools.save_memory`, the one
+    writer, so the manual path cannot end up with a different ceiling from
+    the model's (P5). An empty box is a no-op rather than an error: the only
+    way to send one is to hit Enter on nothing, and answering that with red
+    text is louder than the mistake.
+    """
+    text = (request.POST.get("fact") or "").strip()
+    full = False
+    if text:
+        try:
+            tools_mod.save_memory(request.user, text)
+        except tools_mod.MemoryFull:
+            full = True
+    return _memory_panel(request, full=full)
+
+
+def _memory_panel(request: HttpRequest, *, full: bool = False) -> HttpResponse:
+    """The whole dialog body — list plus input — re-rendered as one fragment.
+
+    Both writes swap the same node, which is what empties the input after a
+    save without a line of JavaScript.
+    """
     return render(
-        request, "assistant/_memories.html", {"memories": AdvisorMemory.objects.for_user(request.user)}
+        request,
+        "assistant/_memories.html",
+        {
+            "memories": AdvisorMemory.objects.for_user(request.user),
+            "memory_full": full,
+            "memory_max": tools_mod.MAX_MEMORIES,
+        },
     )

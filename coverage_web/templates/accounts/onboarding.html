@@ -40,6 +40,26 @@ _welcome_head.html §2); nothing here hardcodes the step count.
 {% endcomment %}
 <div class="page ob">
 
+  {% if unverified_email %}
+    {% comment %}
+    D-4, the honest half. Signup sends a confirmation mail today and the UI
+    never mentioned it, so the student's address stayed unverified forever
+    and the only page that said so was /accounts/email/, which nothing led
+    them to. This is that sentence plus that link.
+
+    NOT a warning, and deliberately not styled as one. Verification is not a
+    gate: `ACCOUNT_EMAIL_VERIFICATION` is "optional" and stays that way until
+    an email provider exists (see the comment at the setting). Colouring this
+    like a blocker would promise a consequence the product does not deliver.
+    Rendered only when allauth's own row exists, so it is never shown to an
+    account that was never sent a mail (accounts.views._unverified_email).
+    {% endcomment %}
+    <p class="ob-verify">
+      Check {{ unverified_email }} for a confirmation link. Your address is not verified yet.
+      <a href="{% url 'account_email' %}">Resend or change it</a>
+    </p>
+  {% endif %}
+
   <nav class="ob-rail" aria-label="Setup progress"
        style="--ob-i: {{ step_number }}; --ob-n: {{ step_total }};">
     <span class="ob-rail-track" aria-hidden="true"></span>
