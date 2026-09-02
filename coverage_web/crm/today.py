@@ -3442,7 +3442,26 @@ def _dashboard_context(user) -> dict:
     """
     today = timezone.localdate()
 
-    campus = Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
+    # `select_related("firm")` IS LOAD-BEARING, not a tidy-up. The rows this
+    # queryset materialises are handed to `_eligible_unsaved_count` below,
+    # which asks `directory.views._eligibility` for a verdict on each one, and
+    # the visa branch of that verdict reads `directory.sponsorship.
+    # effective_sponsorship` -> `opp.firm.sponsors` for every row whose own
+    # posting is silent on sponsorship. Unjoined, that is one `SELECT ... FROM
+    # firms WHERE id = ?` per row: measured on the founder's live board
+    # (2026-09-01) 1,332 of the 1,866 folded rows were silent, and Today ran
+    # 1,397 queries for one page load. With the join the same block costs 2
+    # queries. Both counts below drop the join again on their own — Django
+    # clears `select_related` for an aggregate — so this buys the row fetch
+    # nothing it does not need.
+    #
+    # NOT `.defer("raw")` on top of it. `_eligibility` reads `raw.facts` for
+    # the graduation-window branch, so deferring the column trades 1,332 firm
+    # fetches for 647 deferred-field loads and measured SLOWER (531 ms against
+    # the 373 ms it was meant to fix). The row is wide on purpose here.
+    campus = Opportunity.objects.filter(
+        status="open", bucket__in=TARGET_BUCKETS
+    ).select_related("firm")
     # THE WINDOW COMES FROM `directory.deadlines`, NOT FROM HERE. This line
     # used to spell `deadline__range=(today, today + timedelta(days=9))` — a
     # second, inline copy of the arithmetic that module exists to own, and the

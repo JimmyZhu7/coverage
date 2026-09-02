@@ -1392,3 +1392,129 @@ def test_unconfirmed_note_still_names_a_failed_check_as_a_failed_check():
     note = _unconfirmed_note(o)
     assert "could not confirm it is" in note["why"]
     assert "9 days" not in note["why"]
+
+
+# --------------------------------------------------------------------------- #
+# One card built per row (2026-09-01)
+#
+# The Opportunities view rendered the urgency band and the firm columns off
+# one `rows` list and built a card per row in EACH: 5,166 `_urgency_item`
+# calls at campus scope on the founder's board and 30,068 at `?role=all`, for
+# a dict that is a pure function of the row and the request clock. It is built
+# once now and the band takes copies.
+#
+# Two things have to stay true, and they pull against each other. The cards
+# must be IDENTICAL to what two independent builds produced — this is a speed
+# change and nothing else. And the band's card must not be the clusters' card
+# OBJECT, because the cluster pass mutates its dicts afterwards (the save-star
+# and the city-variant grouping) and the band never showed either.
+# --------------------------------------------------------------------------- #
+
+def _bands(rows, **kw):
+    return _urgency_feed(rows, now=NOW, today=TODAY, my_firm_ids=set(), **kw)
+
+
+def _titled(firm, url, title, **kw):
+    """`_opp` with the title free. Distinct titles matter here: the feed folds
+    repeat listings (`directory.dupes`), so three rows sharing a title at one
+    firm reach the render as one and a per-row count would prove nothing."""
+    return Opportunity.objects.create(
+        firm=firm, url=url, title=title, bucket="internship", status="open",
+        region="", **kw,
+    )
+
+
+@pytest.mark.django_db
+def test_prebuilt_items_give_the_band_exactly_what_it_built_itself():
+    """The equivalence, band by band and key by key. A supplied `items` map
+    must change the COST of the call and nothing else."""
+    firm = _firm(slug="one-build", name="One Build")
+    dated = _titled(firm, "https://one-build.com/1", "Dated Analyst",
+                    deadline=TODAY + timedelta(days=5))
+    rolling = _titled(firm, "https://one-build.com/2", "Rolling Analyst")
+    _seen(rolling, 2)
+    rows = [dated, rolling]
+
+    # One `cutoffs` map on both sides, because that argument is what the view
+    # passes and it is the only input that changes a card without changing the
+    # row (`open_run_days`). Leaving it to default on one side would compare
+    # two different requests, not two ways of serving one.
+    from directory.open_runs import onboarding_cutoffs
+
+    cutoffs = onboarding_cutoffs({o.firm_id for o in rows})
+    on_its_own = _bands(rows, cutoffs=cutoffs)
+    prebuilt = {o.id: _urgency_item(o, now=NOW, today=TODAY, my_firm_ids=set(),
+                                    cutoffs=cutoffs)
+                for o in rows}
+    supplied = _bands(rows, cutoffs=cutoffs, items=prebuilt)
+    assert supplied == on_its_own
+
+
+@pytest.mark.django_db
+def test_the_bands_card_is_a_copy_not_the_callers_card():
+    """The band's cards are COPIES. Handing it the caller's own dicts would
+    have been the faster change and a wrong one: the `opportunities` view
+    mutates those dicts after this call — `_group_city_variants` writes
+    `variants`/`in_group` and the save-star pass writes `track_status` — and
+    a band card that suddenly grew a star or a "+N more locations" disclosure
+    would be this optimisation leaking onto the page."""
+    firm = _firm(slug="no-bleed", name="No Bleed")
+    o = _titled(firm, "https://no-bleed.com/1", "Copy Me")
+    prebuilt = {o.id: _urgency_item(o, now=NOW, today=TODAY, my_firm_ids=set())}
+
+    band = _bands([o], items=prebuilt)
+    card = (band["closing"] + band["rolling"])[0]
+    assert card == prebuilt[o.id]
+    assert card is not prebuilt[o.id]
+
+    prebuilt[o.id]["track_status"] = "saved"
+    assert "track_status" not in card
+
+
+@pytest.mark.django_db
+def test_one_urgency_item_per_row(client, monkeypatch):
+    """The count, which is the whole point: three rows used to cost six
+    builds, one for the urgency band and one for the firm column."""
+    from directory import views
+
+    firm = _firm(slug="count-builds", name="Count Builds")
+    for i in range(3):
+        _titled(firm, f"https://count-builds.com/{i}", f"Analyst {i}")
+
+    built = []
+    real = views._urgency_item
+
+    def counting(o, **kw):
+        built.append(o.id)
+        return real(o, **kw)
+
+    monkeypatch.setattr(views, "_urgency_item", counting)
+    client.get(reverse("opportunities"))
+    assert len(built) == len(set(built)) == 3, built
+
+
+@pytest.mark.django_db
+def test_the_card_asks_for_its_eligibility_verdict_once(client, monkeypatch):
+    """`facts` and `verdict` are the same `_eligibility` call, and it walks
+    `raw.facts`. Asking twice per card doubled that walk for two answers that
+    are equal by construction."""
+    from directory import views
+
+    firm = _firm(slug="one-verdict", name="One Verdict")
+    o = _opp(firm, "https://one-verdict.com/1",
+             raw={"facts": {"grad": {"value": "2028", "years": ["2028"],
+                                     "phrase": "graduating in 2028"}}})
+
+    calls = []
+    real = views._eligibility
+
+    def counting(opp, profile):
+        calls.append(opp.id)
+        return real(opp, profile)
+
+    monkeypatch.setattr(views, "_eligibility", counting)
+    item = _urgency_item(o, now=NOW, today=TODAY, my_firm_ids=set(),
+                         profile={"class_year": 2028, "work_auth": {},
+                                  "languages": [], "study_level": ""})
+    assert calls == [o.id]
+    assert item["verdict"]["kind"] == "year_ok"

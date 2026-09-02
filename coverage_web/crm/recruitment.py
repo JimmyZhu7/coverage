@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import re
 from collections import namedtuple
+from functools import lru_cache
 
 from .relevance import is_recruiting_role
 
@@ -129,6 +130,40 @@ _PERSON_TRACK_RES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 )
 
 
+# The longest string this cache will hold a key for. `Contact.role` is a
+# CharField(max_length=255), so every ROLE fits; `notes` and `angle` are
+# TextFields and are the two other things `contact_verdict` hands to
+# `_track_signal`, and a student's prose is unbounded in both length and
+# variety — cacheable in form, worthless in practice (nobody writes the same
+# paragraph twice) and the one input that could park megabytes of someone's
+# notes in a process-local dict. Over the cap the classifier is called
+# straight through, which is exactly today's behaviour.
+_TRACK_SIGNAL_CACHE_MAX_CHARS = 255
+
+
+@lru_cache(maxsize=4096)
+def _cached_role_function(text: str) -> str:
+    """`directory.recommend.role_function`, memoised on the title string.
+
+    The same shape and the same argument as `directory.views._role_function`
+    (see its note): the classifier is a pure regex read of one string, so a
+    stale entry is impossible without an edit to `recommend.py`, which
+    restarts the process anyway. What differs is the key space — contact
+    ROLES, not posting titles — so the cache is sized to a personal CRM
+    rather than to the board: 4,096 slots against the founder's 265 contacts,
+    with LRU eviction as the ceiling if a process serves many students.
+
+    Worth caching because this runs per contact per render: measured
+    2026-09-01 on the founder's live account, 15 ms of every Today and
+    Network render went to re-classifying the same 265 role strings, and
+    `crm.views.contact_list` pays it a second time on the same request via
+    `_build_actions`.
+    """
+    from directory.recommend import role_function
+
+    return role_function(text)
+
+
 def _track_signal(text: str) -> str:
     """The track this text places its person in, or "". Checks the posting
     vocabulary first (`role_function` — but only a REAL track: its "none"
@@ -136,9 +171,12 @@ def _track_signal(text: str) -> str:
     the signature extras above."""
     if not text:
         return ""
-    from directory.recommend import role_function
+    if len(text) <= _TRACK_SIGNAL_CACHE_MAX_CHARS:
+        named = _cached_role_function(text)
+    else:
+        from directory.recommend import role_function
 
-    named = role_function(text)
+        named = role_function(text)
     if named and named != "none":
         return named
     for rx, track in _PERSON_TRACK_RES:
