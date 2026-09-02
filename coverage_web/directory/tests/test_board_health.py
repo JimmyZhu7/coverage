@@ -271,3 +271,173 @@ def test_every_marked_slug_exists_in_the_catalog():
 
     catalog = {slug for slug, _ in BOARDS}
     assert set(NO_CAMPUS_BOARD) <= catalog
+
+
+# ---- D-20 / WS-OPS-13: the boards we are not allowed to read ----------------
+
+
+def test_no_registered_workday_board_is_a_disallowed_site():
+    """The one rule D-20 turned into code.
+
+    `robots.txt` compliance became the product's own rule the same week these
+    sites were enumerated, so registering a `Disallow:`-listed board would be
+    a deliberate override of it. The check is keyed on `(tenant_host, site)`
+    and not on the slug alone, because the slug alone is not the fact:
+    Houlihan Lokey disallows a site called `External` while Ares, Mizuho,
+    CLSA and Morgan Stanley each publish one under that name.
+    """
+    from directory.boards import DISALLOWED_WORKDAY_SITES
+
+    registered = {(b.tenant_host, b.site) for _, b in BOARDS
+                  if getattr(b, "provider", "") == "workday"}
+    forbidden = {(host, site)
+                 for host, sites in DISALLOWED_WORKDAY_SITES.items()
+                 for site in sites}
+    assert registered & forbidden == set()
+
+
+def test_blackrocks_campus_board_is_recorded_as_unreachable_not_forgotten():
+    """D-20's whole point: not fetching it is a decision, and a decision the
+    product keeps a record of. A student still gets the address."""
+    from directory.boards import UNREACHABLE_BY_POLICY
+
+    entry = UNREACHABLE_BY_POLICY["blackrock"]
+    assert entry["site"] == "BlackRock_Early_Careers_Program"
+    assert entry["url"].startswith("https://")
+
+
+def test_every_unreachable_entry_names_a_site_its_tenant_actually_disallows():
+    """The record may not drift from the enumeration it came from. An entry
+    whose site is no longer on its tenant's `Disallow:` list is either a stale
+    record or an invented one, and both read to a student as a firm whose
+    board we cannot see."""
+    from directory.boards import DISALLOWED_WORKDAY_SITES, UNREACHABLE_BY_POLICY
+
+    for slug, entry in UNREACHABLE_BY_POLICY.items():
+        disallowed = DISALLOWED_WORKDAY_SITES.get(entry["tenant_host"], frozenset())
+        assert entry["site"] in disallowed, slug
+        assert entry["url"].startswith("https://"), slug
+        assert entry["firm"] and entry["reason"], slug
+
+
+def test_the_report_says_which_boards_it_will_not_read():
+    """A ·-line and never a ⚠: nothing is broken and nothing is fixable from
+    this side. It sits in the report so an operator reading a firm's zero can
+    tell "not allowed to look" from "looked and found nothing"."""
+    out = health.boards_unreachable_by_policy()
+
+    assert {b["slug"] for b in out} == {"blackrock", "regions"}
+    # `health_report()` is non-empty here because no scrape has been recorded
+    # at all, which is itself a finding.
+    line = next(l for l in health.health_report()
+                if "deliberately not fetched" in l)
+    assert line.startswith("·")
+    assert "BlackRock_Early_Careers_Program" in line
+
+
+def test_the_policy_line_stays_off_a_clean_report(monkeypatch):
+    """`health_report() == []` is the signal the nightly pipeline acts on, and
+    a report that is never empty is a report nobody reads. This line is
+    context for a finding, so it rides along with one and prints on nothing
+    else."""
+    firm = _firm("evercore", "Evercore")
+    _row(firm, "greenhouse", "https://x/1")
+    monkeypatch.setattr(health, "BOARDS", [("evercore", GreenhouseBoard(
+        firm="Evercore", token="evercore"))])
+    for ago in (120, 60, 30):
+        _run([{"slug": "evercore", "provider": "greenhouse",
+               "board": "evercore", "rows": 1}], ago_minutes=ago)
+    ScrapeRun.objects.create(
+        connector="enrich", started=timezone.now(), finished=timezone.now(),
+        status="ok", stats={"queued": 1, "fetched": 1, "unreachable": 0})
+
+    assert health.health_report() == []
+    # Still recorded, still readable — it is the REPORT that stays quiet, not
+    # the record.
+    assert {b["slug"] for b in health.boards_unreachable_by_policy()} == {
+        "blackrock", "regions"}
+
+
+def test_an_unreachable_firm_with_no_firm_row_still_reports():
+    """Regions is not a catalog firm precisely BECAUSE this rule stopped it
+    becoming one. Dropping it from the record for that reason would hide the
+    decision the record exists to hold, so the entry carries its own display
+    name and does not need a database row."""
+    assert not Firm.objects.filter(slug="regions").exists()
+
+    out = {b["slug"]: b for b in health.boards_unreachable_by_policy()}
+    assert out["regions"]["firm"] == "Regions Financial"
+
+
+def test_a_live_firm_row_wins_the_display_name():
+    """So a renamed firm reads the same on its page and in the report."""
+    _firm("blackrock", "BlackRock Inc.")
+
+    out = {b["slug"]: b for b in health.boards_unreachable_by_policy()}
+    assert out["blackrock"]["firm"] == "BlackRock Inc."
+
+
+# ---- WS-OPS-13: the second site per tenant, and the regional banks ---------
+
+
+def test_the_second_workday_site_is_registered_for_every_tenant_that_has_one():
+    """Each of these was read off its own tenant's `robots.txt` `Allow:` list
+    and fetched once on 2026-09-02 before it was written down. The pairs are
+    pinned because the failure mode is silent: a typo in a site slug fetches
+    a 404 that `health` reports as a failing board, and a WRONG-but-real slug
+    fetches somebody else's requisitions under this firm's name."""
+    registered = {(slug, b.tenant_host, b.site) for slug, b in BOARDS
+                  if getattr(b, "provider", "") == "workday"}
+
+    assert ("pjt", "pjtpartners.wd1", "Studentevents") in registered
+    assert ("raymondjames", "raymondjames.wd1", "RaymondJamesEarlyCareers") in registered
+    assert ("hl", "hl.wd1", "Events") in registered
+    assert ("guggenheim", "guggenheim.wd1", "Guggenheim_Undergraduate_Programs") in registered
+    assert ("moelis", "moelis.wd1", "University-Hires") in registered
+    assert ("mtb", "mtb.wd5", "Campus") in registered
+
+
+def test_the_regional_bank_boards_are_registered_and_scoped():
+    """`intern` matches "Internal" and "International" — measured 2026-09-02
+    at 1,449 rows on PNC and 1,297 on U.S. Bank — so every firm-wide board
+    here is scoped on `internship`, the word the campus requisitions
+    themselves use. Harris Williams and M&T's `Campus` are the exceptions and
+    are unscoped on purpose: both are small, already-campus sites, and a
+    search text on either would hide the next requisition the day it opens."""
+    workday = [(slug, b) for slug, b in BOARDS
+               if getattr(b, "provider", "") == "workday"]
+    by_key = {(slug, b.tenant_host, b.site): b for slug, b in workday}
+
+    for slug, host, site in (("keybank", "keybank.wd5", "External_Career_Site"),
+                             ("fifththird", "fifththird.wd5", "53careers"),
+                             ("huntington", "huntington.wd12", "HNBcareers"),
+                             ("usbank", "usbank.wd1", "US_Bank_Careers")):
+        assert by_key[(slug, host, site)].search_text == "internship"
+
+    pnc = {b.search_text for slug, b in workday
+           if slug == "pnc" and b.site == "External"}
+    assert pnc == {"internship", "undergraduate intern"}
+    assert by_key[("pnc", "pnc.wd5", "HarrisWilliams")].search_text == ""
+    assert by_key[("mtb", "mtb.wd5", "Campus")].search_text == ""
+
+
+def test_every_new_catalog_firm_carries_a_vertical():
+    """`scrape` pre-creates a catalog firm from DEFAULT_TRACKS. A firm missing
+    from that table gets an empty tracks list the Track filter can never
+    match, which is a firm that scrapes fine and is invisible."""
+    from directory.boards import DEFAULT_TRACKS
+
+    for slug in ("pnc", "keybank", "fifththird", "huntington", "usbank", "mtb"):
+        assert DEFAULT_TRACKS[slug] == ["ib"], slug
+
+
+def test_the_tenants_with_no_campus_site_stay_marked():
+    """Their `robots.txt` Allow lists were enumerated on 2026-09-02 and hold
+    no campus site, so the marker now stands on an enumeration rather than on
+    a row count. Perella Weinberg is deliberately absent: same finding, but
+    its students are on tal.net and registered."""
+    from directory.boards import NO_CAMPUS_BOARD
+
+    for slug in ("ares", "oaktree", "blueowl", "fidelityintl", "stanchart"):
+        assert slug in NO_CAMPUS_BOARD
+    assert "pwp" not in NO_CAMPUS_BOARD

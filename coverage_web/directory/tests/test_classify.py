@@ -799,6 +799,49 @@ def test_region_census_20260809(location, expected):
 
 
 # ---------------------------------------------------------------------------
+# The regional-bank census (2026-09-02). Six Workday boards joined the catalog
+# with WS-OPS-13 and they are Midwestern firms: Fifth Third is Cincinnati,
+# KeyBank is Cleveland, Huntington is Columbus. The state-suffix rule had no
+# `oh`, so 36 open campus rows on those three firms resolved to no market at
+# all — outside the `us` facet, outside the hk/us tabs, and outside D-2's own
+# supply count, which is the number those boards were registered to move.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("location,expected", [
+    # The Ohio rows, verbatim from the boards on the day they were added.
+    ("Cincinnati, OH", "us"),
+    ("Cleveland, OH", "us"),
+    ("Brooklyn, OH", "us"),
+    ("Columbus, OH", "us"),
+    ("Chagrin Falls, OH", "us"),
+    ("Vandalia, OH", "us"),
+    ("Toledo, OH", "us"),
+    ("Goshen, IN", "us"),
+    # The boundary holds for both new codes, which is the whole reason they
+    # are safe to add: a letter after the code means it is a word, not a state.
+    # "" and not "other": North Macedonia is in no key list, so the field
+    # names no market this table knows. What matters here is that it is not
+    # "us" — ", oh" must not fire inside "Ohrid".
+    ("Ohrid, North Macedonia", ""),
+    ("Mumbai, India", "other"),            # ", in" must not fire inside "India"
+    ("Jakarta, Indonesia", "other"),
+    ("Inverness", ""),
+    # Oregon is deliberately still unresolved: ", or" is an English
+    # conjunction and the boundary cannot tell the two apart, so two rows
+    # stay blank rather than becoming a rule that can be wrong (P1).
+    ("Portland, OR", ""),
+    ("Albany, OR", ""),
+    # Workday's own multi-city placeholder. It names no place, so it answers
+    # no market — the honest read, and not something a state list can fix.
+    ("2 Locations", ""),
+    ("14 Locations", ""),
+])
+def test_region_census_20260902_regional_banks(location, expected):
+    assert normalize_region(location) == expected
+
+
+# ---------------------------------------------------------------------------
 # The non-campus census (2026-08-09). Lifting the Workday cap to 1,500 grew
 # the whole open set to 15,234 rows and brought a long tail of geography with
 # it — banks file by BUILDING, and Workday's job slugs strip accents.

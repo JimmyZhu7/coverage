@@ -508,6 +508,129 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     # answer 404 on every plausible token — unchanged from 2026-07-24.
     ("permira", GreenhouseBoard(firm="Permira", token="permira")),
 
+    # ---- The SECOND Workday site per tenant, and the regional banks
+    # (enumerated from each tenant's own robots.txt + live-verified
+    # 2026-09-02). WS-OPS-13, unblocked by D-20. ----
+    #
+    # THE METHOD, AND WHY IT IS NOT A SEARCH. On Workday the connector unit is
+    # `(tenant, siteId)`: a recruiter decides which requisitions reach which
+    # Job Posting Site, so "the firm's board" is never a single thing. Eight
+    # catalog firms had a connector pointed at the experienced-hire site and
+    # had never produced one campus row between them — 689 rows scraped, 0
+    # ever campus. Every site below was read off its own tenant's
+    # `https://<tenant_host>.myworkdayjobs.com/robots.txt` `Allow:` list,
+    # which is the tenant's own published enumeration of its public sites,
+    # and then fetched once to see what it holds. Nothing here was guessed at
+    # and nothing `Disallow:`-listed was fetched (D-20; see
+    # UNREACHABLE_BY_POLICY below).
+    #
+    # AUDITED BY MEMBERSHIP, NOT BY ROW COUNT. Campus and main sites are
+    # disjoint, not subsets, so a second site is only worth registering if
+    # the primary does not already carry its rows. One title off each new
+    # site was searched against the firm's registered primary site, plus a
+    # short distinctive phrase from it so a miss could not be an artifact of
+    # searching a 60-character string (all measured 2026-09-02):
+    #     PJT           Studentevents "University College Dublin & Trinity
+    #                   College Dublin ..." -> Students: 0. "Company
+    #                   Presentation" -> Students: 3, all Camberview
+    #                   full-time analyst reqs, none of them an event.
+    #     Raymond James EarlyCareers "2027 Full-Time Analyst, Risk
+    #                   Management" -> raymondjamescareers: 0. "2027" ->
+    #                   raymondjamescareers: 0 across the whole site.
+    #     Moelis        University-Hires "Join Our Campus Talent Community"
+    #                   -> Experienced-Hires: 0. "Campus" -> 0.
+    #     M&T           Campus "2027 Management Development Program -
+    #                   Internal Audit" -> MTB: 0. "2027 Summer" -> MTB: 0,
+    #                   while "Management Development Program" -> 192 rows of
+    #                   mainframe and programme-manager rôles. The firm-wide
+    #                   site is NOT registered for that reason: its campus
+    #                   answer is zero and its noise is 192.
+    #
+    ("pjt", WorkdayBoard(firm="PJT Partners", tenant_host="pjtpartners.wd1",
+                         site="Studentevents")),  # live-verified 2026-09-02, 4 rows
+    # 7 rows and every one of them a 2027 campus req (Investment Banking
+    # Summer Analyst - Private Credit / M&A, Equity Research Associate, the
+    # Clark Capital Mentoring Program). The registered `raymondjamescareers`
+    # board answers ZERO for "2027" — this firm's whole campus cycle was
+    # invisible to Coverage and the catalog could not have known, because the
+    # experienced board is large and healthy.
+    ("raymondjames", WorkdayBoard(firm="Raymond James", tenant_host="raymondjames.wd1",
+                                  site="RaymondJamesEarlyCareers")),  # live-verified 2026-09-02, 7 rows
+    # Both live and EMPTY today (HTTP 200, total 0), the Jefferies-events
+    # case: a real site with a real slug, out of season. Registered because
+    # this is where the rows land when the cycle opens, and a board that
+    # reports zero cleanly costs one request. `health.board_health` keys per
+    # board, so an empty one is visible as "empty" rather than hidden behind
+    # its firm's producing sibling.
+    ("hl", WorkdayBoard(firm="Houlihan Lokey", tenant_host="hl.wd1",
+                        site="Events")),  # live-verified 2026-09-02, 0 rows
+    ("guggenheim", WorkdayBoard(firm="Guggenheim", tenant_host="guggenheim.wd1",
+                                site="Guggenheim_Undergraduate_Programs")),  # live-verified 2026-09-02, 0 rows
+    # ONE row, and the row is "Join Our Campus Talent Community" — a standing
+    # interest list, not a programme. This is the site the research holds up
+    # as the reason a board is audited by membership rather than by row
+    # count: a count of 1 would call it healthy and Moelis's real 2027 London
+    # Summer Analyst sits on tal.net (registered above), not here. Registered
+    # anyway, and with this note, because it is the tenant's own campus site
+    # and a real req landing on it is exactly the event nothing else would
+    # see.
+    ("moelis", WorkdayBoard(firm="Moelis", tenant_host="moelis.wd1",
+                            site="University-Hires")),  # live-verified 2026-09-02, 1 row
+    #
+    # The regional banks. `SYNTHESIS-PLAN.md` Part D recommendation 3 named
+    # nine; six are built below, and the three that are not are recorded
+    # under "Regional banks that are NOT boards" after this list rather than
+    # left looking like an oversight. These carry the late-cycle inventory a
+    # student who missed the spring IB round can still apply to, which is the
+    # supply D-2's gate is counted against.
+    #
+    # SEARCH TEXT, MEASURED NOT ASSUMED. `intern` is rejected on every one of
+    # these boards for the reason the Accenture entry above already records:
+    # it matches "Internal" and "International". Measured 2026-09-02 —
+    # PNC "intern" 1,449 rows led by "International Trade Services Analyst";
+    # KeyBank 427; U.S. Bank 1,297. `internship` is the title word the
+    # campus reqs themselves use.
+    ("mtb", WorkdayBoard(firm="M&T Bank", tenant_host="mtb.wd5",
+                         site="Campus")),  # live-verified 2026-09-02, 11 rows
+    # PNC's unfiltered board reports total=2000, which is Workday's ceiling
+    # and not a count (do-not-build register §5.2 item 17). Two search texts,
+    # deduped by URL the way Accenture's pair is: "internship" 24 rows
+    # (Corporate & Institutional Banking Undergraduate Summer 2027), and
+    # "undergraduate intern" 23 (Technology / Internal Audit / Asset
+    # Management Group Undergraduate Intern) — different reqs, same board.
+    ("pnc", WorkdayBoard(firm="PNC", tenant_host="pnc.wd5", site="External",
+                         search_text="internship")),  # live-verified 2026-09-02, 24 rows
+    ("pnc", WorkdayBoard(firm="PNC", tenant_host="pnc.wd5", site="External",
+                         search_text="undergraduate intern")),  # live-verified 2026-09-02, 23 rows
+    # Harris Williams is PNC's M&A house and runs its own `Allow:`-listed
+    # site on the same tenant. 22 rows unfiltered, including "Investment
+    # Banking 1st Year Analyst, London - Summer 2027" and "2027 M&A
+    # Associate - Consumer". Deliberately unscoped, the Haitong case: the
+    # whole site is 22 rows, so a search_text would filter a board with
+    # nothing to filter and would hide the next campus req the day it opens.
+    ("pnc", WorkdayBoard(firm="PNC", tenant_host="pnc.wd5",
+                         site="HarrisWilliams")),  # live-verified 2026-09-02, 22 rows
+    ("keybank", WorkdayBoard(firm="KeyBank", tenant_host="keybank.wd5",
+                             site="External_Career_Site",
+                             search_text="internship")),  # live-verified 2026-09-02, 38 rows
+    ("fifththird", WorkdayBoard(firm="Fifth Third", tenant_host="fifththird.wd5",
+                                site="53careers",
+                                search_text="internship")),  # live-verified 2026-09-02, 54 rows
+    ("huntington", WorkdayBoard(firm="Huntington", tenant_host="huntington.wd12",
+                                site="HNBcareers",
+                                search_text="internship")),  # live-verified 2026-09-02, 16 rows
+    # U.S. Bank answers, and answers ZERO for campus. Measured 2026-09-02 on
+    # the only two sites its robots.txt allows (`US_Bank_Careers`,
+    # `Elavon_Careers`): "internship" 0, "campus" 0, "summer 2027" 0, while
+    # the unfiltered site holds 1,380 experienced reqs. That is a board with
+    # no campus inventory today, not a broken one, and the honest handling is
+    # the HPS/Marshall Wace one — register the scoped board so the row lands
+    # the day it opens, and let `health` report the zero rather than the
+    # catalog inventing a reason for it.
+    ("usbank", WorkdayBoard(firm="U.S. Bank", tenant_host="usbank.wd1",
+                            site="US_Bank_Careers",
+                            search_text="internship")),  # live-verified 2026-09-02, 0 rows
+
     # ---- Browser tier (headless Chromium via Playwright) ----
     # CICC runs Beisen (北森); its job list only loads after JS bootstraps a
     # session, so beisen.py drives a browser and captures the site's own
@@ -605,6 +728,60 @@ BOARDS: list[tuple[str, BoardConfig]] = [
 # would put tech back in the public feed and reverse the 2026-07-23 scope cut.
 # The scope decision lives in this catalog, which is why the firms table can
 # carry them harmlessly.
+#
+# ---- Regional banks that are NOT boards, and the tenants with no second
+# site (probed 2026-09-02, WS-OPS-13) ----
+#
+# THREE OF THE NINE REGIONAL BANKS ARE NOT BUILT. Recorded with the probe
+# result so the next attempt starts from it rather than repeating the search.
+#
+# 1. Regions Financial — REACHABLE AND NOT FETCHED, by policy. Its tenant
+#    `regions.wd5` publishes a robots.txt whose every line is a `Disallow:`
+#    and whose Allow list is empty: `Regions_Careers`, `BlackArch_Careers`
+#    (its M&A arm), `Conversion_Site` and `broadbean_external` are all
+#    disallowed. Coverage does not fetch a site a tenant asks it not to —
+#    the same call as BlackRock's below, and D-20's whole point. Recorded in
+#    UNREACHABLE_BY_POLICY so a student gets the link and goes themselves.
+#
+# 2. Citizens Financial Group — no Workday tenant found. Eight candidate
+#    hosts probed (`citizensbank`, `citizens`, `cfg`,
+#    `citizensfinancialgroup` across wd1/wd3/wd5/wd12); every one answers
+#    HTTP 422 on `/robots.txt`, which is what a myworkdayjobs.com host
+#    returns for a tenant that does not exist. Its ATS is somewhere else and
+#    finding it needs a look at the firm's own careers markup, which is the
+#    method the 2026-08-08 banks round used and is a separate piece of work.
+#
+# 3. Comerica — `comerica.wd1` answers **HTTP 401 on robots.txt**, i.e. the
+#    host declines to tell us its rules at all. `core/robots.py` already
+#    treats a 401/403 robots.txt as a refusal rather than as an absence
+#    ("FAILURE MEANS ALLOW ... Only an actual Disallow match, or a robots.txt
+#    served as 401/403, blocks a fetch"), so this is not a tenant to probe
+#    around. Every other candidate host (wd3/wd5/wd12/wd101/wd505,
+#    `comericabank.wd1`, `cma.wd1`) answers 422.
+#
+# THE FIVE TENANTS WITH NO SECOND SITE TO REGISTER. Each of these was on the
+# audit's "connector points at the experienced-hire board" list, and the
+# question WS-OPS-13 asked was whether a campus site existed alongside it.
+# Their own robots.txt says no, which is a better answer than a search:
+#     Ares          `aresmgmt.wd1`  -> External, External-Ada
+#     Oaktree       `oaktree.wd1`   -> Oaktree
+#     Blue Owl      `blueowl.wd1`   -> blueowl  (blue_owl_private disallowed)
+#     Fidelity Intl `fil.wd3`       -> 001, fidelitycanada
+#     Std Chartered `peopleplus.wd3`-> SCB_Careers
+#     Perella W.    `pwp.wd1`       -> PWP_Experienced_Opportunities
+# So their NO_CAMPUS_BOARD entries below stand, and now stand on an
+# enumeration rather than on a row count. Perella Weinberg is not on that
+# list and does not join it: its students are on tal.net and registered.
+#
+# BLACKSTONE'S ALLOW LIST IS 300+ ENTRIES and almost all of it is
+# `X-GhostSite-<agency name>` — one site per external recruiter, which is
+# how the tenant routes agency submissions. The campus site
+# (`Blackstone_Campus_Careers`) is already registered. The handful of
+# school-scoped sites on the list (`UK_SEO`, `UK_Notre_Dame`,
+# `UK_London_Business_School`, `Schwarzman_Scholars`, `Boston_Career_Fairs`)
+# are single-school pipelines and each needs its own membership audit before
+# it earns a line here; they are named so the next pass does not have to
+# re-read 42KB of robots.txt to find them.
 
 
 # Vertical (Firm.tracks) for catalog firms that are NOT in the founder's
@@ -698,6 +875,92 @@ DEFAULT_TRACKS: dict[str, list[str]] = {
     # management the same as Bridgewater/AQR/Marshall Wace above.
     "janushenderson": ["am"],
     "gic": ["am"],
+    # Regional banks (2026-09-02). `ib` is the convention this table already
+    # applies to every bank in the 2026-08-08 round — Truist, BMO, CIBC,
+    # Santander, TD — and it is a statement about the FIRM's vertical, not a
+    # claim about each row: PNC runs Harris Williams, KeyBank runs KeyBanc
+    # Capital Markets, Fifth Third and Huntington both run capital-markets
+    # arms, M&T runs Wilmington Trust. What keeps a commercial-banking or
+    # wealth req on these boards from reading "matches IB" is the title-level
+    # rule in `recommend._NON_TRACK_FUNCTION`, which declines those phrases
+    # outright, not this column.
+    "pnc": ["ib"],
+    "keybank": ["ib"],
+    "fifththird": ["ib"],
+    "huntington": ["ib"],
+    "usbank": ["ib"],
+    "mtb": ["ib"],
+}
+
+
+# Campus boards Coverage knows the address of and will NOT fetch, because the
+# tenant's own `robots.txt` disallows it. Slug -> (what the site is, where a
+# student goes instead).
+#
+# WHY THIS EXISTS AS DATA AND NOT AS SILENCE. D-20 settled the question: the
+# `Disallow:` list is how these sites were found in the first place, no login
+# or paywall is involved, and the rows behind them are exactly the campus
+# inventory this product exists to surface. Coverage still does not fetch
+# them. `robots.txt` is the site operator's stated wish, X7 made honouring it
+# the product's own rule the same week, and a product whose pitch to
+# institutions is that it is careful with data does not override its own new
+# rule for a handful of rows. The `Allow:`-listed sites roughly double reach
+# without the question.
+#
+# But "we do not fetch it" is not the same as "it does not exist", and P9 is
+# the reason this is a dict rather than a comment: the board cannot see what
+# it is not allowed to read, and the honest move is to say so in the UI and
+# hand the student the link, not to render a firm page that looks like the
+# programme is not running. Every entry carries a URL a person can open.
+#
+# THE BAR FOR ADDING ONE. `tenant_host` and `site` must be a pair the
+# tenant's own `robots.txt` `Disallow:` list named (never a guess at a URL),
+# and `url` must be a page a student can actually open. A `Firm` row is NOT
+# required: Regions is not a catalog firm precisely because this rule stopped
+# it becoming one, and dropping it from the record for that reason would hide
+# the very decision the record exists to hold. `firm` carries the display
+# name so the report reads the same either way.
+UNREACHABLE_BY_POLICY: dict[str, dict[str, str]] = {
+    "blackrock": {
+        "firm": "BlackRock",
+        "tenant_host": "blackrock.wd1",
+        "site": "BlackRock_Early_Careers_Program",
+        "reason": "BlackRock's Workday tenant disallows its early-careers site in robots.txt",
+        "url": "https://careers.blackrock.com/early-careers",
+    },
+    "regions": {
+        "firm": "Regions Financial",
+        "tenant_host": "regions.wd5",
+        "site": "Regions_Careers",
+        "reason": "Regions' Workday tenant disallows every one of its career sites in robots.txt",
+        "url": "https://www.regions.com/about-regions/careers",
+    },
+}
+
+
+#: `Disallow:`-listed Workday sites, keyed by tenant host, read off the
+#: tenants probed on 2026-09-02. Kept as data so the test that forbids them
+#: can name them instead of a comment nothing enforces.
+#:
+#: KEYED BY TENANT, and it has to be: the slug alone is not the fact. Houlihan
+#: Lokey disallows a site called `External` while Ares, Mizuho, CLSA and
+#: Morgan Stanley each publish one under the same name, so a flat set of
+#: slugs would fail four healthy boards to protect one. `refreshFacet` is
+#: omitted throughout — every tenant disallows it and it is an endpoint, not
+#: a career site.
+#:
+#: Not exhaustive and not meant to be: this is the set the catalog has
+#: actually seen, and a pair joins it when a probe finds it.
+DISALLOWED_WORKDAY_SITES: dict[str, frozenset[str]] = {
+    "blackrock.wd1": frozenset({"BlackRock_Early_Careers_Program", "BlackRock_AIG"}),
+    "regions.wd5": frozenset({"Regions_Careers", "BlackArch_Careers",
+                              "Conversion_Site", "broadbean_external"}),
+    "guggenheim.wd1": frozenset({"Guggenheim-Confidential"}),
+    "pjtpartners.wd1": frozenset({"NonPublicJobs082891", "PrivateEvents"}),
+    "keybank.wd5": frozenset({"Invite-Only_Career_Site"}),
+    "blueowl.wd1": frozenset({"blue_owl_private"}),
+    "oaktree.wd1": frozenset({"DirectApply"}),
+    "hl.wd1": frozenset({"External"}),
 }
 
 

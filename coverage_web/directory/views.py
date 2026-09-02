@@ -67,6 +67,7 @@ from directory.deadlines import (
     is_posting_closed,
 )
 from directory import estimates
+from directory.boards import UNREACHABLE_BY_POLICY
 from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
@@ -5506,6 +5507,13 @@ def firm_detail(request, slug):
         "role": role,
         "campus_total": campus_total,
         "other_total": other_total,
+        # P9, made visible on the one page where its absence is a lie. This
+        # firm HAS a campus board, Coverage knows its address, and Coverage
+        # does not read it because the tenant's own robots.txt says not to
+        # (D-20). Without this note the page shows a firm's experienced reqs
+        # and no internship, which reads as "the programme is not running".
+        # The note names the reason and hands over the link.
+        "unreachable_board": UNREACHABLE_BY_POLICY.get(firm.slug),
         **_my_network_at(request.user, firm, today=today),
     }
     return render(request, "directory/firm_detail.html", context)
