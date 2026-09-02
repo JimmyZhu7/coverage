@@ -360,12 +360,49 @@ def test_the_everything_segment_states_its_own_count_honestly(client, bar):
 # Load-bearing strings and live-region wiring.
 # ---------------------------------------------------------------------------
 
-def test_the_open_roles_figure_is_a_live_region(client, bar):
-    """The results swap silently for a screen-reader user, so the headline
-    count re-announces itself. One figure, not the whole strip."""
-    body = _get(client).content.decode()
-    assert body.count('role="status"') == 1
-    assert '<span class="ss-item" role="status">' in body
+def test_the_result_count_announces_from_outside_the_swap_target(client, bar):
+    """REWRITTEN 2026-09-01. This test used to assert `role="status"` on the
+    headline figure inside `.stat-strip`, and that assertion pinned a live
+    region that could not fire.
+
+    `#cov-results` is swapped with `innerHTML`, so the strip — and with it
+    the node carrying the role — is DESTROYED and rebuilt on every filter
+    change. A live region announces changes to its own contents; one that is
+    replaced rather than updated announces nothing. The old test passed on
+    the markup and told us nothing about the behaviour: a sighted user
+    watched 2,596 become 431 while a screen-reader user heard silence.
+
+    The region is now a stable element OUTSIDE the swap target, filled out
+    of band by `_filter_counts.html` on every htmx response, alongside the
+    facet counts it already refreshes. So there are three claims, and the
+    first two are what the old test could not make:
+
+      1. the region survives the swap (it is not in the swapped fragment),
+      2. every swap carries an out-of-band update for it,
+      3. there is exactly ONE live region for the count, because two would
+         read the same number back twice.
+    """
+    full = _get(client).content.decode()
+    # 1. Present on the page, outside the results div, and polite.
+    assert 'id="cov-live"' in full
+    assert 'aria-live="polite"' in full
+    before, _, after = full.partition('<div id="cov-results">')
+    assert 'id="cov-live"' in before, (
+        "the live region must sit outside #cov-results; inside it, every swap "
+        "replaces the region instead of updating it and nothing is announced")
+    assert 'id="cov-live"' not in after
+
+    # 2. Every htmx response updates it out of band with the live figure.
+    swap = _hx(client).content.decode()
+    assert 'id="cov-live" hx-swap-oob="innerHTML"' in swap
+    assert "4 open roles" in swap   # the fixture's four campus rows
+
+    # 3. One region for this fact, not two. The strip's own figure no longer
+    #    claims a role: two live regions holding one count is how a screen
+    #    reader ends up reading it back twice. (`base.html`'s message strip is
+    #    a separate region for a separate fact and is not counted here.)
+    assert full.count('id="cov-live"') == 1
+    assert "role=\"status\"" not in full[full.index('class="stat-strip"'):]
 
 
 # ---------------------------------------------------------------------------

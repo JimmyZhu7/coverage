@@ -45,6 +45,21 @@ TWO SHAPES, because HTML forces it:
 Anything not covered by this mechanism must not render a count at all: a
 number that cannot stay live is worse than no number.
 {% endcomment %}
+{% comment %}
+THE RESULT COUNT, ANNOUNCED. Same out-of-band mechanism as the counts below,
+and for a related reason: a live region has to EXIST BEFORE its content
+changes or nothing is announced, and every element inside `#cov-results` is
+destroyed and rebuilt by the swap. The strip's headline figure carried
+`role="status"` for months and could not have announced anything — the node
+holding the role was replaced along with the number in it, so a sighted user
+watched 2,596 become 431 while a screen-reader user heard silence.
+
+`#cov-live` is rendered once by `opportunities.html`, OUTSIDE the swap
+target, and never replaced. This fills it. It is `.vh` rather than the strip
+itself because the strip is four figures and a filter change should announce
+the answer, not read the dashboard back.
+{% endcomment %}
+<span id="cov-live" hx-swap-oob="innerHTML">{{ total }} open role{{ total|pluralize }}{% if all_cluster_count %} at {{ all_cluster_count }} firm{{ all_cluster_count|pluralize }}{% endif %}</span>
 {% for s in role_segments %}<span id="{{ s.count_id }}" hx-swap-oob="innerHTML">{{ s.count }}</span>
 {% endfor %}
 {% if role_optin_segment %}<span id="{{ role_optin_segment.count_id }}" hx-swap-oob="innerHTML">{{ role_optin_segment.count }}</span>
