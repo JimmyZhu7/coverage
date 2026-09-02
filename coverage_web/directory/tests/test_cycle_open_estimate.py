@@ -207,16 +207,23 @@ def test_the_picked_column_prints_both_sentences(client, django_user_model):
     _market("pagefirm", region="us", months=[date(2027, 2, 1), date(2027, 3, 1)])
 
     body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
-    assert "not open in your regions yet" in body
-    assert "Closest fits" in body
-    assert "Estimated to open" in body
-    assert "Feb 2027 to Mar 2027" in body
-    # THE PROVENANCE MOVED TO THE HOVER (2026-09-02) and must still be on the
-    # page. The claim is the line a student reads; where the claim came from
-    # is the line's `title`. `cycle_open_estimate` still joins the two for the
-    # digest, which has no hover to put anything on.
-    assert 'title="From past cycles at' in body
-    assert "Not a firm&#x27;s own published date." in body
+    # BOTH SENTENCES MOVED OFF THE CARD AND ONTO THE COLUMN'S HOVER
+    # (2026-09-02, the founder's call). They stood between the heading and
+    # the first role, so the column spent five lines explaining before it
+    # showed anything to apply to. What they SAY has not changed and is
+    # still on the page, on the header's `title`, and the weekly digest
+    # still prints both in full — a digest has no hover to put them on.
+    header = re.search(r'<header class="firmcol-head"[^>]*title="([^"]*)"', body)
+    assert header, "the picked column's header carries no context hover"
+    hover = header.group(1)
+    assert "not open in your regions yet" in hover
+    assert "Closest fits" in hover
+    assert "Estimated to open" in hover
+    assert "Feb 2027 to Mar 2027" in hover
+    assert "From past cycles at" in hover
+    assert "Not a firm&#x27;s own published date." in hover
+    # And the card itself no longer spends a line on either.
+    assert '<span class="firmcol-cycle-note"' not in body
 
 
 def test_a_rail_that_scores_nothing_still_explains_itself(client, django_user_model):

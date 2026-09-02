@@ -2396,7 +2396,10 @@ def _local_clock(zone: str, day: date, minutes: int) -> str:
     at = datetime.combine(day, dt_time(minutes // 60, minutes % 60))
     aware = at.replace(tzinfo=ZoneInfo(zone))
     local = timezone.localtime(aware)
-    return time_format(local, "fA").replace("AM", "a").replace("PM", "p")
+    # "9PM", not "9p" (2026-09-02, the founder's call). The single letter
+    # saved two characters per window and cost legibility on a card whose
+    # whole job is a pair of clock times.
+    return time_format(local, "fA")
 
 
 def _send_windows(user, contacts, day) -> list[dict]:

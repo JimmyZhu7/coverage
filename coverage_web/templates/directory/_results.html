@@ -120,7 +120,14 @@ exactly the moment it had something to say.
       whose header cannot.
       {% endcomment %}
       <article class="firmcol firmcol--picked{% if not pick_cluster.roles %} is-empty{% endif %} kin-reveal panel" style="--i:0" aria-labelledby="pickcol-h">
-        <header class="firmcol-head">
+        {% comment %}
+        The two cycle sentences live here now (2026-09-02) rather than as
+        two italic lines inside the card. `title` on the header, so the
+        whole column carries the context and no vertical space is spent on
+        it. Both are still built in views.py and still printed in full by
+        the weekly digest.
+        {% endcomment %}
+        <header class="firmcol-head"{% if pick_cluster.cycle_note or pick_cluster.cycle_open.text %} title="{{ pick_cluster.cycle_note }}{% if pick_cluster.cycle_note and pick_cluster.cycle_open.text %} {% endif %}{{ pick_cluster.cycle_open.text }}{% if pick_cluster.cycle_open.why %} {{ pick_cluster.cycle_open.why }}{% endif %}"{% endif %}>
           <span class="firmcol-logo firmcol-logo--picked" aria-hidden="true">★</span>
           <div class="firmcol-id">
             {% comment %}h2 like the firm columns beside it: this column is a
@@ -197,47 +204,21 @@ exactly the moment it had something to say.
             {% endcomment %}
               {% if pick_cluster.reasons %}<span class="firmcol-why" title="{% for r in pick_cluster.reasons %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_cluster.reasons %}{% if forloop.first %}<strong>{{ r.text }}</strong>{% else %}<span class="fc-stat">{{ r.text }}</span>{% endif %}{% endfor %}</span>{% endif %}
             </div>
-            {% comment %}The early-cycle student's reframe: their stored
-            target cycle has ZERO live postings (that recruiting has not
-            opened), so without this line the column presents prior-cycle
-            near-misses as if they were the thing the student asked for.
-            Computed against the whole open board, never the picks — see
-            _cycle_not_open_note in views.py.{% endcomment %}
-            {% if pick_cluster.cycle_note %}
-              <span class="firmcol-cycle-note">{{ pick_cluster.cycle_note }}</span>
-            {% endif %}
             {% comment %}
-            AND WHEN THE STUDENT'S OWN CYCLE OPENS. The sentence above says
-            the cycle has not opened; on the founder's board it fired and
-            then stopped, leaving the one question it raises unanswered while
-            `FirmDate` held the answer the whole time (28 `app_open` rows for
-            sa2028, 7 in Hong Kong and 16 in the US).
+            BOTH CYCLE SENTENCES CAME OFF THE CARD (2026-09-02, the founder's
+            own call: "kill the block of words below 6 roles 4 firms"). They
+            were two italic paragraphs standing between the column's heading
+            and its first role, so the card spent five lines explaining
+            before it showed a single thing to apply to.
 
-            SECOND, not merged into the first. They are different claims with
-            different evidence: the first is a fact about today's board and
-            is certain; this one is a forecast off past cycles and says so in
-            its own words. One sentence carrying both would let the certainty
-            of the first lend itself to the second.
-
-            Same span class, so it reads as one block of context rather than
-            a new kind of thing. `{}` whenever the corpus cannot say, in
-            which case nothing renders and the column is exactly as it was —
-            see `_cycle_open_parts` in views.py for the three-firm floor
-            and why every date here is labelled a forecast.
-
-            THE PROVENANCE IS THE `title`, NOT THE LINE (2026-09-02). The
-            sentence used to print whole — "Estimated to open United States
-            Nov 2026 to Jan 2027, from past cycles at 16 firms. Not a firm's
-            own published date." — three wrapped lines in a 320px header, two
-            of them answering "where did this come from". A fact a student
-            ACTS on is a line here; a fact about where the fact came from is a
-            hover. The word "Estimated" stays on the visible half, so the line
-            cannot read as a published date to someone who never hovers, and
-            the digest still sends the whole sentence (`cycle_open_estimate`).
+            Not deleted, moved: both now ride the header's `title`, which is
+            where this file already puts a fact about where a fact came from.
+            `cycle_note` (this cycle has no live postings, so these are
+            near-misses) and `cycle_open` (when the student's own cycle is
+            forecast to open) are unchanged in views.py, and the weekly
+            digest still prints both in full — see `cycle_open_estimate`.
+            The board is the surface that was overloaded, not the sentences.
             {% endcomment %}
-            {% if pick_cluster.cycle_open.text %}
-              <span class="firmcol-cycle-note" title="{{ pick_cluster.cycle_open.why }}">{{ pick_cluster.cycle_open.text }}</span>
-            {% endif %}
             {% comment %}
             Never a silent truncation. This column obeys the filters like its
             neighbours, so it owns up to what they removed — and it stays on
