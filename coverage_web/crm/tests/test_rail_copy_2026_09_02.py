@@ -36,6 +36,31 @@ where the "before" is the two card boxes plus the 16px rail gap between
 them, both colour schemes identical at both widths. The pace half alone,
 with nothing unplaced, is 100px.
 
+A FOURTH PASS, LATER THE SAME NIGHT: "clear, concise, straightforward."
+Not a cutting job. Every line on the three cards the founder was looking at
+was already short, and each one that changed here changed because of what a
+student reads it as on FIRST encounter, with no knowledge of the codebase:
+
+    Where do they sit?              -> Contacts to place
+    N new this week, no market set. -> N new this week with no market set.
+    HK desk good 9PM to 10:30PM     -> HK desk send 9PM to 10:30PM
+    N open, longest Nd              -> N roles open, oldest Nd
+    N open, all today               -> N roles open, all opened today
+    Lily Liu - chat set up          -> Lily Liu - chat agreed
+
+Nothing got shorter to be shorter and no fact left. One fact was ADDED, to
+a `title`: the send windows are printed on the reader's own clock and the
+card had never said so, which is the one misreading on these cards that
+would send a student to write at the wrong hour. The rest of the rule holds
+as before -- keep every fact, cut the explanation, and where the explanation
+is load-bearing put it in a `title`.
+
+Widths re-measured with headless Playwright against the demo account at
+1280x800 and 375x812 in both colour schemes, on the widest value each line
+can hold (999 unplaced arrivals; 236 roles open, oldest 124d). Every line
+that changed renders on exactly the number of lines it rendered on before,
+which is one.
+
 A Django test client has no layout engine, so those numbers are quoted
 rather than re-run; what is checked here is the markup and the CSS text that
 produce them.
@@ -98,6 +123,19 @@ def _styles_of(html: str, *, strip_comments: bool = False) -> str:
     assert blocks, "the page no longer renders a <style> block"
     css = "\n".join(blocks)
     return re.sub(r"/\*.*?\*/", "", css, flags=re.S) if strip_comments else css
+
+
+def _face(markup: str) -> str:
+    """The plain text of a slice of markup, tags stripped.
+
+    Needed from 2026-09-02: the word "good" moved OFF the send-window row
+    and INTO its `title`, so `"good " in card` now passes on the strength of
+    the attribute that replaced it. Same trap `_styles_of(strip_comments=)`
+    guards against one function up, one attribute over. Any assertion about
+    what a student READS goes through here; assertions about a `title` read
+    the markup directly and say so.
+    """
+    return " ".join(re.sub(r"<[^>]+>", " ", markup).split())
 
 
 def _card(html: str, heading: str) -> str:
@@ -201,11 +239,73 @@ def test_the_close_is_no_longer_explained_in_the_copy():
 def test_both_windows_survive_the_diet():
     """The good window and the avoid window are two different facts, and a
     good window with no avoid window is a smaller claim, not a shorter one.
-    Nothing here trades a fact for a line."""
+    Nothing here trades a fact for a line.
+
+    REWRITTEN 2026-09-02, fourth pass. It read `"good " in hk`, and "good"
+    moved into the row's `title` that night, so the old assertion would now
+    pass on the strength of the attribute that replaced the word it was
+    guarding. Read off the FACE instead, which is the only place a window
+    the student can act on counts.
+    """
     card = _card(_page(_st_user_with_two_markets("both@example.com")), "Schedule")
-    hk = re.search(r'<li class="dbh"[^>]*>(.*?)</li>', card, re.S).group(1)
-    assert "good " in hk and "avoid " in hk
+    hk = _face(re.search(r'<li class="dbh"[^>]*>(.*?)</li>', card, re.S).group(1))
+    assert "send " in hk and "avoid " in hk, (
+        "two windows, still two: a send window and an avoid window"
+    )
+    # A pair of clock times on each side. Matched rather than spelled out:
+    # `_local_clock` renders on the READER's timezone, so the digits differ
+    # with the test user's, and the claim here is that both windows still
+    # print two hours and not that they print any particular two.
+    pairs = re.findall(r"\d{1,2}(?::\d\d)?[AP]M to \d{1,2}(?::\d\d)?[AP]M", hk)
+    assert len(pairs) == 2, f"expected a send window and an avoid window; got {hk!r}"
     assert "desk" in hk, "the row still says whose day this is a fact about"
+
+
+def test_the_send_window_leads_with_a_verb_and_says_what_it_is_for():
+    """"HK desk good 9PM to 10:30PM" led its clause with a bare adjective, so
+    the first three words parse as a verdict on the desk until the time
+    arrives to correct them. It also never said what the window was FOR: this
+    row is `crm.today._send_windows`, the answer to "when is it worth
+    writing", and the card above it is titled Schedule, so nothing on screen
+    connected the hours to an email.
+
+    "send" is the verb the function is named for and the same four characters
+    "good" was, so the pair now reads as two imperatives in one register --
+    send then, avoid then. Measured: one line at 1280 and at 375, both
+    schemes, unchanged.
+    """
+    card = _card(_page(_st_user_with_two_markets("verb@example.com")), "Schedule")
+    # The WHOLE <li>, opening tag included: the word this test says has moved
+    # into the `title` is in the attribute, not in the element's children.
+    row = re.search(r'<li class="dbh".*?</li>', card, re.S).group(0)
+    face = _face(row)
+    assert " send " in f" {face} ", "the window states the action it is a window for"
+    assert "good" not in face, (
+        "an adjective is leading the clause again; the word belongs in the "
+        "title, where the reason the window is good lives"
+    )
+    assert "good window" in row, (
+        "the fact that this half hour is the GOOD one is still stated, in "
+        "the title"
+    )
+
+
+def test_the_windows_say_whose_clock_they_are_on():
+    """THE FACT THIS PASS ADDED, and the only one it did.
+
+    `crm.today._local_clock` converts every one of these hours into the
+    reader's own timezone -- that conversion is the whole feature -- and the
+    card said so nowhere. "HK desk send 9PM" with no such note reads as 9PM
+    in Hong Kong, which is the one misreading on these three cards that costs
+    a student a real send at a real wrong hour.
+
+    In the `title` and not on the face, because it is provenance and not a
+    thing to act on, and because the row measured full at both widths. The
+    words are the Deadlines card's own, which already says "your own clock"
+    about the same idea one card down.
+    """
+    card = _card(_page(_st_user_with_two_markets("clock@example.com")), "Schedule")
+    assert "your own clock" in card
 
 
 def test_the_hint_row_is_the_rails_own_content_left_meta_right_shape():
@@ -233,6 +333,47 @@ def test_an_ib_only_student_still_gets_no_hint_at_all():
     # in the shared block whether or not any student sees it.
     card = _card(_page(user), "Schedule")
     assert '<ul class="daybar-hint">' not in card
+
+
+def test_a_chat_with_no_time_is_agreed_and_does_not_claim_to_be_booked():
+    """"Lily Liu · chat set up" sat beside "no time yet" and contradicted it
+    inside five words: a chat that is SET UP is a chat with a time on it, and
+    this branch of `crm.today._schedule` exists precisely because no time is
+    known. The stored value's own display label over-claims the same way
+    ("Chat scheduled", `crm.utils`) -- right for a booked chat, wrong for
+    every row this branch builds.
+
+    "agreed" is what the state actually asserts and nothing further:
+    `thread_state="chat_scheduled"` is reached off a reply saying yes
+    (`crm.relevance.INBOUND_TOUCH_KINDS`) or off the student logging that it
+    was agreed, and neither of those events knows a time.
+
+    Nothing about the row's shape moved, and the person is still named.
+    """
+    card = _card(_page(_st_user_with_two_markets("chat@example.com")), "Schedule")
+    face = _face(card)
+    assert "Lily Liu · chat agreed" in face
+    assert "set up" not in face, (
+        "the row claims a chat is arranged on a card that says it has no time"
+    )
+
+
+def test_the_time_column_still_says_the_time_is_missing():
+    """"no time yet" is UNCHANGED and this pins that it stays that way.
+
+    It sits in `.activity-when`, the column holding "2p today", "Fri" and
+    "in 58d" on every other row of this rail, and the honest occupant of a
+    time column is the absence of a time. Rewriting it as an ask ("needs a
+    time") was considered in the same pass and rejected: it would be the only
+    imperative in that column anywhere on the page, and the row already has
+    a verb -- the chat was agreed and the time is what is outstanding.
+    """
+    card = _card(_page(_st_user_with_two_markets("when@example.com")), "Schedule")
+    when = re.findall(r'<span class="activity-when[^"]*">(.*?)</span>', card, re.S)
+    assert "no time yet" in [w.strip() for w in when], (
+        "the row no longer says a time is missing; it is the only thing in "
+        "the product that does"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -321,12 +462,67 @@ def test_the_two_day_counts_on_one_card_can_no_longer_read_alike():
         )
     card = _card(_page(user), "Deadlines")
     assert "in 58d" in card, "the countdown carries its direction"
-    assert "longest 24d" in card, "the elapsed figure is still stated"
+    assert "oldest 24d" in card, "the elapsed figure is still stated"
     assert ">58d<" not in card, "a bare countdown is what caused the confusion"
 
 
+def test_the_open_run_line_names_its_noun_and_points_backwards():
+    """"18 open, longest 24d" was the most cryptic line on the rail: four
+    words carrying a census, a subject and an age, and stating one of them.
+
+    TWO FIXES, NEITHER OF THEM A CUT.
+
+    "18 open" named no noun, so the reader supplied one from the row above
+    it, where the only candidates were applications and deadlines -- neither
+    of which is what this counts. "roles" is the word the Opportunities feed
+    and every firm page already use for exactly these rows ("See open roles",
+    "No campus roles open right now"), so the line joins the vocabulary a
+    student meets everywhere else. No `pluralize`: `firm_open_runs` drops any
+    firm under `CYCLE_OBSERVATION_MIN_SAMPLE`, so the count is three or more
+    or the line does not render.
+
+    "longest" was the half of the 2026-09-02 direction bug that the "in 58d"
+    fix did not reach. A countdown an inch above now states its direction,
+    but "longest 24d" still reads forward -- "open longest", "lasts longest"
+    -- which is the exact confusion this card was rewritten to end.
+    "oldest" is a superlative of age and cannot point forward, so the elapsed
+    reading is the only one available and the rail's bare-Nd rule is restated
+    on the line rather than relied on from elsewhere.
+
+    Measured at the widest values this line holds (236 roles open, oldest
+    124d): one line at 1280 and at 375, both schemes, as before.
+    """
+    from directory.models import Opportunity
+    user = _deadline_user()
+    firm = Firm.objects.get(slug="hsbc")
+    today = timezone.localdate()
+    for i, age in enumerate([70, 24, 20, 9]):
+        o = Opportunity.objects.create(
+            firm=firm, title=f"SA {i}", bucket="internship", status="open",
+            url=f"https://x.test/hsbc/{i}",
+        )
+        Opportunity.objects.filter(pk=o.pk).update(
+            first_seen=timezone.make_aware(
+                dt.datetime.combine(today - dt.timedelta(days=age), dt.time(9)),
+                dt.timezone.utc,
+            )
+        )
+    card = _card(_page(user), "Deadlines")
+    face = _face(card)
+    # Three, not four: the 70-day row predates this firm's onboarding cutoff,
+    # so `open_run_days` returns None for it and it is not counted at all.
+    assert "3 roles open, oldest 24d" in face
+    assert "longest" not in face, (
+        "the forward-reading superlative is back on a backward-reading figure"
+    )
+    # And the fact the noun is short for is where it already was.
+    assert "Campus postings" in card, (
+        "the title still says these are campus postings Coverage watched open"
+    )
+
+
 # ---------------------------------------------------------------------------
-# 3. Where do they sit? — the note, not the heading.
+# 3. Contacts to place — the heading, the count and the verb.
 # ---------------------------------------------------------------------------
 def _unplaced_user():
     user = _user(email="unpl@example.com", tracks=("ib",))
@@ -335,10 +531,37 @@ def _unplaced_user():
     return user
 
 
-def test_the_heading_and_the_verb_are_untouched():
-    """Both are the founder's own words from 2026-08-31 and the template
-    comment holds the argument for them. A copy pass that shortens the line
-    under them must not quietly relitigate them.
+def test_the_verb_is_untouched_and_the_heading_now_carries_it():
+    """REWRITTEN 2026-09-02, fourth pass. It was
+    `test_the_heading_and_the_verb_are_untouched` and it pinned the old
+    interrogative heading as fixed on the grounds that it was the founder's
+    own word.
+
+    THE VERB IS STILL FIXED and this test still pins it. "Place them" is the
+    same verb the Contacts caption on the Network page uses for this exact
+    action, pointing at this exact tool.
+
+    THE HEADING CHANGED, on "clear, concise, straightforward", for three
+    reasons the template comment states at length:
+
+      it is a question this card never answers -- under it are a count and a
+      button, so the reader is asked something and handed a number;
+
+      "sit" is a trading floor's word for a DESK and the field this block is
+      short of is a MARKET. Coverage stores no desk and the tool the button
+      opens asks for a country, so a literal reading sends the student
+      hunting a field that does not exist;
+
+      it was the only interrogative heading in a rail of noun phrases.
+
+    This is NOT a relitigation of the 2026-08-31 call that rejected
+    "Unplaced" for naming a state nobody could resolve unaided -- unplaced
+    WHAT, and placed WHERE. "Contacts to place" answers the WHAT and borrows
+    the button's own verb, and the WHERE is answered by the line directly
+    beneath, which is the ground that moved: on 2026-08-31 the heading stood
+    above a NOTE and was the only thing on the block naming the missing
+    field. The count line that replaced the note says "no market set" on its
+    own face, which the next test pins.
 
     The verb's MARKUP changed on 2026-09-02 ("make Place them into a
     button"), which is why this no longer looks for `>Place them</a>` inside
@@ -346,9 +569,12 @@ def test_the_heading_and_the_verb_are_untouched():
     element is the shared `.btn` is pinned in
     `crm/tests/test_unplaced_arrivals.py`.
     """
-    card = _card(_page(_unplaced_user()), "Where do they sit?")
-    assert "Where do they sit?" in card
+    card = _card(_page(_unplaced_user()), "Contacts to place")
+    assert "Contacts to place" in card
     assert ">Place them</a>" in card
+    assert "sit?" not in card, (
+        "the heading asks about a desk again; the field is a market"
+    )
 
 
 def test_the_line_under_the_heading_is_a_count_and_keeps_both_its_facts():
@@ -365,10 +591,19 @@ def test_the_line_under_the_heading_is_a_count_and_keeps_both_its_facts():
     every region-less contact on the account, and the missing fact itself
     ("no market set"). The mechanism is a `title`, pinned by the next test,
     which is the same place it was already living.
+
+    "WITH", NOT A COMMA (2026-09-02, fourth pass). The two facts used to hang
+    off a comma splice, which leaves the reader to work out whether all N
+    lack a market or merely some unnamed things do. "with" makes the second
+    fact a property of the first and the ambiguity goes. Neither fact moved
+    and the line still renders on one line at both widths, measured at 999.
     """
-    card = _card(_page(_unplaced_user()), "Where do they sit?")
+    card = _card(_page(_unplaced_user()), "Contacts to place")
     line = re.search(r'<p class="unplaced-count"[^>]*>(.*?)</p>', card, re.S).group(1)
-    assert re.sub(r"<[^>]+>", "", line).strip() == "3 new this week, no market set."
+    assert _face(line) == "3 new this week with no market set."
+    assert "week, no market" not in _face(card), (
+        "the splice is back; the two facts are joined by a comma again"
+    )
     assert "until you say" not in card
     assert "Coverage cannot match" not in card
     assert "unplaced-note" not in card, (
@@ -379,7 +614,7 @@ def test_the_line_under_the_heading_is_a_count_and_keeps_both_its_facts():
 def test_the_mechanism_the_note_stopped_explaining_is_still_reachable():
     """It is a fact about how the product works, not one the student acts on,
     so it is a `title` now. Cut the explanation, do not delete it."""
-    card = _card(_page(_unplaced_user()), "Where do they sit?")
+    card = _card(_page(_unplaced_user()), "Contacts to place")
     assert "matches a firm's deadlines to a person by market" in card
     assert "nothing infers one" in card, (
         "P1 still has to be visible somewhere on this card: the product does "
@@ -537,7 +772,7 @@ def test_the_pace_card_carries_no_picture_at_all():
 
 
 # ---------------------------------------------------------------------------
-# 5b. Pace and "Where do they sit?" as ONE widget (2026-09-02, third pass).
+# 5b. Pace and "Contacts to place" as ONE widget (2026-09-02, third pass).
 #
 # "Combine this with unsorted contacts, make into one widget." Both halves
 # are facts about this week, which is why they are together, but they are not
@@ -581,7 +816,7 @@ def test_the_two_cards_are_one_card(client):
     )
     card = _pace_card(html)
     assert 'class="pace-figure"' in card
-    assert "Where do they sit?" in card
+    assert "Contacts to place" in card
     assert "Place them" in card
 
 
@@ -655,7 +890,7 @@ def test_with_nothing_unplaced_the_card_is_the_pace_half_alone(client):
     card = _pace_card(_page(user))
     assert 'class="pace-figure"' in card, "the pace half is always present"
     assert "unplaced-card" not in card
-    assert "Where do they sit?" not in card, "an orphan heading survived"
+    assert "Contacts to place" not in card, "an orphan heading survived"
     assert "Place them" not in card, "an empty action survived"
     assert "btn-primary" not in card, (
         "the merged card kept a primary with nothing left to press it for"
@@ -683,7 +918,7 @@ def test_the_goal_not_yet_hit_reads_the_same_in_both_halves(client):
     assert "Weekly goal hit." not in card
     assert "more to go." in card
     # And the queue half is unchanged by the miss.
-    assert "Where do they sit?" in card
+    assert "Contacts to place" in card
     assert "Place them" in card
 
 

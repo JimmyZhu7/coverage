@@ -2307,7 +2307,9 @@ def _schedule(user, today) -> list[dict]:
        said the copy could never state when a chat was "because we do not
        store a chat datetime anywhere". That stopped being true when
        CalendarEvent landed — but only for chats whose time somebody knows,
-       so these rows survive, saying honestly that no time is set yet.
+       so these rows survive, saying honestly that no time is set yet. They
+       say "chat agreed" and not "chat set up" for exactly that reason; see
+       the row builder below.
 
     A merged list is the point: "what's next" is one question, and answering
     it across two cards makes the reader do the interleaving.
@@ -2339,7 +2341,7 @@ def _schedule(user, today) -> list[dict]:
         # is skipped here rather than filtered in the query. `thread_state`
         # stays "chat_scheduled" after a cancellation, so dropping the row
         # without claiming the contact would hand them straight to the untimed
-        # branch below and print "Lily Liu · chat set up — no time yet" about
+        # branch below and print "Lily Liu · chat agreed — no time yet" about
         # the chat that was just called off. Silence is the honest answer.
         if ev.cancelled_at is not None:
             if ev.contact_id:
@@ -2404,7 +2406,27 @@ def _schedule(user, today) -> list[dict]:
             # Sorts after every timed row on the same day: a thing with a
             # known time outranks a thing without one.
             "sort": (now.replace(hour=23, minute=59), 1),
-            "title": f"{c.name} · chat set up",
+            # "chat agreed", not "chat set up" (2026-09-02, "clear, concise,
+            # straightforward"). This row is the branch that exists BECAUSE
+            # no time is known, and it printed "Lily Liu · chat set up" next
+            # to "no time yet" — a row that contradicts itself in the space
+            # of five words, since a chat that is set up is a chat with a
+            # time on it. "agreed" is what the state actually asserts and
+            # nothing more: `thread_state="chat_scheduled"` is reached off a
+            # reply saying yes (`crm.relevance.INBOUND_TOUCH_KINDS`) or off
+            # the student logging that it was agreed, and neither of those
+            # events knows a time. It also stops over-claiming in the way the
+            # stored value's own display label does ("Chat scheduled",
+            # `crm.utils`), which is right for a booked chat and wrong for
+            # every row this branch builds.
+            #
+            # "no time yet" beside it is deliberately UNCHANGED. It sits in
+            # `.activity-when`, the column that holds "2p today", "Fri" and
+            # "in 58d" everywhere else, and the honest occupant of a time
+            # column is the absence of a time. Turning it into an ask
+            # ("needs a time") was considered and rejected: it would be the
+            # only imperative in that column on the page.
+            "title": f"{c.name} · chat agreed",
             "contact": c,
             "when": "no time yet",
             "is_today": False,
@@ -2653,7 +2675,7 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
             "date": fd.date,
             "days": days,
             # "in 58d", NOT "58d" (2026-09-02). This row also carries
-            # `open_run`, whose "longest 24d" is an ELAPSED figure counting UP
+            # `open_run`, whose "oldest 24d" is an ELAPSED figure counting UP
             # from a day in the past. Two bare day counts an inch apart,
             # pointing in opposite directions of time, is the whole defect the
             # founder saw on this card. The rail's rule now: a bare "Nd" is

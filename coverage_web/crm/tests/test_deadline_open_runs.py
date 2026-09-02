@@ -224,14 +224,29 @@ def test_onboarding_batch_postings_do_not_unlock_the_line(client):
 # What the card actually renders.
 # ---------------------------------------------------------------------------
 
-def test_the_card_renders_the_census_and_the_longest_run(client):
+def test_the_card_renders_the_census_and_the_oldest_run(client):
+    """RENAMED AND REWRITTEN 2026-09-02 (fourth copy pass, "clear, concise,
+    straightforward"). It read `..._and_the_longest_run` and pinned "3 open,
+    longest 22d".
+
+    Two words changed and neither number did. "open" named no noun, so a
+    reader took one from the row above, where the only candidates were
+    applications and deadlines -- and this counts neither; "roles" is what
+    the Opportunities feed and every firm page already call these. "longest"
+    read forward ("open longest", "lasts longest") on a figure counting back,
+    which is the exact confusion the "in 58d" fix in the same card was for;
+    "oldest" is a superlative of age and cannot point forward.
+    """
     user = _user()
     firm = _firm()
     _date(firm, in_days=6)
     _watched_runs(firm, [22, 9, 3])
 
     card = _card(_today_page(client, user))
-    assert "3 open, longest 22d" in card
+    assert "3 roles open, oldest 22d" in card
+    assert "longest" not in card, (
+        "a forward-reading superlative is back on a backward-reading figure"
+    )
 
 
 def test_an_all_same_day_firm_reads_as_today_not_as_zero_days(client):
@@ -247,7 +262,10 @@ def test_an_all_same_day_firm_reads_as_today_not_as_zero_days(client):
         _opp(firm, days_ago=0, url=f"https://x.test/new{i}", today=today)
 
     card = _card(_today_page(client, user))
-    assert "3 open, all today" in card
+    # "all opened today", not "all today" (2026-09-02, fourth copy pass).
+    # "all today" one line under a row about a closing date could be read as
+    # "all closing today", which is the one thing this line never means.
+    assert "3 roles open, all opened today" in card
     assert "0d" not in card
 
 

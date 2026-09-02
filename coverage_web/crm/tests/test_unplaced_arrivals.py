@@ -163,11 +163,20 @@ def test_a_contact_that_arrived_blank_this_week_is_counted(client):
     assert _count(user) == 1
 
     card = _card(_today(client, user))
-    # The question, its size and its verb, which is the whole card. Pinned
+    # The heading, its size and its verb, which is the whole card. Pinned
     # together because the card's job is to be answerable: a state with no
     # verb beside it was what it read as two passes ago.
-    assert "Where do they sit?" in card
-    assert "1 new this week, no market set." in _face(card)
+    #
+    # REWRITTEN 2026-09-02 (fourth copy pass, "clear, concise,
+    # straightforward"). It pinned "Where do they sit?" and "1 new this week,
+    # no market set." The heading was a question the card never answered and
+    # "sit" asked about a DESK when the missing field is a MARKET, so it is
+    # a noun phrase carrying the button's own verb now; the count line's
+    # comma splice became "with", which binds the missing field to the count
+    # instead of leaving the reader to. Neither fact left the card:
+    # `crm/tests/test_rail_copy_2026_09_02.py` holds the full argument.
+    assert "Contacts to place" in card
+    assert "1 new this week with no market set." in _face(card)
     assert "Place them" in card
     # Neither the person nor their firm reaches the page.
     assert "Jude Yoon" not in card
@@ -274,7 +283,7 @@ def test_a_bulk_batch_is_counted_in_full(client):
         _arrival(user, f"Person {i}", firm)
 
     assert _count(user) == 9
-    assert "9 new this week, no market set." in _face(_card(_today(client, user)))
+    assert "9 new this week with no market set." in _face(_card(_today(client, user)))
 
 
 def test_the_card_counts_the_week_and_the_tab_counts_the_pool(client):
@@ -299,7 +308,7 @@ def test_the_card_counts_the_week_and_the_tab_counts_the_pool(client):
                  days_ago=UNPLACED_ARRIVAL_WINDOW_DAYS + 1 + i)
 
     assert _count(user) == 12
-    assert "12 new this week, no market set." in _face(_card(_today(client, user)))
+    assert "12 new this week with no market set." in _face(_card(_today(client, user)))
 
     client.force_login(user)
     resp = client.get(reverse("crm:contact_list"), {"scope": "unplaced"})
