@@ -35,7 +35,7 @@ import html as _html
 import json
 import re
 
-from .http import fetch_text
+from .http import fetch_text, unreadable
 from .models import FetchResult, Opportunity, TalentGatewayBoard, VerificationResult
 
 name = "talentgateway"
@@ -45,25 +45,44 @@ _MAX_PAGES = 20
 _URL_RE = re.compile(r"jobs\.ubs\.com/TGnewUI/.*?jobid=(\d+)", re.IGNORECASE)
 
 
+class TalentGatewayShapeError(ValueError):
+    """The board page came back without the embedded results payload this
+    connector reads. Its own class so `fetch()` can call that unreadable
+    rather than empty — every `return []` below used to be indistinguishable
+    from a genuinely empty featured block."""
+
+
 def _parse_page(html_text: str) -> list[dict]:
     """Extract the embedded `<input id="searchResults" value="...">` JSON.
     Uses a find-based slice (not a regex) because the value is one long
     entity-encoded string with no raw quote until its closing `"`, and a
-    non-greedy regex mis-terminates on it."""
+    non-greedy regex mis-terminates on it.
+
+    Raises `TalentGatewayShapeError` when the input, its value, or the JSON
+    inside it is missing or unparseable. Returning `[]` for those is what let
+    a BrassRing page change quietly close a firm's whole board: the payload
+    IS the board, so its absence is never evidence of an empty one. An
+    element that parses to an empty `HotJobs.Job` list is a real empty
+    board and still returns `[]`."""
     i = html_text.find('id="searchResults"')
     if i < 0:
-        return []
+        raise TalentGatewayShapeError(
+            f"no id=\"searchResults\" element on the board page "
+            f"({len(html_text)} bytes)")
     vi = html_text.find('value="', i)
     if vi < 0:
-        return []
+        raise TalentGatewayShapeError("searchResults element carries no value= attribute")
     vi += len('value="')
     vj = html_text.find('"', vi)
     if vj < 0:
-        return []
+        raise TalentGatewayShapeError("searchResults value= attribute is unterminated")
     try:
         data = json.loads(_html.unescape(html_text[vi:vj]))
-    except (ValueError, TypeError):
-        return []
+    except (ValueError, TypeError) as e:
+        raise TalentGatewayShapeError(f"searchResults payload is not JSON: {e}") from e
+    if not isinstance(data, dict) or "HotJobs" not in data:
+        raise TalentGatewayShapeError(
+            "searchResults payload carries no 'HotJobs' block")
     return (data.get("HotJobs") or {}).get("Job") or []
 
 
@@ -103,9 +122,16 @@ def fetch(board: TalentGatewayBoard) -> FetchResult:
         # Normalization stays inside this try — see greenhouse.py's fetch()
         # for why a malformed row must not raise past this function.
         opportunities = [o for o in (_normalize(j, board) for j in unique) if o.url and o.title]
+    except TalentGatewayShapeError as e:
+        return FetchResult(board=board, ok=False, opportunities=[], raw_count=0,
+                           error=unreadable(f"talentgateway {board.site_id}: {e}"))
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(unique))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(unique),
+                       # The payload parsed and its Job list was empty: the
+                       # board's own answer, not a parse that found nothing.
+                       empty_state=not opportunities)
 
 
 def classify_url(url: str) -> dict | None:

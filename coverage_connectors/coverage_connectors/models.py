@@ -335,6 +335,22 @@ class FetchResult:
     #: verified live on the firm's own site were sitting in the database as
     #: closed. A truncated list is not evidence of absence.
     truncated: bool = False
+    #: The board POSITIVELY stated it has nothing: a Greenhouse envelope whose
+    #: own `meta.total` is 0, a Workday `total: 0`, an RMK "no jobs found"
+    #: panel, a sitemap that parsed fine and held no matching paths. Only ever
+    #: meaningful alongside `ok=True` and an empty `opportunities`.
+    #:
+    #: It exists because zero rows has three meanings, not two, and the third
+    #: one is the dangerous one. A connector that CANNOT read the response
+    #: says so with `ok=False` (see `http.unreadable`). A connector that read
+    #: an explicit empty state sets this flag, and `ingest` may safely close
+    #: the firm's remaining rows off it. Everything else — Greenhouse's
+    #: vacated token being byte-identical to a quiet board, an HTML board
+    #: whose parser found nothing and whose page carried no empty-state panel
+    #: either — leaves this False, and the caller decides using the one fact
+    #: this package does not have: how many rows the board banked last time
+    #: (see `coverage_connectors.zero_rows_guard`).
+    empty_state: bool = False
 
 
 @dataclass(frozen=True, slots=True)

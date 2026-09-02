@@ -22,7 +22,7 @@ from __future__ import annotations
 import html
 import re
 
-from .http import fetch_text
+from .http import fetch_text, unreadable
 from .models import FetchResult, Opportunity, TalentsoftBoard, VerificationResult
 
 name = "talentsoft"
@@ -40,6 +40,16 @@ _CARD = re.compile(
     r'ts-offer-card-content__list[^>]*>(?P<meta>.*?)</ul>',
     re.S)
 _LI = re.compile(r"<li[^>]*>\s*([^<]*?)\s*</li>")
+
+# Talentsoft's own "the list is empty" line, in the two languages this
+# tenant serves (the platform is French; CA-CIB's site runs both). Its
+# presence is what turns zero cards from a parse failure into an answer.
+_EMPTY_STATE_RE = re.compile(
+    r"ts-no-result|no-offer|aucune?\s+offre"
+    r"|no\s+(?:offers?|results?|jobs?|vacancies)\s+(?:were\s+)?(?:found|match|available)"
+    r"|0\s+(?:offers?|r[ée]sultats?)\b",
+    re.IGNORECASE,
+)
 
 
 def _normalize(m: re.Match, board: TalentsoftBoard) -> Opportunity | None:
@@ -74,7 +84,22 @@ def fetch(board: TalentsoftBoard) -> FetchResult:
                 seen.add(opp.url)
                 opps.append(opp)
         if not opps:
-            raise ValueError("no ts-offer-card entries parsed — markup changed?")
+            # Zero cards, and the question is which zero. A tenant that has
+            # genuinely emptied its list still renders the list container and
+            # its own "no offer" line; a tenant whose card markup changed
+            # renders offers this regex can no longer see. The old code raised
+            # a bare ValueError for both, which reported a real empty board as
+            # a broken one — the same conflation in the opposite direction to
+            # the one the rest of this package is fixing.
+            if _EMPTY_STATE_RE.search(page):
+                return FetchResult(board=board, ok=True, opportunities=[],
+                                   raw_count=0, empty_state=True)
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"no ts-offer-card entries parsed from {len(page)} bytes and "
+                    f"no empty-list message — markup changed?"),
+            )
         return FetchResult(board=board, ok=True, opportunities=opps,
                            raw_count=len(opps))
     except Exception as exc:  # noqa: BLE001 — one board must not sink the run

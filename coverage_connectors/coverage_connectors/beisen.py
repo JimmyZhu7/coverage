@@ -174,7 +174,12 @@ def fetch(board: BeisenBoard) -> FetchResult:
         opportunities = [_normalize(j, board) for j in uniq]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(uniq))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(uniq),
+                       # Reaching here means a real GetJobAdPageList response
+                       # was captured (the `any_captured` guard above), so an
+                       # empty result is the board's own answer.
+                       empty_state=not opportunities)
 
 
 def classify_url(url: str) -> dict | None:

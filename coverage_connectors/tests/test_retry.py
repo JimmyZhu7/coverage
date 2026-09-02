@@ -23,7 +23,10 @@ def _result(ok: bool, error: str | None = None) -> FetchResult:
 def _scripted_fetch(monkeypatch, outcomes: list[FetchResult]):
     calls = {"n": 0}
 
-    def fake(board):
+    def fake(board, **kwargs):
+        # **kwargs so this stands in for the real `fetch(board, *,
+        # banked_rows=0)`; the retry path passes the caller's row history
+        # through and this helper does not care what it is.
         result = outcomes[min(calls["n"], len(outcomes) - 1)]
         calls["n"] += 1
         return result

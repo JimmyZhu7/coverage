@@ -140,10 +140,35 @@ def test_stated_total_beyond_the_cap_reports_truncated(monkeypatch):
 
 
 def test_an_empty_board_is_ok_and_empty_not_an_error(monkeypatch):
-    # An empty result set renders no paginationLabel at all.
-    monkeypatch.setattr(successfactors, "fetch_text", lambda url, **kw: _page("", label=None))
+    """REWRITTEN 2026-09-01. This used to pin "no rows on the page -> ok=True,
+    0 rows" for ANY 200, which is the silent-empty failure itself: RMK is a
+    catch-all 200 (a wrong q=, a moved tenant, a maintenance page and a real
+    zero-result search all look identical bar the empty-state panel), and a
+    clean zero is what lets ingest close the firm's whole open set. The
+    behaviour it now pins is that a page SAYING it found nothing is still
+    ok=True and 0 rows — and additionally flags `empty_state`, so the caller's
+    own history guard knows not to second-guess it. The
+    no-panel-and-no-rows case has its own test below."""
+    monkeypatch.setattr(
+        successfactors, "fetch_text",
+        lambda url, **kw: _page('<div class="noSearchResults">No jobs found.</div>',
+                                label=None))
     r = successfactors.fetch(BOARD)
     assert r.ok and r.raw_count == 0 and r.opportunities == [] and not r.truncated
+    assert r.empty_state, "the page said so in its own words"
+
+
+def test_zero_rows_with_no_empty_state_panel_is_unreadable(monkeypatch):
+    """An empty result set renders no paginationLabel AND no data-row, so
+    without the empty-state panel there is nothing on the page to tell a
+    genuinely quiet board from one whose markup moved. Reported as unreadable
+    rather than empty — the direction that costs a health line instead of a
+    firm's whole open set."""
+    monkeypatch.setattr(successfactors, "fetch_text", lambda url, **kw: _page("", label=None))
+    r = successfactors.fetch(BOARD)
+    assert not r.ok and r.opportunities == []
+    assert "board unreadable, not empty" in (r.error or "")
+    assert "no empty-state panel" in (r.error or "")
 
 
 def test_fetch_failure_is_reported_not_raised(monkeypatch):

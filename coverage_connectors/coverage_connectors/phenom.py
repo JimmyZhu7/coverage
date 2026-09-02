@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 
-from .http import post_json
+from .http import post_json, unreadable
 from .models import FetchResult, Opportunity, PhenomBoard, VerificationResult
 
 name = "phenom"
@@ -64,12 +64,35 @@ def fetch(board: PhenomBoard) -> FetchResult:
     seen: set[str] = set()
     jobs: list[dict] = []
     start = 0
+    total = 0
     while True:
         try:
             data = post_json(f"https://{board.host}/widgets", _payload(board, start))
         except Exception as e:  # noqa: BLE001
             return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-        block = data.get("refineSearch", {})
+        # PHENOM REPORTS ITS FAILURES IN THE BODY, WITH A 200. A rejected
+        # payload, an unknown ddoKey, a widget the tenant has turned off: all
+        # of them come back as `{"status": "failure"}` (sometimes with a
+        # `message`), never as a 4xx. `data.get("refineSearch", {})` turned
+        # every one into an empty batch and a clean zero, so a tenant that
+        # renamed a widget would read as a firm that stopped hiring.
+        status = str(data.get("status") or "").lower()
+        if status and status != "success":
+            note = str(data.get("message") or data.get("errorMessage") or "")[:120]
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"phenom answered 200 with status={status!r}"
+                    + (f": {note}" if note else "")),
+            )
+        if "refineSearch" not in data:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"phenom response carries no 'refineSearch' block "
+                    f"(got {sorted(data)[:6]})"),
+            )
+        block = data.get("refineSearch") or {}
         batch = (block.get("data") or {}).get("jobs", [])
         for job in batch:
             jid = str(job.get("jobId") or job.get("jobSeqNo") or "")
@@ -88,7 +111,12 @@ def fetch(board: PhenomBoard) -> FetchResult:
         opportunities = [o for o in (_normalize(j, board) for j in jobs) if o.url]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(jobs))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(jobs),
+                       # `totalHits: 0` inside a well-formed refineSearch block
+                       # is the widget answering "nothing matches", which is a
+                       # statement rather than a silence.
+                       empty_state=not opportunities and total == 0)
 
 
 def classify_url(url: str) -> dict | None:

@@ -326,7 +326,12 @@ def fetch(board: TalnetBoard) -> FetchResult:
                   "board unreadable, not empty",
         )
     return FetchResult(board=board, ok=True, opportunities=opportunities,
-                       raw_count=len(rows), truncated=truncated)
+                       raw_count=len(rows), truncated=truncated,
+                       # Past the markup guard above, so a zero here is a
+                       # board page carrying no vacancy markup at all — the
+                       # empty events board's own answer (Jefferies' Insight
+                       # Days board is registered empty on purpose).
+                       empty_state=not opportunities)
 
 
 def classify_url(url: str) -> dict | None:

@@ -51,7 +51,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import fetch_json
+from .http import fetch_json, unreadable
 from .models import FetchResult, Opportunity, OracleBoard, VerificationResult
 
 name = "oracle"
@@ -117,6 +117,13 @@ _URL_RE = re.compile(
 )
 
 
+class OracleEnvelopeError(ValueError):
+    """The search endpoint answered 200 with a body this connector cannot
+    read as a result set. Its own class so `fetch()` can report it as
+    "unreadable, not empty" while every other exception stays a plain
+    board-level error."""
+
+
 def _search(host: str, site: str, keyword: str) -> tuple[list[dict], int | None]:
     """(matched requisitions, provider-reported total for this keyword).
 
@@ -125,15 +132,30 @@ def _search(host: str, site: str, keyword: str) -> tuple[list[dict], int | None]
     "insight", genuinely is: 1,631 live) far more than the `limit=25` this
     connector ever asks for or gets back per search. `None` when the
     envelope carries no such field (missing/malformed — the same case
-    `verify()` already treats as "can't tell", never as evidence)."""
+    `verify()` already treats as "can't tell", never as evidence).
+
+    ORACLE'S SILENT-EMPTY MODE, and why the `requisitionList` KEY is checked
+    rather than its length. Drop the `expand=` parameter from this URL and
+    the endpoint answers HTTP 200 with an `items[0]` object that simply has
+    no `requisitionList` key at all (observed 2026-09-01). A connector
+    reading `block.get("requisitionList", [])` sees zero jobs and no error —
+    the same "the firm has nothing open" reading that a real result of zero
+    would produce. A genuinely empty search sends the key with an empty
+    list; a broken request omits it. That distinction is the entire signal,
+    so it is read as a key test, never a truthiness test."""
     url = _SEARCH_URL.format(host=host, site=site, kw=urllib.parse.quote(keyword))
     data = fetch_json(url)
-    items = data.get("items", [])
+    items = data.get("items", []) if isinstance(data, dict) else []
     if not items:
         return [], None
     block = items[0]
+    if "requisitionList" not in block:
+        raise OracleEnvelopeError(
+            f"oracle site {site!r} answered 200 with no 'requisitionList' key "
+            f"on items[0] (got {sorted(block)[:6]}) — the expand= parameter is "
+            f"missing or the envelope changed")
     total = block.get("TotalJobsCount")
-    return block.get("requisitionList", []), (total if isinstance(total, int) else None)
+    return block.get("requisitionList") or [], (total if isinstance(total, int) else None)
 
 
 def _fetch_details(host: str, site: str, rid: str) -> dict | None:
@@ -214,11 +236,22 @@ def fetch(board: OracleBoard) -> FetchResult:
     # fell outside the top-25-by-relevancy "insight" results and was
     # falsely closed in the same batch as 3 other JPM oracle rows.
     truncated = False
+    # True only while every keyword's own search has positively said zero.
+    # A keyword whose envelope carried no total leaves this False — silence
+    # is not an empty board.
+    every_keyword_said_zero = True
     for kw in board.keywords:
         try:
             found, total = _search(board.host, board.site_number, kw)
+        except OracleEnvelopeError as e:
+            # 200 with an unreadable body. Distinct from a network error so
+            # the health report can say which of the two happened.
+            return FetchResult(board=board, ok=False, opportunities=[], raw_count=0,
+                               error=unreadable(str(e)))
         except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
             return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
+        if total != 0 or found:
+            every_keyword_said_zero = False
         if total is not None and total > len(found):
             truncated = True
         for req in found:
@@ -244,7 +277,9 @@ def fetch(board: OracleBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(reqs),
-                        truncated=truncated)
+                        truncated=truncated,
+                        empty_state=(not opportunities and bool(board.keywords)
+                                     and every_keyword_said_zero))
 
 
 def classify_url(url: str) -> dict | None:

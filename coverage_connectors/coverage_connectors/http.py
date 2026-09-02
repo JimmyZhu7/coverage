@@ -23,12 +23,31 @@ tracking (`learnings.record_fetch`) was a single-user file-backed side-store
 and is exactly the kind of state this extraction is told to drop. Callers
 who want fetch telemetry should wrap `fetch_json`/`post_json` themselves;
 this module raises cleanly and lets the caller decide what to log where.
+
+3. **Trust store.** Every request verifies against `certifi`'s CA bundle
+   rather than whatever the interpreter's OpenSSL happens to point at.
+   Measured 2026-09-01 on the scraper host: `ssl.get_default_verify_paths()`
+   resolves to macOS's `/etc/ssl/cert.pem`, which does not carry Sectigo's
+   "Public Server Authentication Root R46". EY (`careers.ey.com`) and HSBC
+   (`apply.careers.hsbc.com`) both chain to it, so both boards had returned
+   `CERTIFICATE_VERIFY_FAILED … unable to get local issuer certificate` in
+   every run for two weeks — 175 open rows frozen behind a stale bundle on
+   OUR machine, not a problem with either site. A direct handshake against
+   both hosts confirmed the split: system bundle fails, certifi succeeds
+   (issuers "Sectigo Public Server Authentication CA OV R40" and "… R36").
+   `successfactors.py`'s docstring had already diagnosed this and prescribed
+   `SSL_CERT_FILE=$(python -c 'import certifi;print(certifi.where())')` — an
+   env var nobody exports before a cron run. Reading certifi here makes the
+   fix the default instead of a thing to remember. Verification is never
+   disabled and never relaxed; the only change is WHICH roots are trusted,
+   and certifi is the strictly larger, actively-maintained set.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -38,6 +57,27 @@ USER_AGENT = "coverage-connectors/0.1 (+https://coverage.app; deterministic ATS/
 DEFAULT_TIMEOUT_SECONDS = 15
 DEFAULT_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 1.5
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    """A verifying context backed by certifi's roots (see module docstring).
+
+    Falls back to the interpreter's own default context if certifi is
+    somehow absent — that is the behaviour this package had before, so a
+    stripped install degrades to the old bug rather than to no TLS at all.
+    Hostname checking and certificate verification stay on in both branches;
+    there is no code path here that turns either off.
+    """
+    try:
+        import certifi
+    except ImportError:  # pragma: no cover — certifi is a declared dependency
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+#: Built once at import: loading a ~300KB PEM bundle per request would cost
+#: more than the fetch it protects, and the roots do not change mid-process.
+SSL_CONTEXT = _build_ssl_context()
 
 
 class FetchError(Exception):
@@ -63,7 +103,9 @@ def _do_request(
     if headers:
         req_headers.update(headers)
     req = urllib.request.Request(url, data=data, headers=req_headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — deliberate plain HTTP client
+    with urllib.request.urlopen(  # noqa: S310 — deliberate plain HTTP client
+        req, timeout=timeout, context=SSL_CONTEXT
+    ) as resp:
         return resp.read()
 
 
@@ -128,6 +170,49 @@ _CHALLENGE_TITLES = {
     "attention required!": "Cloudflare block page",
 }
 _TITLE_TAG_RE = re.compile(r"<title[^>]*>([^<]*)</title>", re.IGNORECASE)
+
+
+# ---------------------------------------------------------------- zero rows
+#
+# "Unreadable, not empty" is the second half of the same contract
+# `bot_challenge_reason` states above, and it is the one that had only one
+# implementation. Fifteen of eighteen connectors returned `ok=True` with zero
+# opportunities whenever a 200 came back and their parser found nothing —
+# which downstream means "this firm has no openings", the single most
+# expensive lie this package can tell: `ingest` reads a clean zero as
+# permission to close the firm's entire open set, and `health` reads it as a
+# market fact worth a quiet line rather than a bug.
+#
+# Every connector now answers one question before returning a clean zero:
+# does this response carry POSITIVE evidence that the board is empty, or
+# merely an absence of rows we know how to read? The three outcomes:
+#
+#   ok=False + UNREADABLE_SUFFIX   the response is the wrong shape (a key the
+#                                  platform always sends is missing, a stated
+#                                  total disagrees with the rows, a login stub
+#                                  came back instead of a feed). Nothing may
+#                                  be concluded from it.
+#   ok=True, empty_state=True      the board said, in its own words, that it
+#                                  has nothing: `{"jobs": []}` under a
+#                                  `total: 0`, an "no jobs found" panel, a
+#                                  sitemap with no matching paths. A real
+#                                  market fact; auto-close may proceed.
+#   ok=True, empty_state=False     parsed cleanly, no rows, and the platform
+#                                  offered no empty-state signal either way.
+#                                  Greenhouse's vacated token lives here and
+#                                  is indistinguishable on the wire from a
+#                                  quiet board — so the CALLER, which is the
+#                                  only party that knows how many rows this
+#                                  board has banked before, decides (see
+#                                  `zero_rows_guard`).
+UNREADABLE_SUFFIX = "board unreadable, not empty"
+
+
+def unreadable(reason: str) -> str:
+    """The standard board-level error text for a response that cannot be
+    read. One phrasing across every connector, so health reporting and a
+    human reading a log both learn it once."""
+    return f"{reason} — {UNREADABLE_SUFFIX}"
 
 
 def bot_challenge_reason(html: str) -> str | None:

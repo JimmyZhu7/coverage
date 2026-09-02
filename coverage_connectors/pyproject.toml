@@ -4,6 +4,13 @@ version = "0.1.0"
 description = "Coverage's deterministic ATS fetch/verify engine — Greenhouse, Lever, and Workday connectors, pure Python, no state, no filesystem paths. Oracle Recruiting Cloud, tal.net, and company-specific fetchers remain future work; see docs/build-plan.md §4/§7."
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    # CA bundle. `http.py` verifies against certifi's roots rather than the
+    # interpreter's default store: macOS's /etc/ssl/cert.pem does not carry
+    # Sectigo's Public Server Authentication Root R46, which EY and HSBC both
+    # chain to, and their boards failed CERTIFICATE_VERIFY_FAILED in every run
+    # for two weeks because of it. Declared rather than assumed-present now
+    # that the fetch path reads it.
+    "certifi>=2025.1.31",
     # Browser tier (beisen.py) drives headless Chromium. The Python package is
     # light; the Chromium binary is installed separately (`playwright install
     # chromium`, done in the Dockerfile). The connector imports it lazily and

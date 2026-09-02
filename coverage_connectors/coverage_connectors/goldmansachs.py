@@ -28,7 +28,7 @@ import json
 import re
 import urllib.error
 
-from .http import fetch_json
+from .http import fetch_json, unreadable
 from .models import FetchResult, GoldmanSachsBoard, Opportunity, VerificationResult
 
 name = "goldmansachs"
@@ -110,7 +110,26 @@ def fetch(board: GoldmanSachsBoard) -> FetchResult:
             rs = _post(page)
         except Exception as e:  # noqa: BLE001
             return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
+        # higher.gs.com's GraphQL layer answers a rejected or renamed query
+        # with a 200 and a body carrying no `items` at all. This is Goldman's
+        # entire campus board — one board, one firm — so a clean zero here
+        # empties the firm.
+        if "items" not in rs:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"higher.gs.com answered 200 with no 'items' key "
+                    f"(got {sorted(rs)[:6]})"),
+            )
         batch = rs.get("items", [])
+        stated_total = rs.get("totalCount")
+        if not batch and page == 0 and isinstance(stated_total, int) and stated_total > 0:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"higher.gs.com reported totalCount={stated_total} and "
+                    f"returned 0 items"),
+            )
         for it in batch:
             rid = it.get("roleId") or ""
             if not rid or rid in seen:
@@ -133,7 +152,8 @@ def fetch(board: GoldmanSachsBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities,
-                       raw_count=len(items), truncated=truncated)
+                       raw_count=len(items), truncated=truncated,
+                       empty_state=not opportunities and total == 0)
 
 
 def classify_url(url: str) -> dict | None:

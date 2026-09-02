@@ -47,11 +47,13 @@ from datetime import date
 from typing import Iterable
 
 from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 from django.utils.text import slugify
 
 from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpportunity, fetch_many
 
+from .boards import board_key
 from .classify import (
     board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title,
     derive_class_year, extract_class_year, extract_cohort,
@@ -540,6 +542,16 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
         "changes_recorded": 0,
         "providers": set(), "firms_touched": set(), "created_firms": [],
         "errors": [],
+        # ONE LINE PER BOARD, not per (firm, provider). Everything else in
+        # this dict — and every key `health` used to read — collapses a
+        # firm's several boards into one row, which is how two brand-new
+        # tal.net campus boards could fetch zero every night behind a
+        # producing Workday board and appear nowhere at all. Closed-detection
+        # stays per-pair below (it must: absence is only absence when every
+        # board of the pair agrees), but REPORTING is now per board.
+        # `health.board_health()` reads this; a run recorded before it
+        # existed has no such key and that reader falls back.
+        "boards": [],
     }
     # Accumulated unsaved OpportunityChange rows; one bulk_create at the end.
     changes: list[OpportunityChange] = []
@@ -563,6 +575,15 @@ def ingest_results(results: Iterable[FetchResult], *, mark_closed: bool = True) 
         pair_all_ok.setdefault(pair, True)
         pair_truncated.setdefault(pair, False)
         seen_by_pair.setdefault(pair, set())
+
+        stats["boards"].append({
+            "firm": board.firm, "slug": firm.slug, "provider": source,
+            "board": board_key(board), "ok": bool(result.ok),
+            "rows": len(result.opportunities),
+            "empty_state": bool(getattr(result, "empty_state", False)),
+            "truncated": bool(getattr(result, "truncated", False)),
+            "error": result.error or "",
+        })
 
         if not result.ok:
             stats["boards_failed"] += 1
@@ -697,6 +718,68 @@ def _derive_label(boards: list[BoardConfig]) -> str:
     return providers[0] if len(providers) == 1 else "mixed:" + ",".join(providers)
 
 
+def _banked_open_rows(boards: list[BoardConfig]) -> dict[tuple[str, str], int]:
+    """`(board.firm, provider) -> open rows we currently hold`, for the
+    connector layer's zero-rows guard.
+
+    THE FACT THE CONNECTORS CANNOT HAVE. Greenhouse answers a token a firm
+    has moved off with `200 {"jobs":[]}` — the same bytes a genuinely quiet
+    board sends. Nothing on the wire separates them, so the only thing that
+    can is what we already hold, and the connector package deliberately keeps
+    no state. This hands it over for the length of one fetch.
+
+    OPEN rows, not every row ever: the flag's purpose is to stop
+    closed-detection wiping live postings off a fetch that read nothing, and
+    a board whose season has legitimately ended has nothing left to protect.
+    A board that produced in the past and holds nothing open now is a
+    visibility question, and `health.board_health()` reports it as one
+    instead of failing the fetch every night forever.
+
+    ONLY WHERE THE COUNT IS ATTRIBUTABLE. Opportunity rows record `source`
+    (a provider name), not which of a firm's boards on that provider produced
+    them, so for a pair with two boards the count belongs to neither. Thirteen
+    catalog slugs are in that position — Solomon Partners runs a Greenhouse
+    "studentsgraduates" board AND a "professionals" one, and lending the
+    students' rows to the professionals board would fail it every night for
+    being seasonally empty. A pair with more than one board in this run is
+    left out, and its boards fall back to their own connector's shape checks,
+    which are the ones that do not need history.
+
+    Firms are matched on the exact `Firm.name` the board carries, which is
+    the name `scrape` stamped onto it from the seeded row moments earlier.
+    A board whose firm has not been seeded contributes nothing and its guard
+    stays inert — silence, not a zero that would read as history.
+    """
+    if not boards:
+        return {}
+    pair_boards: dict[tuple[str, str], int] = {}
+    for b in boards:
+        pair_boards[(b.firm, b.provider)] = pair_boards.get((b.firm, b.provider), 0) + 1
+    names = {b.firm for b in boards}
+    firm_ids = dict(
+        Firm.objects.filter(name__in=names).values_list("name", "id")
+    )
+    lowered = {name.lower(): fid for name, fid in firm_ids.items()}
+    sources = {b.provider for b in boards}
+    counts = (
+        Opportunity.objects.exclude(status="closed")
+        .filter(firm_id__in=set(lowered.values()), source__in=sources)
+        .values_list("firm_id", "source")
+        .annotate(n=Count("id"))
+    )
+    by_firm_source = {(fid, src): n for fid, src, n in counts}
+    out: dict[tuple[str, str], int] = {}
+    for board in boards:
+        pair = (board.firm, board.provider)
+        if pair_boards[pair] > 1:
+            continue  # not attributable to one board — see the docstring
+        fid = lowered.get(board.firm.lower())
+        if fid is None:
+            continue
+        out[pair] = by_firm_source.get((fid, board.provider), 0)
+    return out
+
+
 def ingest_boards(
     boards: list[BoardConfig], *, label: str | None = None, mark_closed: bool = True
 ) -> ScrapeRun:
@@ -712,7 +795,8 @@ def ingest_boards(
         connector=label or _derive_label(boards), started=started, status="running"
     )
     try:
-        results = fetch_many(boards) if boards else []
+        results = (fetch_many(boards, banked_rows=_banked_open_rows(boards))
+                   if boards else [])
         stats = ingest_results(results, mark_closed=mark_closed)
     except Exception as exc:  # noqa: BLE001 — a hard failure still gets an honest run record
         run.finished = timezone.now()

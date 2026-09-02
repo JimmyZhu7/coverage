@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import urllib.parse
 
-from .http import fetch_json
+from .http import fetch_json, unreadable
 from .models import FetchResult, McKinseyBoard, Opportunity, VerificationResult
 
 name = "mckinsey"
@@ -84,6 +84,7 @@ def fetch(board: McKinseyBoard) -> FetchResult:
     closed-detection close live rows)."""
     seen: set[str] = set()
     docs: list[dict] = []
+    every_keyword_said_zero = True
     for kw in board.keywords or ("",):
         start = 1
         while True:
@@ -97,7 +98,27 @@ def fetch(board: McKinseyBoard) -> FetchResult:
             # missing — `for doc in None` would raise an uncaught TypeError
             # out here (outside the network try above) and kill the whole
             # board's fetch. Same root cause as `verify`'s envelope guard.
+            # `docs` present-but-null is a legitimate zero-hit page (see
+            # above). `docs` ABSENT is a different envelope entirely — the
+            # gateway's error body, or a shape change — and folding it into
+            # the same empty list is how a whole board reads as closed.
+            if "docs" not in data:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"mckinsey gateway answered 200 with no 'docs' key "
+                        f"(got {sorted(data)[:6]})"),
+                )
             batch = data.get("docs") or []
+            stated_total = data.get("numFound")
+            if not batch and start == 1 and isinstance(stated_total, int) and stated_total > 0:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"mckinsey reported numFound={stated_total} and returned "
+                        f"0 docs"),
+                )
+            every_keyword_said_zero = every_keyword_said_zero and not batch and stated_total == 0
             for doc in batch:
                 jid = str(doc.get("jobID") or "")
                 if not jid or jid in seen:
@@ -115,7 +136,9 @@ def fetch(board: McKinseyBoard) -> FetchResult:
         opportunities = [o for o in (_normalize(d, board) for d in docs) if o.url]
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(docs))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(docs),
+                       empty_state=not opportunities and every_keyword_said_zero)
 
 
 def classify_url(url: str) -> dict | None:

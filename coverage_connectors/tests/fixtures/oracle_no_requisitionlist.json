@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "SearchId": null,
+      "Keyword": "internship",
+      "TotalJobsCount": 0,
+      "Limit": 25,
+      "Offset": 0,
+      "links": []
+    }
+  ],
+  "count": 1,
+  "hasMore": false,
+  "limit": 25,
+  "offset": 0,
+  "links": []
+}

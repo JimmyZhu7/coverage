@@ -82,9 +82,41 @@ silent until then: the stored date was gone the instant the fresh one was
 assigned, so nothing downstream could tell a student tracking that role
 that its deadline had moved at all.
 
-Volume: capped at --limit rows per run (default 200), oldest first, fetched
-through a small thread pool — the same politeness posture as fetch_many.
-Each run is recorded in scrape_runs (connector="reverify").
+CANDIDATE ORDER, and why it is not simply "oldest first" any more.
+
+The cutoff decides WHICH rows are eligible; the order decides which of them a
+200-row run actually reaches, and the pool is 14,227 rows deep. Ordering by
+`deadline_checked_at` alone spends the budget in arrival order, and arrival
+order is overwhelmingly `other`: 13,306 of the 16,029 open rows are
+experienced-hire postings nobody on this product will ever apply to, against
+2,723 campus rows. Measured 2026-09-01 against the live board, the first run
+under the old order reached 23 campus rows out of 200 and 1 dated row out of
+200, and a campus row's deep check recurred roughly every 18-36 days — on the
+only rows whose deadline a student is racing. Under the new order the same
+first run reaches 200 campus rows out of 200, every one of them dated, and
+the campus backlog drains in 12 runs.
+
+So the same candidates, in a different order:
+
+  1. campus bucket first (`classify.TARGET_BUCKETS` — insight, internship,
+     entry_level). This is the product's entire subject; everything else is
+     inventory.
+  2. then rows with a deadline, nearest first. A row closing on Friday is
+     worth re-checking before one closing in March, and both are worth more
+     than one with no date at all.
+  3. then by `last_verified` age, oldest first, nulls first — which is what
+     the previous order was reaching for, kept as the tie-break it should
+     always have been.
+
+The BUDGET is unchanged: same `--limit`, same cutoff, same request volume,
+same politeness. Only the order changed. Nothing is starved by this that was
+not already being starved — `other` rows keep whatever the campus rows do not
+use, and once the campus set is fresh (it drains in about a week at the
+current cadence) the run flows straight back into the rest.
+
+Volume: capped at --limit rows per run (default 200), fetched through a small
+thread pool — the same politeness posture as fetch_many. Each run is recorded
+in scrape_runs (connector="reverify").
 
 `--ids` is a targeted backfill for rows a specific audit already named —
 mirrors `enrich_postings --ids` exactly, and exists for the same reason:
@@ -103,11 +135,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand
-from django.db.models import F, Q
+from django.db.models import Case, F, IntegerField, Q, Value, When
 from django.utils import timezone
 
 from coverage_connectors import verify
 
+from directory.classify import TARGET_BUCKETS
 from directory.models import Opportunity, OpportunityChange, ScrapeRun
 
 
@@ -199,7 +232,28 @@ class Command(BaseCommand):
             candidates = list(
                 Opportunity.objects.filter(status="open")
                 .filter(Q(deadline_checked_at__isnull=True) | Q(deadline_checked_at__lt=cutoff))
-                .order_by(F("deadline_checked_at").asc(nulls_first=True))[: opts["limit"]]
+                .annotate(
+                    # 0 for a campus row, 1 for everything else. Annotated
+                    # rather than run as two queries so the `--limit` slice
+                    # still happens in the database, on one pass.
+                    _campus_first=Case(
+                        When(bucket__in=TARGET_BUCKETS, then=Value(0)),
+                        default=Value(1),
+                        output_field=IntegerField(),
+                    ),
+                )
+                .order_by(
+                    "_campus_first",
+                    # Dated rows before undated, nearest deadline first. A
+                    # posting closing this week is the one whose liveness a
+                    # student is about to act on.
+                    F("deadline").asc(nulls_last=True),
+                    # The old primary key, kept as the tie-break: within one
+                    # bucket and one deadline, the least recently confirmed
+                    # row goes first.
+                    F("last_verified").asc(nulls_first=True),
+                    "id",
+                )[: opts["limit"]]
             )
         if not candidates:
             self.stdout.write("Nothing stale enough to re-check.")

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!--
+  An iCIMS portal serving its job list under a card layout this connector's
+  `_ANCHOR_RE` cannot read: the anchor no longer carries `class="iCIMS_Anchor"`
+  and the canonical `/jobs/<id>/<slug>/job` href has moved onto a wrapping
+  element. Two real postings are on this page. The old parser returned zero
+  rows and `ok=True`, which is the Jefferies tal.net failure on a different
+  platform.
+-->
+<html lang="en">
+<body>
+<div class="iCIMS_JobsTable">
+  <div class="iCIMS_JobCardItem" data-job-id="10966">
+    <a href="https://careers-sig.icims.com/jobs/10966/accounting-internship-summer-2027/job">
+      <h3>10966 - Accounting Internship: Summer 2027</h3>
+    </a>
+  </div>
+  <div class="iCIMS_JobCardItem" data-job-id="10974">
+    <a href="https://careers-sig.icims.com/jobs/10974/quantitative-trader-intern/job">
+      <h3>10974 - Quantitative Trader Intern</h3>
+    </a>
+  </div>
+</div>
+</body>
+</html>

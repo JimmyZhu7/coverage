@@ -47,9 +47,11 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
+from dataclasses import replace
+from typing import Callable, Mapping
 
 from . import avature, beisen, eightfold, goldmansachs, greenhouse, icims, lever, lumesse, mckinsey, oracle, phenom, sitemap, socgen, successfactors, talentgateway, talentsoft, talnet, workday
+from .http import unreadable
 from .models import (
     BoardConfig,
     AvatureBoard,
@@ -98,6 +100,7 @@ __all__ = [
     "fetch",
     "fetch_many",
     "verify",
+    "zero_rows_guard",
 ]
 
 # Provider name -> connector module. A future connector (Oracle, tal.net, …)
@@ -125,12 +128,53 @@ CONNECTORS: dict[str, Connector] = {
 }
 
 
-def fetch(board: BoardConfig) -> FetchResult:
-    """Fetch one board, dispatching on `board.provider`."""
+def zero_rows_guard(result: FetchResult, banked_rows: int) -> FetchResult:
+    """Turn "read cleanly, returned nothing, and used to hold rows" into a
+    board-level failure.
+
+    THE CASE THIS EXISTS FOR. Greenhouse answers a live board token that a
+    firm has moved off with `HTTP 200 {"jobs":[],"meta":{"total":0}}` — the
+    byte-for-byte same response a board that genuinely has no openings sends
+    (observed on `optiver`, 2026-09-01). A dead token 404s and is caught
+    already; a VACATED one is invisible. Sixth Street's token started 404ing
+    two runs ago holding 20 open rows and nothing said so, and Marshall
+    Wace's board has answered `{"jobs":[]}` since August with no error, no
+    guard and no health line. On the wire there is nothing to key on, so the
+    guard has to key on history instead, and history is the one thing this
+    package deliberately does not keep — hence a caller-supplied count.
+
+    `banked_rows` is how many rows the caller currently holds OPEN for this
+    board's (firm, provider). Open, not ever-seen: this flag's job is to stop
+    `ingest` closing live rows off a fetch that read nothing, and a board
+    whose whole season has legitimately closed out has nothing left to
+    protect. A board that produced in the past and holds nothing open now is
+    a visibility problem, not a false-close risk, and `health.board_health()`
+    reports it as its own line rather than failing the fetch.
+
+    Never fires on a board that positively said it is empty (`empty_state`),
+    which is exactly the case the message would be wrong about.
+    """
+    if not result.ok or result.opportunities or result.empty_state or banked_rows <= 0:
+        return result
+    return replace(
+        result, ok=False,
+        error=unreadable(
+            f"zero rows from a board that held {banked_rows} — "
+            f"token vacated or renamed?"
+        ),
+    )
+
+
+def fetch(board: BoardConfig, *, banked_rows: int = 0) -> FetchResult:
+    """Fetch one board, dispatching on `board.provider`.
+
+    `banked_rows` is optional context from the caller (see
+    `zero_rows_guard`); at its default of 0 the guard cannot fire and
+    behaviour is exactly the connector's own."""
     connector = CONNECTORS.get(board.provider)
     if connector is None:
         raise ValueError(f"no connector registered for provider {board.provider!r}")
-    return connector.fetch(board)
+    return zero_rows_guard(connector.fetch(board), banked_rows)
 
 
 # Error text that marks a fetch worth retrying: the failure is about the
@@ -151,8 +195,8 @@ def _is_transient(error: str | None) -> bool:
 
 
 def fetch_with_retry(
-    board: BoardConfig, *, retries: int = 1, backoff_s: float = 3.0,
-    _sleep: Callable[[float], None] = time.sleep,
+    board: BoardConfig, *, banked_rows: int = 0, retries: int = 1,
+    backoff_s: float = 3.0, _sleep: Callable[[float], None] = time.sleep,
 ) -> FetchResult:
     """`fetch`, retried once on a transient network failure.
 
@@ -161,26 +205,45 @@ def fetch_with_retry(
     retrying it would just double the load and delay the honest error.
     `_sleep` is injectable for tests; the backoff grows linearly because two
     attempts is the ceiling — this is a courtesy retry, not a retry loop.
+
+    The zero-rows guard's failure is deliberately NOT transient: a vacated
+    token answers `{"jobs":[]}` just as promptly on the second attempt.
     """
-    result = fetch(board)
+    result = fetch(board, banked_rows=banked_rows)
     attempt = 0
     while not result.ok and _is_transient(result.error) and attempt < retries:
         attempt += 1
         _sleep(backoff_s * attempt)
-        result = fetch(board)
+        result = fetch(board, banked_rows=banked_rows)
     return result
 
 
-def fetch_many(boards: list[BoardConfig], *, max_workers: int = 8) -> list[FetchResult]:
+def fetch_many(
+    boards: list[BoardConfig], *, max_workers: int = 8,
+    banked_rows: Mapping[tuple[str, str], int] | None = None,
+) -> list[FetchResult]:
     """Fetch every board concurrently (ported from `sources.py`'s
     `ats_candidates()`, which ran its ~37 boards through a
     `ThreadPoolExecutor(max_workers=8)` rather than 15s-timeout-each in
     strict sequence). `pool.map` preserves input order in its results, so
     the returned list lines up with `boards` even though the fetches
     themselves run out of order. Each fetch carries the one-shot transient
-    retry — see `fetch_with_retry`."""
+    retry — see `fetch_with_retry`.
+
+    `banked_rows` maps `(firm name, provider)` to the count of rows the
+    caller holds open for that pair, and is what lets `zero_rows_guard` tell
+    a vacated board from a quiet one. Omitted, every board is fetched with
+    no history and the guard cannot fire — the behaviour every caller had
+    before this argument existed."""
+    counts = banked_rows or {}
+
+    def _one(board: BoardConfig) -> FetchResult:
+        return fetch_with_retry(
+            board, banked_rows=counts.get((board.firm, board.provider), 0)
+        )
+
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        return list(pool.map(fetch_with_retry, boards))
+        return list(pool.map(_one, boards))
 
 
 def verify(url: str) -> VerificationResult:

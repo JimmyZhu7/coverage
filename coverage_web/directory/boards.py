@@ -693,6 +693,149 @@ DEFAULT_TRACKS: dict[str, list[str]] = {
 }
 
 
+# The field(s) that IDENTIFY one board inside its provider — every connector's
+# own docstring names them, gathered here because two readers now need them:
+# `ingest` stamping a per-board line into `ScrapeRun`, and `health` printing a
+# per-board table.
+#
+# WHY A PER-BOARD IDENTITY IS NEEDED AT ALL. The catalog holds 127 boards
+# under 110 slugs: 13 firms run more than one. `ingest`'s own bookkeeping is
+# keyed on `(firm, provider)` — correct for closed-detection, which must union
+# every board a firm has on a provider before concluding a posting is gone —
+# but as the ONLY key it makes a second board invisible. Moelis and Perella
+# Weinberg each gained two tal.net campus boards on 2026-09-01; both firms
+# already had a producing Workday board, so both new boards could fetch zero
+# every night and never appear anywhere. Marshall Wace's Greenhouse board has
+# answered `{"jobs":[]}` since August with the same silence.
+#
+# Per provider rather than a generic sweep of field names, because "what makes
+# two boards different" is not the same question per platform and a generic
+# answer got it wrong: Accenture registers the SAME Workday tenant and site
+# twice under different `search_text` ("internship" and "early careers"), so
+# `search_text` is part of a Workday board's identity while `domain` — the
+# same `myworkdayjobs.com` on all but a handful — is noise. A provider whose
+# board is firm-wide with nothing to vary lists no fields and keys on its own
+# name. `test_board_health.py` pins that every catalog key is unique.
+_BOARD_IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
+    "greenhouse": ("token",),
+    "lever": ("org",),
+    "workday": ("tenant_host", "site", "search_text"),
+    "oracle": ("host", "site_number"),
+    "talnet": ("board_url",),
+    "sitemap": ("sitemap_url",),
+    "mckinsey": ("keywords",),
+    "phenom": ("host", "keywords"),
+    "goldmansachs": (),
+    "talentgateway": ("partner_id", "site_id"),
+    "eightfold": ("host", "domain"),
+    "beisen": ("host", "pages"),
+    "avature": ("feed_url",),
+    "lumesse": ("host", "tech_id"),
+    "icims": ("tenant",),
+    "socgen": (),
+    "talentsoft": ("list_url",),
+    "successfactors": ("origin", "keywords"),
+}
+
+
+def _shorten(value: str) -> str:
+    """A URL-shaped identifier rendered as `host/…/last/three/segments`.
+
+    tal.net board URLs run past 110 characters, most of it a fixed
+    `/vx/lang-en-GB/mobile-0/appcentre-ext/brand-4/xf-…/candidate/jobboard/`
+    prefix that is identical between a firm's two boards; the part that
+    actually distinguishes them is the tail (`vacancy/1/adv` against
+    `vacancy/2/adv`). A key nobody can read is a key nobody uses, and
+    `test_board_health.py` pins that every catalog key is still unique
+    after this.
+    """
+    if "://" not in value:
+        return value
+    rest = value.split("://", 1)[1].rstrip("/")
+    host, _, path = rest.partition("/")
+    if not path:
+        return host
+    segments = [s for s in path.split("/") if s]
+    if len(segments) <= 3:
+        return f"{host}/{'/'.join(segments)}"
+    return f"{host}/…/{'/'.join(segments[-3:])}"
+
+
+def board_key(board: BoardConfig) -> str:
+    """A short, stable identifier for ONE board — what a human would type to
+    say which of a firm's boards they mean.
+
+    Deliberately built from the config's own identifying fields rather than
+    from a URL the connector happens to construct: the fields are what the
+    catalog states and what an operator would edit, and several connectors
+    build more than one URL per fetch. Two boards of the same provider for
+    the same firm always differ in at least one of these (they would not be
+    two boards otherwise), so the key separates them; a provider with a
+    single firm-wide board and nothing to vary (`socgen`, `goldmansachs`)
+    honestly reports its provider name and nothing more.
+
+    An unregistered provider falls back to a sweep of every identifying
+    field any provider uses — worse to read, never wrong, and it means a new
+    connector reports something sensible before anyone remembers to add it
+    above.
+    """
+    provider = getattr(board, "provider", "")
+    fields = _BOARD_IDENTITY_FIELDS.get(
+        provider,
+        tuple(dict.fromkeys(f for fs in _BOARD_IDENTITY_FIELDS.values() for f in fs)),
+    )
+    parts = []
+    for field in fields:
+        value = getattr(board, field, None)
+        if value in (None, "", (), []):
+            continue
+        if isinstance(value, (tuple, list)):
+            value = ",".join(str(v) for v in value)
+        parts.append(_shorten(str(value)))
+    return " ".join(parts) if parts else (provider or "?")
+
+
+# Catalog firms whose registered board(s) are the EXPERIENCED-HIRE site, with
+# the campus programme on a site Coverage does not query. Slug -> the board
+# that is registered, so the health line can say what is there instead.
+#
+# Measured on the live board 2026-09-01: each of these firms' connectors is
+# working and producing rows — 689 between them — and not one row has ever
+# classified into a campus bucket. That is not a firm with no students; it is
+# the wrong board, and until tonight nothing on the firm page, in the Picked
+# column or in the health report said so. `research-ats-lifecycle.md` Q6 is
+# the mechanism: on Workday a tenant has many Job Posting Sites and a
+# recruiter chooses which requisitions go to each, so "the firm's board" is
+# never a single thing.
+#
+# NOT A GUESS, AND NOT A PERMANENT VERDICT. Nothing is added here without a
+# measured zero, and `health.firms_without_campus_board()` re-checks the DB
+# every run: the moment one of these firms produces a campus row it drops off
+# the report on its own, with no edit here.
+#
+# Moelis and Perella Weinberg belong to the same audit finding and are
+# deliberately NOT on this list. Both had tal.net student boards registered
+# on 2026-09-01 (PWP board 2 carries the 2027 Private Funds Advisory Analyst;
+# Moelis board 2 the 2027 London Summer Analyst), so the statement this
+# marker makes — "no campus board is registered for this firm" — is no longer
+# true of them. Their boards returning zero today is a different fact, and
+# the per-board table is where it belongs. The distinction matters: one says
+# nobody has found the students' board, the other says we are watching it.
+#
+# The bar for adding a firm is the same one the catalog uses everywhere:
+# a measured zero AND a look for the campus board that did not find one.
+# "It produces no campus rows" alone is not enough — that is the symptom,
+# and 100-odd catalog firms share it for ordinary seasonal reasons.
+NO_CAMPUS_BOARD: dict[str, str] = {
+    "ares": "Workday 'External' — an experienced-hire site (Executive Assistant, Vice President …)",
+    "oaktree": "Workday experienced-hire site",
+    "fidelityintl": "Workday '001' — an experienced-hire site (Senior Data Engineer …)",
+    "blueowl": "Workday experienced-hire site",
+    "stanchart": "Workday 'SCB_Careers' — the firm-wide experienced site",
+    "bain": "Avature careers.bain.com feed — consultant hiring (Project Leader …)",
+}
+
+
 def select_boards(
     *, provider: str | None = None, firm_slug: str | None = None, limit: int | None = None
 ) -> list[tuple[str, BoardConfig]]:
