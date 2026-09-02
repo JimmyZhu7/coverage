@@ -261,7 +261,7 @@ lives inside Settings, which is why `/capture/` lights the Settings tab.
 ## 6. Voice & microcopy rules
 
 1. **Title Case for names.** Page titles, section headings, named surfaces and
-   the primary action on a page are Title Case: "Add Contact", "Coverage Gaps",
+   the primary action on a page are Title Case: "Add Contact", "Covered Firms",
    "Welcome Back", "Build My Queue", "Log Touch", "Upload & Import",
    "Permanently Delete My Account".
 

@@ -155,7 +155,14 @@ def test_the_labels_the_case_decision_named_still_ship():
     named files, so this cannot fire on data or on a heading whose shape it
     had to guess."""
     named = {
-        "crm/contact_list.html": ["Add Contact", "Coverage Gaps", "Log Touch"],
+        # "Coverage Gaps" and the ledger's own "Add Contact" buttons went with
+        # the gaps widget on 2026-09-02, at the founder's request: the gap
+        # state is a CG chip on the firm card now. "Add Contact" still ships
+        # on this page, but as `_pagehead.html`'s `action_label`, so it is no
+        # longer a literal between two tags and cannot be read the way the
+        # rest of this list is. "Covered Firms" replaces both: same page, same
+        # Title Case rule, still a literal.
+        "crm/contact_list.html": ["Covered Firms", "Log Touch"],
         "account/login.html": ["Welcome Back"],
         "core/home.html": ["Build My Queue"],
         "accounts/import.html": ["Upload &amp; Import"],
