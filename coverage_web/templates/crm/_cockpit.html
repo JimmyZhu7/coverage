@@ -484,20 +484,52 @@ copy exactly once, and this is the once.
         <div class="act-grid">
           {% for p in proposals %}
             <article class="act-card kin-reveal act-proposal panel panel--edge" style="--i:{{ forloop.counter0 }}">
+              {% comment %}
+              THE IDENTITY BLOCK, REBUILT 2026-09-02 (founder on his own
+              screenshot of one Centerview proposal: "taking up too much
+              space, reorganize within, ensure visual harmoniousness"). Two
+              lines instead of five, and every fact still on the card.
+
+              THE EYEBROW CARRIES THE VERDICT. "Not in your network" used to
+              open a THIRD zone half a card away from the firm it is about,
+              which is why the card had four blocks that lined up on nothing.
+              It is one short phrase about this person; it rides the firm line
+              it belongs to, and the referral / recruiting chips ride with it.
+
+              ONE PILL, NOT TWO. The card used to carry a "new" warmth chip
+              beside the name AND "Not in your network" below it. They are the
+              same fact twice: a proposal is by definition somebody the CRM has
+              never held, and nothing on this page can be a proposal and not be
+              new. The warmth chip went. The verdict stayed, because it is the
+              one of the two the student acts on — it is what Add changes, and
+              it is the sentence the scan actually computed. (Same reasoning as
+              `.act-draft` in the stylesheet: a badge that renders on every card
+              in the lane, every time, is furniture, not information.)
+
+              THE EMAIL NO LONGER LOSES A COIN TOSS. `role_hint` used to
+              DISPLACE the address in this slot, so the one fact that
+              identifies a human being uniquely disappeared on exactly the
+              cards that knew the most about them — while the role rendered
+              twice, because it is also pre-filled into the Role input below.
+              The address now sits beside the name, always, and the role hint
+              lives only where it can be edited.
+              {% endcomment %}
+              <div class="act-who">
               <div class="act-ident">
                 <div class="act-idtext">
-                  <span class="opp-firm">{% if p.firm %}{{ p.firm.name|smart_title }}{% else %}{{ p.email|slice:"-254:" }}{% endif %}</span>
-                  <h3 class="act-name">{{ p.name|smart_person_name|smart_title }}</h3>
-                  {% if p.role_hint %}<p class="act-role">{{ p.role_hint|smart_title }}</p>{% elif p.firm %}<p class="act-role">{{ p.email }}</p>{% endif %}
+                  <div class="act-eyebrow">
+                    <span class="opp-firm">{% if p.firm %}{{ p.firm.name|smart_title }}{% else %}{{ p.email|slice:"-254:" }}{% endif %}</span>
+                    <span class="prio prio-proposal">Not in your network</span>
+                    {% if p.evidence_kind == "referral" %}<span class="prio">Referral</span>{% endif %}
+                    {% if p.recruiting_hint %}<span class="prio">Recruiting contact</span>{% endif %}
+                  </div>
+                  <div class="act-wholine">
+                    <h3 class="act-name">{{ p.name|smart_person_name|smart_title }}</h3>
+                    {% if p.firm %}<span class="act-mail">{{ p.email }}</span>{% endif %}
+                  </div>
                 </div>
-                <span class="chip warmth-cold">new</span>
               </div>
               <div class="act-context">
-                <div class="act-badges">
-                  <span class="prio prio-proposal">Not in your network</span>
-                  {% if p.evidence_kind == "referral" %}<span class="prio">Referral</span>{% endif %}
-                  {% if p.recruiting_hint %}<span class="prio">Recruiting contact</span>{% endif %}
-                </div>
                 {% comment %}
                 WHAT THEY REPLIED TO — one line, and the one that decides the
                 tap. A reply to a club mail merge and a reply to real
@@ -560,7 +592,8 @@ copy exactly once, and this is the once.
                 {% if p.autopilot_quote %}
                   <p class="act-reason act-replied">Autopilot left this one for you: <span class="act-replied-subj">&ldquo;{{ p.autopilot_quote }}&rdquo;</span></p>
                 {% endif %}
-              </div>
+                </div>
+              </div>{# /act-who #}
               {% comment %}
               COMPLETE THE CARD. The two facts the ask can carry, at the one
               moment somebody is looking at the evidence for this person.
@@ -581,7 +614,18 @@ copy exactly once, and this is the once.
               `hx-include` on the Add button, not a <form>: the card lives
               inside the cockpit's own swap target and a nested form would
               submit on Enter to nowhere.
+
+              WHERE THESE TWO SIT, 2026-09-02. They used to render in the far
+              right column while Add rendered in the far LEFT one, under the
+              name — the two blanks the student fills were as far as the card
+              could put them from the tap that commits them, and Add read as
+              belonging to the identity block rather than to the form. They are
+              now one block, `.act-ask`: the blanks, then the tap that sends
+              them, in that reading order. The markup order across the whole
+              card is unchanged and is also the reading order: identity,
+              evidence, blanks, buttons.
               {% endcomment %}
+              <div class="act-ask">
               <div class="act-fill" id="prop-fill-{{ p.id }}">
                 <label class="act-fill-lab" for="prop-role-{{ p.id }}">Role</label>
                 <input class="act-fill-in" type="text" id="prop-role-{{ p.id }}"
@@ -609,7 +653,8 @@ copy exactly once, and this is the once.
                           hx-post="{% url 'crm:proposal_act' p.id 'dismiss' %}"
                           title="No scan will propose this person again. Undo right after, or restore from Settings.">Dismiss</button>
                 </div>
-              </div>
+                </div>
+              </div>{# /act-ask #}
             </article>
           {% endfor %}
         </div>
