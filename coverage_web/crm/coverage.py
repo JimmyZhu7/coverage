@@ -5,6 +5,13 @@ The product is called Coverage; the Network board should answer "where am I
 actually covered?" without the user having to read 69 firm cards and do the
 arithmetic in their head. That is what `rank_gaps` below is for.
 
+It used to answer it in a strip of its own at the top of the board, which
+ranked every tiered firm and drew the worst six. That strip is gone
+(2026-09-02, the founder's call). The ranking is not: it now decides which
+firm cards wear a "CG" tag, on the board the reader was already looking at,
+under the bar `CG_EXPOSURE_MIN` sets and defends below. Same formula, same
+numbers, one fewer place to look.
+
 This module is PURE, in the same sense as `coverage_domain.cadence`: it
 reads no database and no wall clock. The web layer fetches the rows (already
 tenant-scoped), flattens them into the plain dicts described on `rank_gaps`,
@@ -48,7 +55,7 @@ DEFAULT_ADVOCATE_TARGET = 2
 #    would take to close them: finding a name at a firm where you know
 #    nobody is a bigger lift than warming a name you already have, which is
 #    a bigger lift than converting a chat into an advocate. A firm at or
-#    above the advocate target scores 0 and is not a gap — the strip is not
+#    above the advocate target scores 0 and is not a gap — the board is not
 #    allowed to nag about firms that are done.
 #
 # 3. deadline_bonus — urgency, ADDED not multiplied, and only for a
@@ -62,7 +69,12 @@ DEFAULT_ADVOCATE_TARGET = 2
 #    intended reading: you cannot fix a firm you have no way into once its
 #    deadline lands.
 #
-# Ties break on (tier, firm name) so the strip is stable render to render.
+# Ties break on five keys, not two. This line used to say "(tier, firm
+# name)" and was already false when `open` was added as a tiebreak and
+# `firm_id` as the total-order backstop; `rank_gaps`' own sort documents all
+# five and this header had not caught up. Order: exposure descending, then
+# tier ascending, then open roles descending, then name, then firm id. Only
+# the last is unique, and it is what makes the order total.
 TIER_WEIGHT: dict[int, int] = {1: 3, 2: 2, 3: 1}
 
 NO_CONTACTS = "no_contacts"
@@ -138,10 +150,13 @@ WARM = frozenset({"replied", "chatted", "advocate"})
 #    networking gap to close at a firm that hires off a test, and a strip
 #    that ranked Jane Street "No contacts · exp 12" was asking the student
 #    to do the one thing the firm says does nothing. What survives is the
-#    deadline term: a confirmed close still puts the firm on the strip, for
-#    the deadline alone, and the card's verb is "Apply" rather than "Add"
-#    with the reason beside it. No confirmed close, no card — the strip has
-#    nothing honest to ask.
+#    deadline term: a confirmed close still makes the firm a gap, for the
+#    deadline alone, and `verb` reads "Apply" rather than "Add" with the
+#    reason beside it. No confirmed close, no gap row at all — there is
+#    nothing honest to ask. `verb` and `verb_reason` render nowhere since
+#    the strip came off (2026-09-02); they stay because they are what the
+#    formula CONCLUDED about the firm, and the conclusion is the same
+#    whether or not a surface is printing it.
 OFF_TRACK = "off_track"
 GAP_LABELS[OFF_TRACK] = "Not on your tracks"
 
@@ -165,6 +180,80 @@ ASSESSMENT_REASON = "They hire off their test, not off a chat."
 # summary prints beside the count, so a student with 0 of 2 at every one of
 # 54 firms reads one number and one range instead of 54 identical tooltips.
 ADVOCATE_RANGE: tuple[int, int] = (2, 20)
+
+# ---------------------------------------------------------------------------
+# THE "CG" BAR (2026-09-02): which firms wear the tag on their own card.
+# ---------------------------------------------------------------------------
+#
+# The Coverage Gaps strip is gone. It ranked every tiered firm and drew the
+# worst SIX, so the cap did the deciding and no threshold was ever needed. A
+# per-card tag has no cap, so the threshold is the whole design, and picking
+# it wrong makes the tag useless in one of two directions.
+#
+# Measured 2026-09-02, read-only, by rendering the Network page at each
+# candidate bar and counting the CARDS THAT WOULD WEAR THE TAG. Off the
+# rendered board and not off a raw query, because the view drops archived,
+# parked, campaign-hidden and non-recruitment people before it counts a
+# firm's warmths: Société Générale is `all_cold` in a bare
+# `Contact.objects.for_user` and `no_contacts` on the board, which is a
+# whole gap-ladder rung and moves it across this bar. The reader sees the
+# board, so the board is what the bar is measured against.
+#
+#     bar                 founder (54 cards)   demo (23 cards)
+#     any gap at all       54    100%           21     91%
+#     exposure >= 4        44     81%           20     86%
+#     exposure >= 6        28     51%           18     78%
+#     exposure >= 8        11     20%            6     26%
+#     exposure >= 9         7     13%            6     26%
+#     exposure >= 12        1      2%            6     26%
+#
+# "Any gap at all" tags every card on his board, because he has zero
+# advocates anywhere, so having a gap is his DEFAULT state and a tag on the
+# default state is furniture. Every bar below 8 still tags half the board or
+# more. 12 is the top of the scale and tags one card out of 54 on the board
+# it matters most on, which hides real gaps. 8 is the knee: one card in five
+# on his board, one in four on the demo board, and on the demo board it
+# selects exactly the six firms the strip used to draw, name for name.
+#
+# It is not a tuned number, it is a POSITION on the existing scale, which is
+# why it is written as the arithmetic rather than as 8:
+#
+#     TIER_WEIGHT[2] × GAP_POINTS[NO_CONTACTS]
+#
+# "A firm you ranked, that you have no way into." Both of the formula's
+# heaviest terms have to fire. What clears the bar on the founder's board:
+# one tier-1 bank with nobody (3 × 4 = 12), six tier-1 banks he has emailed
+# with no reply (3 × 3 = 9), four tier-2 banks with nobody (2 × 4 = 8). All
+# eleven are banks on his own tracks. What does NOT clear it: the eleven PE,
+# AM and consulting shops he tiered aspirationally and has nobody at, because
+# `track_fit` already halved them and tagging them would re-open the exact
+# defect that multiplier was added to close; his tier-3 firms, because tier 3
+# is the student's own statement that they matter least; and every firm where
+# somebody has actually replied.
+#
+# A firm with an advocate can never wear it. BELOW_TARGET is 1 point, so the
+# most a firm with an advocate can score is 3 × 1 + 3 = 6, under the bar even
+# with a deadline inside two weeks. That is the same posture the ladder
+# already holds for COVERED: progress is not a thing to nag about.
+#
+# The deadline term can still push a firm over on its own, which is the point
+# of it being additive: a tier-1 off-track firm with nobody (6) and a
+# confirmed close inside 30 days (+2) clears 8. Rare, and correct.
+CG_EXPOSURE_MIN: int = TIER_WEIGHT[2] * GAP_POINTS[NO_CONTACTS]
+
+
+def flagged_firm_ids(gaps: Iterable[Mapping[str, Any]]) -> set:
+    """The firm ids that earn the CG tag, from `rank_gaps`' own output.
+
+    One definition, here rather than in the view, for the same reason the
+    formula is here: the bar is a number a student can be shown and can
+    argue with, and it belongs beside the scale it reads. Takes the ranked
+    gaps rather than the raw rows so it cannot disagree with the ranking.
+    """
+    return {
+        g["firm_id"] for g in gaps
+        if g.get("firm_id") is not None and g["exposure"] >= CG_EXPOSURE_MIN
+    }
 
 
 def track_fit(firm_tracks: Iterable[str] | None, user_tracks: Iterable[str] | None) -> float:
@@ -230,9 +319,9 @@ def rank_gaps(
     *,
     today: date,
     target: int = DEFAULT_ADVOCATE_TARGET,
-    limit: int = 6,
+    limit: int | None = None,
 ) -> list[dict]:
-    """The worst `limit` coverage gaps among the user's tiered firms.
+    """Every coverage gap among the user's tiered firms, worst first.
 
     Args:
         firms: one dict per UserFirm row. Keys used:
@@ -259,7 +348,13 @@ def rank_gaps(
             does the comparing instead.
         today: the as-of date. Drives deadline proximity only.
         target: advocates-per-firm yardstick (see `advocate_target`).
-        limit: how many gaps to return. "The worst handful", not a report.
+        limit: how many gaps to return, or None for all of them. The
+            default WAS 6 — "the worst handful", which is what the Coverage
+            Gaps strip drew. That strip is gone (2026-09-02) and its
+            replacement is a per-card tag with no cap, so every caller now
+            wants every gap and a silent 6 is a trap rather than a
+            convenience. Kept as a parameter because the argument for a
+            capped list is still a real one for a surface that gets one.
 
     Returns:
         Gap dicts sorted worst-first, each carrying the full arithmetic
@@ -298,8 +393,8 @@ def rank_gaps(
         exposure = TIER_WEIGHT[tier] * points + bonus
         if exposure <= 0:
             # Only an assessment firm with no confirmed close lands here
-            # (a covered firm left above): nothing on this strip can help
-            # it, so it is not drawn rather than drawn at zero.
+            # (a covered firm left above): no amount of networking can help
+            # it, so it is not a gap rather than a gap scoring zero.
             continue
         off_track = fit < ON_TRACK_FIT
         ranked.append(
@@ -329,10 +424,10 @@ def rank_gaps(
                 "open": int(f.get("open") or 0),
             }
         )
-    # Four keys, plus a fifth the strip's own promise needs.
+    # Four keys, plus a fifth the ordering's own promise needs.
     #
-    # `rank_gaps`' docstring says ties break "so the strip is stable render to
-    # render", and until this line that was only true down to the fourth key.
+    # The module header above promises the order is stable render to render,
+    # and until this line that was only true down to the fourth key.
     # Two firms at the same tier, in the same gap state, with the same open
     # count and the same name tie on all four and fall through to `list.sort`'s
     # stability — i.e. to the order the CALLER built `firms` in, which is a
@@ -351,7 +446,7 @@ def rank_gaps(
             -g["exposure"], g["tier"], -g["open"], str(g["name"]), str(g["firm_id"]),
         )
     )
-    return ranked[:limit]
+    return ranked if limit is None else ranked[:limit]
 
 
 def _tidy(value: float) -> int | float:
@@ -364,9 +459,18 @@ def _tidy(value: float) -> int | float:
 def advocate_summary(
     firms: Iterable[Mapping[str, Any]], *, target: int = DEFAULT_ADVOCATE_TARGET
 ) -> dict:
-    """One honest aggregate for the top of the Network page: how many
-    advocates the student has across their tiered firms, against the range
-    the outcome research says matters (`ADVOCATE_RANGE`, 2-20).
+    """One honest aggregate over a student's tiered firms: how many
+    advocates they have, against the range the outcome research says
+    matters (`ADVOCATE_RANGE`, 2-20).
+
+    NOTHING RENDERS THIS TODAY. It was a caption under the Coverage Gaps
+    heading, which the founder quoted back word for word and asked to have
+    off the page; the sentence then moved into that heading's own `title=`,
+    and the heading is gone too (2026-09-02). The function stays because it
+    is the one definition of this count and the number is the one the
+    outcome evidence backs, so whatever prints it next reads it here rather
+    than recounting advocates a second way. The view no longer puts it in
+    the Network context: a context key with no renderer is furniture.
 
     Takes the same row dicts `rank_gaps` takes (only `tier` and `warmths`
     are read). Counts ADVOCATES AT TIERED FIRMS ONLY, because that is what
@@ -380,9 +484,7 @@ def advocate_summary(
     parts it wants: `advocates`, `firms` (tiered firm count), `covered`
     (firms at or above `target`), `target`, `low`/`high` (the range), and
     `line` — "Advocates: 0 across 54 target firms · aim for 2 per firm,
-    20 in all". The
-    template is not touched here; `crm.views.contact_list` puts this in
-    the context as `advocate_summary`.
+    20 in all".
     """
     tiered = [f for f in firms if f.get("tier") in TIER_WEIGHT]
     per_firm = [
