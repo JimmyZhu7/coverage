@@ -32,6 +32,7 @@ happen against the stored rows rather than inside the URL.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from typing import Any, Iterable, Sequence
 
 # --------------------------------------------------------------------------- Class A
@@ -220,9 +221,30 @@ _EDGE_NOISE = re.compile(r"^[\s\-–—,;:.·|/]+|[\s\-–—,;:.·|/]+$")
 _SEPARATORS = re.compile(r"[-,:;/|]")
 
 
+@lru_cache(maxsize=65536)
 def normalize_label(value: str) -> str:
     """Casefolded, whitespace- and punctuation-insensitive form of a title or
-    location, for asking "is this the same words?" — never for display."""
+    location, for asking "is this the same words?" — never for display.
+
+    MEMOISED on the string, for the same reason and with the same argument as
+    `recommend.role_function_cached`: a pure function of one string over
+    module-level constants, so one caller's answer is every caller's answer,
+    nothing can leak across a tenant boundary, and the only thing that could
+    stale an entry is an edit to the constants above, which is a source
+    change, which restarts the process. The input space is bounded by the
+    board (13,464 distinct titles across 16,029 open rows) rather than by
+    traffic, so `maxsize` is set above it and this is a full memo table in
+    practice.
+
+    Added 2026-09-02 because the Opportunities segmented control now folds
+    before it counts (`views._folded_count`), which means one render folds
+    the same board several times over — once per segment — and every fold
+    normalizes every title and location it sees. Measured on the live
+    16,655-row open board: the five folds a default render performs cost
+    78 ms cold and 10 ms with this cache warm, 67,124 hits against 14,890
+    misses. Every other fold in the product (My Applications, the firm page,
+    the calendar, ingest's own dedupe) is on the same table and gets the same
+    discount."""
     s = (value or "").translate(_DASHES).casefold()
     s = _SEPARATORS.sub(" ", s)
     s = " ".join(s.split())

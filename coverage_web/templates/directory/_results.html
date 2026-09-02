@@ -54,34 +54,37 @@ the same reason.
   {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
 </div>
 {% comment %}
-THE RECONCILIATION. The segmented control above says "All Campus (2723)" and
-this strip says "2596 Open Roles". Both are true and they count different
-things — the segment counts the BOARD, the strip counts THIS RENDER after
-repeat listings fold and after "Eligible only" hides — but until this line
-existed nothing on the page said so, and two numbers about one board
-disagreeing by 127 an inch apart means at least one of them reads as wrong.
-filter-bar-redesign.md §3, principle 2: counts are a promise.
+WHAT IS LEFT OF THE RECONCILIATION LINE, and why it is one fact now.
 
-`board_count - hidden_dupes - hidden_fit == total` exactly (see `board_count`
-in views.py, and the test that pins the identity), so this line accounts for
-the WHOLE difference, never part of it. The guard is the two subtrahends
-rather than the difference itself, so a future third cut that widened the gap
-would show no footnote at all instead of a footnote that half-explains it —
-silence over a partial account.
+It used to read "3095 on the board · 137 folded as repeat listings", because
+the segmented control above counted BOARD ROWS while this strip counts the
+rows a student is actually shown, and the two numbers sat eight pixels apart
+disagreeing by 137. That footnote explained the gap. This closes it instead:
+the segment counts fold first (see `_folded_count` in views.py), so the pill
+and the strip are the same number and there is nothing to explain. Restating
+the board count here would now just print `total` twice.
 
-NO LINK, deliberately. Every other hide on this page states its count at the
-control that causes it and offers that control as the reversal; the duplicate
-fold has no control, because the "Show repeat listings" checkbox was cut on
-request (2026-08-28) as a genuine narrowing rather than a relocation — see
-`_scope.html`'s note. `?dupes=1` still works as a URL fallback and is still
-unadvertised. Linking it here would both reverse that decision and build a
-one-way door: with the fold off there is no difference left for this line to
-explain, so the line that offered the way in would not be there to offer the
-way back. The fit hide DOES have its control, the "Eligible only" checkbox
-one click above, so it is named and not linked either.
+Losing the fold's count is not an accident of the fix, it is the fix agreeing
+with a decision already on record — `opportunities.html`, 2026-08-28: repeat
+listings fold silently, no toggle, no count, no route back, because one job
+filed as several requisitions is noise on every reading of this page and
+never a role anyone was trying to reach. The footnote had quietly reopened
+that, purely as a side effect of needing to account for 137.
+
+WHAT SURVIVES IS THE FIT HIDE, and it survives because it is a different
+kind of fact. `hidden_fit` counts roles whose own text BLOCKS this reader —
+a graduation window without their year, a refused visa in a market where
+they need one — which is exactly the class of hide that can take away a role
+someone wanted, unlike the fold. `board_count - hidden_fit == total` is the
+remaining identity (views.py pins it), so this line still accounts for the
+WHOLE difference and never part of it.
+
+NO LINK, deliberately: the "Eligible only" checkbox one click above is both
+the control that caused this and the one-click way back, so the count is
+named here and the reversal stays where the student switched it on.
 {% endcomment %}
-{% if hidden_dupes or hidden_fit %}
-  <p class="scope-line scope-foot">{{ board_count }} on the board{% if hidden_dupes %}<span class="scope-sep">·</span>{{ hidden_dupes }} folded as repeat listing{{ hidden_dupes|pluralize }}{% endif %}{% if hidden_fit %}<span class="scope-sep">·</span>{{ hidden_fit }} hidden by Eligible only{% endif %}</p>
+{% if hidden_fit %}
+  <p class="scope-line scope-foot">{{ hidden_fit }} hidden by Eligible only</p>
 {% endif %}
 </div>
 

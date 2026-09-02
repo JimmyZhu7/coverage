@@ -850,6 +850,19 @@ def _p(**kw):
     ("AMP Financial Advisor Trainee", "none"),
     ("Relationship Management - Private Bank - Internship", "none"),
     ("Internship - Securities Processing (Year-Round)", "none"),
+    # The same function under the word "advisor" misses, added 2026-09-02.
+    # Three of these — Bellingham WA, Chagrin Falls OH, Vandalia OH — were in
+    # the founder's fourteen-role bulk-save offer, because the title answered
+    # SILENT and a silent title inherits its bank's ib/st coverage. FP&A is
+    # the other half of the same word: the company's own budgeting desk,
+    # filed here for the reason `\bcontrollers\b` is. 47 titles change answer
+    # board-wide, exactly one of them away from a stated track ("Practice
+    # Consultant, Financial Planning", an experienced-hire row that consults
+    # FOR financial planners).
+    ("Summer 2027 Key Investment Services Internship "
+     "(Certified Financial Planner Track) - Bellingham, WA", "none"),
+    ("Financial Planner", "none"),
+    ("Financial Planning & Analysis, Analyst", "none"),
     # ...but the DIVISION name that covers both businesses still answers
     # `am`, because it genuinely covers asset management. Eight open campus
     # rows; without the explicit phrase the blocklist would swallow them.

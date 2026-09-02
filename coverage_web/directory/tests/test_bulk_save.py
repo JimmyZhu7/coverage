@@ -486,9 +486,9 @@ def test_a_role_under_the_recommenders_bar_does_not_fit(client):
     A role only reaches the gate by carrying a `year_ok` verdict, which means
     the posting STATED this student's class — worth `W_CLASS_STATED` (30) on
     its own, already past `MIN_SCORE` (25) before any other axis speaks.
-    Measured on the founder's board 2026-09-02: track took 56 rows to 38,
-    region took 38 to 8, and the bar took 8 to 8, the lowest survivor scoring
-    56.
+    Measured on the founder's board 2026-09-02, all four tests in order:
+    track took 72 rows to 41, region took 41 to 11, the rung took 11 to 9,
+    and the bar took 9 to 9, the lowest survivor scoring 56.
 
     That is a fact about today's weights, not a reason to leave the bar out.
     It is the same number the ranker applies before ordering anything, so
@@ -534,6 +534,155 @@ def test_a_student_who_stated_no_tracks_or_regions_is_filtered_on_neither(client
     client.get(reverse("opportunities"))
 
     assert set(client.session["bulk_save_offer"]) == {ops.id, abroad.id}
+
+
+# ---------------------------------------------------------------------------
+# THE RUNG OF THE LADDER (added 2026-09-02)
+# ---------------------------------------------------------------------------
+#
+# THE MEASURED DEFECT, same board and same student as above. Once the offer
+# was scored it came to fourteen roles, and two of the fourteen were Wells
+# Fargo PhD internships — "2027 Quantitative Analytics Summer Internship
+# Applied Computational Intelligence (ACI PhD)" and its Capital Markets
+# sibling. Both state his graduation window, both sit in a market he named,
+# both score in the seventies, and neither is a job a sophomore can take. The
+# gate's own note had called that a boundary and left it for the next
+# measurement. `_offer_fits` now applies the rung test `recommend()` applies
+# to a stated-class row, and the offer went 14 -> 12; the retail
+# financial-planning fix below took it to 9.
+
+
+def _undergrad(email="rung@example.com"):
+    """A student who has stated the rung as well as the desk and the market.
+
+    `study_level` is what turns the rung test on at all. Without it
+    `student_level` falls back to reading the target cycles, and with neither
+    stated it answers "" — which filters nothing, which is `_fit_student`'s
+    world and the reason the tests above are unaffected by any of this."""
+    u = _fit_student(email=email)
+    u.study_level = "undergrad"
+    u.save(update_fields=["study_level"])
+    return u
+
+
+@pytest.mark.django_db
+def test_a_phd_internship_is_not_offered_to_an_undergraduate(client):
+    """The posting's own title says who it is for, and it is not him.
+
+    `role_level` reads the rung out of the title and `level_mismatch` refuses
+    the pair — both `recommend`'s, neither re-derived here (P5). A bulk save
+    is a decision made once for every row in it, so a role the student cannot
+    take is not a row to be scrolled past, it is clutter committed to his own
+    pipeline."""
+    user = _undergrad()
+    wanted = _titled_opp(1, "Investment Banking Summer Analyst")
+    phd = _titled_opp(2, "Quantitative Analytics Summer Internship (PhD)")
+    client.force_login(user)
+
+    resp = client.get(reverse("opportunities"))
+
+    assert set(client.session["bulk_save_offer"]) == {wanted.id}
+    assert phd.id not in client.session["bulk_save_offer"]
+    assert "1 role fits you and names your year" in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_the_advanced_degree_rung_is_refused_under_its_other_name(client):
+    """"Summer Associate" is the banks' name for the same rung, and the
+    reason `role_level` reads shapes rather than the word "Associate" alone
+    (bare "Associate" is the undergraduate entry title at PwC and Deloitte).
+    An undergraduate is not offered either spelling."""
+    user = _undergrad()
+    analyst = _titled_opp(1, "Investment Banking Summer Analyst")
+    associate = _titled_opp(2, "Investment Banking Summer Associate")
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+
+    assert set(client.session["bulk_save_offer"]) == {analyst.id}
+
+
+@pytest.mark.django_db
+def test_a_rung_nobody_stated_filters_nothing(client):
+    """P3 again, on the new axis. `level_mismatch` is False the moment either
+    side is silent, so a student who never stated a study level and a title
+    that names no rung are both filtered on nothing — exactly the behaviour
+    that existed before this test was added.
+
+    Two halves, because either one alone would pass for the wrong reason: a
+    student with no level sees the PhD row, and a student WITH a level still
+    sees a title that names no rung at all."""
+    silent_student = _fit_student(email="nolevel@example.com")
+    phd = _titled_opp(1, "Quantitative Analytics Summer Internship (PhD)")
+    client.force_login(silent_student)
+    client.get(reverse("opportunities"))
+    assert set(client.session["bulk_save_offer"]) == {phd.id}
+
+    client.logout()
+    stated = _undergrad(email="stated@example.com")
+    quiet = _titled_opp(2, "Investment Banking Summer Programme")
+    client.force_login(stated)
+    client.get(reverse("opportunities"))
+    assert set(client.session["bulk_save_offer"]) == {quiet.id}
+
+
+@pytest.mark.django_db
+def test_retail_financial_planning_is_not_a_track_anyone_picked(client):
+    """KeyBank's "Key Investment Services Internship (Certified Financial
+    Planner Track)" is retail financial planning, and three of them — in
+    Bellingham WA, Chagrin Falls OH and Vandalia OH — were in the founder's
+    fourteen-role offer on 2026-09-02.
+
+    They got there through a hole in `recommend._NON_TRACK_FUNCTION`, which
+    named `\\bfinancial advisor\\b` and not the planner: the title answered
+    SILENT, and a silent title inherits the bank's own ib/st coverage. Fixed
+    in the vocabulary rather than in the gate, because a second answer to
+    "what function is this?" living inside a bulk-save offer is the defect
+    `_offer_fits` is otherwise built to avoid (P5) — and because the same
+    hole put those rows in the track facet and the picks rail too."""
+    user = _fit_student()
+    wanted = _titled_opp(1, "Investment Banking Summer Analyst")
+    planner = _titled_opp(
+        2, "Summer 2027 Key Investment Services Internship "
+           "(Certified Financial Planner Track) - Bellingham, WA")
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+
+    assert set(client.session["bulk_save_offer"]) == {wanted.id}
+    assert planner.id not in client.session["bulk_save_offer"]
+
+
+@pytest.mark.django_db
+def test_the_count_the_peek_and_the_write_agree_across_the_rung_gate(client):
+    """The one property every change to this gate has to keep: the banner's
+    number, the roles the peek names, and the rows the confirm writes are one
+    list from one call.
+
+    A new gate is exactly where that breaks — the 206/209/208 incident was a
+    count and a write asking two slightly different questions — so this pins
+    all four figures on a board where the gate is actually doing something,
+    with a PhD row and a financial-planning row present and excluded."""
+    user = _undergrad()
+    keep = {_titled_opp(1, "Investment Banking Summer Analyst").id,
+            _titled_opp(2, "Investment Banking Off-Cycle Analyst").id}
+    _titled_opp(3, "Quantitative Analytics Summer Internship (PhD)")
+    _titled_opp(4, "Key Investment Services Internship "
+                   "(Certified Financial Planner Track)")
+    client.force_login(user)
+
+    resp = client.get(reverse("opportunities"))
+    ctx = resp.context
+
+    assert ctx["eligible_unsaved"] == 2
+    assert ctx["bulk_save_peek"]["total"] == 2
+    assert {r["id"] for r in ctx["bulk_save_peek"]["rows"]} == keep
+    assert set(client.session["bulk_save_offer"]) == keep
+    assert "2 roles fit you and name your year" in resp.content.decode()
+
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    assert set(UserOpportunity.objects.for_user(user)
+               .values_list("opportunity_id", flat=True)) == keep
 
 
 # ---------------------------------------------------------------------------
