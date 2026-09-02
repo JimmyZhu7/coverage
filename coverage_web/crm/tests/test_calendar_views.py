@@ -682,7 +682,9 @@ def test_the_add_form_is_still_a_plain_post(client, logged_in):
     while the form carries no hx- attribute of its own and nothing above it
     boosts."""
     markup = _markup(_get(client))
-    form = re.search(r'<form class="cal-form"[^>]*>', markup)
+    # class name anchored, not the whole attribute: D-13's panel primitive
+    # (2026-09-02) appended "panel" to this form's class list.
+    form = re.search(r'<form class="cal-form[^"]*"[^>]*>', markup)
     assert form, "the add-to-calendar form went missing"
     assert "hx-" not in form.group(0), (
         "the add-to-calendar form must stay a plain document POST"

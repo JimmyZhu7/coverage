@@ -379,7 +379,9 @@ def test_the_pace_ring_is_gone_and_took_its_css_with_it():
     Deleted rather than left as dead rules, which is the other half of the
     same cleanup."""
     html = _page(_user(email="pace@example.com", tracks=("ib",)))
-    card = html[html.index('class="rail-card pace-card"'):]
+    # 'class="rail-card pace-card"' stopped matching once D-13's panel
+    # primitive appended "panel" to the same attribute (2026-09-02).
+    card = html[html.index('class="rail-card pace-card'):]
     card = card[:card.index("</div>", card.index("pace-spark"))]
     assert "pace-ring" not in card
     css = _styles_of(html, strip_comments=True)
@@ -433,7 +435,7 @@ def test_the_pace_card_carries_one_picture_not_two_of_the_same_number():
     where you are), the note (what is still owed), and the sparkline (how this
     week compares to the last eight)."""
     html = _page(_user(email="pace4@example.com", tracks=("ib",)))
-    card = html[html.index('class="rail-card pace-card"'):]
+    card = html[html.index('class="rail-card pace-card'):]
     card = card[:card.index("</div>", card.index("pace-spark"))]
     assert card.count("<svg") == 0, "the only picture left is the sparkline"
     assert card.count('class="pace-spark"') == 1

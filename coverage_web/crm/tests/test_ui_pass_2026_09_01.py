@@ -321,15 +321,25 @@ def test_the_grid_settles_when_the_month_or_view_changes():
 # Talk
 # ---------------------------------------------------------------------------
 def test_talk_wears_the_shared_page_header():
-    """The 42px title, the accent stroke and the mono eyebrow are most of
-    what makes six separate pages read as one product, and this was the only
-    nav destination without them: a 22px title beside a hamburger, first
+    """The 42px title and the accent stroke are most of what makes six
+    separate pages read as one product, and this was the only nav
+    destination without them: a 22px title beside a hamburger, first
     content at y=86 against the shared datum of 118.
+
+    Rewritten 2026-09-02: it originally pinned an "Advisor" eyebrow, added
+    the same night as a justification for why Talk should carry one when no
+    other nav page does. A sibling fix removed it a few hours later, on the
+    finding that the justification was already false -- every other nav
+    page dropped its eyebrow on 2026-08-29, so Talk was the one page still
+    stating something the rest of the product had stopped saying. No
+    eyebrow is the shared shape now; this pins that instead of the eyebrow.
     """
     html = _get(TALK, "ui-talk@example.com")
-    assert 'class="pagehead as-pagehead"' in html
-    assert '<p class="pagehead-eyebrow">Advisor</p>' in html
-    assert "pagehead-title" in html
+    assert "as-pagehead" in html
+    assert '<p class="pagehead-eyebrow">' not in html, (
+        "Talk is the only nav page with no eyebrow, by decision; one came back"
+    )
+    assert '<h1 class="pagehead-title">Talk to Coverage</h1>' in html
     assert "pagehead-sub" not in html, "the chat keeps its vertical room"
 
 
