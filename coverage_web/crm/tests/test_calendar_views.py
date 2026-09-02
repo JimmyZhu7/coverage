@@ -546,3 +546,146 @@ def test_the_narrow_screen_agenda_lists_the_period_it_is_showing(client, logged_
     assert all(c["date"].month == 3 for c in month)
     week = _get(client, view="week", y=2027, m=3, d=31).context["agenda_days"]
     assert len(week) == 7 and week[0]["date"] == date(2027, 3, 29)
+
+
+# ---------------------------------------------------------------------------
+# The bar navigates by htmx, not by reloading the document.
+#
+# Reported live: clicking Month, Week or Day reloaded the whole page. The
+# `#cal-view` wrapper and its long comment had shipped that morning claiming
+# every navigation swaps, and the wrapper really does carry
+# hx-target/hx-select/hx-swap/hx-push-url -- but not one of the six links
+# carried `hx-get`, and an inherited attribute describes a request without
+# ever starting one. htmx binds a click handler to an element when that
+# element names a VERB, so all six stayed plain anchors and every click was a
+# full document load. Nothing in the suite could tell: no test had ever read
+# an hx- attribute on this page.
+#
+# Measured in a real browser before and after: five nav clicks, five
+# `document` requests and a destroyed JS context before; five `xhr` requests
+# and a surviving one after.
+# ---------------------------------------------------------------------------
+
+def _tag(markup: str, pattern: str) -> str:
+    """The one opening tag matching `pattern`, so an assertion about a link's
+    attributes cannot pass on a different link that happens to be nearby."""
+    match = re.search(r"<a[^>]*" + pattern + r"[^>]*>", markup)
+    assert match, f"no <a> matching {pattern!r}"
+    return match.group(0)
+
+
+def _hx_get(tag: str) -> str | None:
+    match = re.search(r'hx-get="([^"]*)"', tag)
+    return match.group(1) if match else None
+
+
+def _href(tag: str) -> str:
+    match = re.search(r'href="([^"]*)"', tag)
+    assert match, f"no href on {tag!r}"
+    return match.group(1)
+
+
+@pytest.mark.parametrize("pattern", [
+    r'rel="prev"', r'rel="next"', r">Month<", r">Week<", r">Day<",
+])
+def test_every_view_and_paging_link_carries_its_own_hx_get(
+        client, logged_in, pattern):
+    """The regression that shipped: the wrapper's four attributes are all
+    inherited, and inheritance gives a link the SHAPE of a request without
+    giving it a trigger. Only `hx-get` on the link itself makes htmx take the
+    click, so each link is asserted individually rather than by counting."""
+    markup = _markup(_get(client, view="month", y=2027, m=3, d=15))
+    tag = _tag(markup, pattern)
+    assert _hx_get(tag) is not None, (
+        f"{pattern} navigates by document load: it has an href and no hx-get, "
+        "which is the exact shape of the bug reported live."
+    )
+    # Same target both ways, so the no-JS fallback and the swap agree and a
+    # middle-click opens what the swap would have shown.
+    assert _hx_get(tag) == _href(tag)
+
+
+@pytest.mark.parametrize("view", ["month", "week", "day"])
+def test_today_requests_only_when_today_is_somewhere_else(
+        client, logged_in, view):
+    """Today is the one control whose `hx-get` is conditional. From another
+    month it is a real navigation and must swap; from the period it is
+    already in, the click handler cancels the click and scrolls, so a request
+    would fetch identical markup and throw away the animation it just
+    started."""
+    away = _today_link(_get(client, view=view, y=2027, m=3, d=15))
+    assert _hx_get(away) == _href(away)
+
+    here = _today_link(_get(client, view=view))
+    assert "data-already-today" in here
+    assert _hx_get(here) is None, (
+        "Today must not fire a request when today is already on screen."
+    )
+
+
+def test_the_wrapper_still_declares_where_the_swap_goes(client, logged_in):
+    """The other half of the pair. `hx-get` alone would swap into the link
+    itself; these four say the response replaces this block, is carved out of
+    the full page by id, and updates the address bar on the way."""
+    markup = _markup(_get(client))
+    wrapper = re.search(r'<div id="cal-view"[^>]*>', markup)
+    assert wrapper, "the #cal-view wrapper went missing"
+    for attr in ('hx-target="#cal-view"', 'hx-select="#cal-view"',
+                 'hx-swap="outerHTML"', 'hx-push-url="true"'):
+        assert attr in wrapper.group(0), attr
+
+
+@pytest.mark.parametrize("view", ["month", "week", "day"])
+def test_an_htmx_request_answers_with_a_page_hx_select_can_carve(
+        client, logged_in, view):
+    """There is no second template and no fragment branch in the view, by
+    design: `hx-select="#cal-view"` pulls the block out of the ordinary full
+    response, which is what keeps the page working with JS off. So the
+    contract an htmx request depends on is that the normal answer still
+    contains a COMPLETE #cal-view element."""
+    resp = client.get(reverse("crm:calendar"),
+                      {"view": view, "y": 2027, "m": 3, "d": 15},
+                      headers={"hx-request": "true"})
+    assert resp.status_code == 200
+    markup = _markup(resp)
+    assert markup.count('<div id="cal-view"') == 1
+    # The parts the swap is FOR are inside it: the bar the click came from
+    # and the period heading it redraws.
+    body = markup.split('<div id="cal-view"', 1)[1]
+    assert '<div class="cal-bar">' in body
+    assert 'class="cal-month"' in body
+
+
+def test_the_today_handler_is_delegated_so_it_survives_a_swap(
+        client, logged_in):
+    """The Today link lives INSIDE #cal-view, and every navigation replaces
+    #cal-view. A listener attached to the link at page load therefore dies on
+    the first Month or Week click, after which Today goes back to doing
+    nothing visible -- which is the complaint the handler exists to answer.
+    So the listener has to sit on something the swap cannot replace and match
+    the link when the click reaches it."""
+    body = _get(client).content.decode()
+    script = body.split("data-today-link", 1)[1]
+    assert 'document.addEventListener("click"' in body
+    assert "closest" in script, (
+        "the Today handler must match the link on the way up, not hold a "
+        "reference to the element the next swap throws away"
+    )
+    assert 'querySelectorAll("[data-today-link]' not in body
+
+
+def test_the_add_form_is_still_a_plain_post(client, logged_in):
+    """The incident this page's comment is written against: a POST form swept
+    into an htmx swap answers a redirect with a bare fragment, which htmx
+    then paints as the whole page. That is why this page names its six links
+    individually instead of reaching for `hx-boost`, and it stays true only
+    while the form carries no hx- attribute of its own and nothing above it
+    boosts."""
+    markup = _markup(_get(client))
+    form = re.search(r'<form class="cal-form"[^>]*>', markup)
+    assert form, "the add-to-calendar form went missing"
+    assert "hx-" not in form.group(0), (
+        "the add-to-calendar form must stay a plain document POST"
+    )
+    assert 'method="post"' in form.group(0)
+    assert "hx-boost" not in markup

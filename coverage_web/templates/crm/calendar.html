@@ -546,6 +546,16 @@
 
   `hx-target`/`hx-select`/`hx-swap`/`hx-push-url` are inherited by the links
   below rather than repeated six times; only `hx-get` differs per link.
+
+  `hx-get` IS THE ONLY THING THAT MAKES ANY OF THIS RUN, and it is the one
+  attribute this block shipped without. Inherited attributes describe a
+  request; they do not start one. htmx binds a click handler to an element
+  when that element names a verb, so for a day this container carried four
+  attributes nobody read and all six links stayed plain anchors: every
+  Month/Week/Day, every arrow, every Today was a full document load, exactly
+  the behaviour the paragraph above says was removed. Reported live. If a
+  link is ever added to this bar, it needs `hx-get` on the link itself; the
+  wrapper cannot give it one.
   {% endcomment %}
   <div id="cal-view"
        hx-target="#cal-view" hx-select="#cal-view"
@@ -553,8 +563,8 @@
   <div class="cal-bar">
     <h2 class="cal-month">{{ period_label }}</h2>
     <div class="cal-nav">
-      <a class="btn" href="{{ prev_url }}" aria-label="Previous {{ period_noun }}" rel="prev">‹</a>
-      <a class="btn" href="{{ next_url }}" aria-label="Next {{ period_noun }}" rel="next">›</a>
+      <a class="btn" href="{{ prev_url }}" hx-get="{{ prev_url }}" aria-label="Previous {{ period_noun }}" rel="prev">‹</a>
+      <a class="btn" href="{{ next_url }}" hx-get="{{ next_url }}" aria-label="Next {{ period_noun }}" rel="next">›</a>
     </div>
     {% comment %}The product's own segmented control (.subnav.scope-tabs in
     coverage.css, the same component the Network and Opportunities filters
@@ -567,9 +577,9 @@
     other two views unreachable for any date you were actually looking at.
     {% endcomment %}
     <nav class="subnav scope-tabs cal-views" aria-label="Calendar view">
-      <a href="{{ month_url }}"{% if view == 'month' %} aria-current="page"{% endif %}>Month</a>
-      <a href="{{ week_url }}"{% if view == 'week' %} aria-current="page"{% endif %}>Week</a>
-      <a href="{{ day_url }}"{% if view == 'day' %} aria-current="page"{% endif %}>Day</a>
+      <a href="{{ month_url }}" hx-get="{{ month_url }}"{% if view == 'month' %} aria-current="page"{% endif %}>Month</a>
+      <a href="{{ week_url }}" hx-get="{{ week_url }}"{% if view == 'week' %} aria-current="page"{% endif %}>Week</a>
+      <a href="{{ day_url }}" hx-get="{{ day_url }}"{% if view == 'day' %} aria-current="page"{% endif %}>Day</a>
     </nav>
     {% comment %}
     Reported live: clicking Today while already viewing the current month
@@ -586,8 +596,16 @@
     month grid. `today_in_range` is the same question the month comparison
     asked, asked once for all three views (see `_period_context`).
     {% endcomment %}
+    {% comment %}
+    `hx-get` on this one is conditional where the other five carry it
+    unconditionally: when today is already on screen the script at the foot
+    of this page cancels the click and scrolls instead, so a request would be
+    a swap that repaints identical markup and throws away the animation the
+    handler just started. No `hx-get` in that case means no request at all,
+    which is what "already here" should cost.
+    {% endcomment %}
     <a class="btn" href="{% url 'crm:calendar' %}?view={{ view }}" data-today-link
-       {% if today_in_range %}data-already-today{% endif %}>Today</a>
+       {% if today_in_range %}data-already-today{% else %} hx-get="{% url 'crm:calendar' %}?view={{ view }}"{% endif %}>Today</a>
     {% comment %}Feed URL for the calendar app the user already lives in.
     webcal:// so Calendar.app opens a subscribe dialog instead of downloading
     a one-off snapshot.{% endcomment %}
@@ -728,28 +746,33 @@ surprise you), the link falls through to its real href instead of silently
 doing nothing a second way.
 {% endcomment %}
 {% script %}
-  document.querySelectorAll("[data-today-link][data-already-today]").forEach(function (a) {
-    a.addEventListener("click", function (e) {
-      // Visibility, not existence. Several of these markers are in the DOM
-      // at once -- the grid cell and the agenda row are mutually exclusive
-      // by media query, not by rendering -- so `querySelector` on the first
-      // match would grab the hidden desktop cell on a narrow viewport and
-      // never try the agenda row at all. `offsetParent` is the check that
-      // separates "in the document" from "on the screen".
-      var cell = null;
-      [".cal-day.is-today", ".cal-dayv.is-today", ".cal-agenda-day.is-today"]
-        .some(function (sel) {
-          var el = document.querySelector(sel);
-          if (el && el.offsetParent) { cell = el; return true; }
-          return false;
-        });
-      if (!cell) return;
-      e.preventDefault();
-      cell.scrollIntoView({ behavior: "smooth", block: "center" });
-      cell.classList.remove("is-today-pulse");
-      void cell.offsetWidth;
-      cell.classList.add("is-today-pulse");
-    });
+  // Delegated from the document, not bound to the link, because the link is
+  // inside #cal-view and every navigation on this page REPLACES #cal-view.
+  // A listener attached at load survives exactly until the first Month or
+  // Week click, and after that Today silently goes back to doing nothing --
+  // which is the complaint this handler exists to answer.
+  document.addEventListener("click", function (e) {
+    var link = e.target.closest && e.target.closest("[data-today-link][data-already-today]");
+    if (!link) return;
+    // Visibility, not existence. Several of these markers are in the DOM
+    // at once -- the grid cell and the agenda row are mutually exclusive
+    // by media query, not by rendering -- so `querySelector` on the first
+    // match would grab the hidden desktop cell on a narrow viewport and
+    // never try the agenda row at all. `offsetParent` is the check that
+    // separates "in the document" from "on the screen".
+    var cell = null;
+    [".cal-day.is-today", ".cal-dayv.is-today", ".cal-agenda-day.is-today"]
+      .some(function (sel) {
+        var el = document.querySelector(sel);
+        if (el && el.offsetParent) { cell = el; return true; }
+        return false;
+      });
+    if (!cell) return;
+    e.preventDefault();
+    cell.scrollIntoView({ behavior: "smooth", block: "center" });
+    cell.classList.remove("is-today-pulse");
+    void cell.offsetWidth;
+    cell.classList.add("is-today-pulse");
   });
 {% endscript %}
 {% endblock %}
