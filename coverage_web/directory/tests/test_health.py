@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
+from django.conf import settings
 from django.utils import timezone
 
 from coverage_connectors import GreenhouseBoard
@@ -192,6 +194,25 @@ def test_a_new_wall_warns_once_then_becomes_a_standing_line():
     assert health.walled_boards()[0]["is_new"] is False
     report = "\n".join(health.health_report())
     assert "· bot-walled" in report and "⚠ bot-walled" not in report
+
+
+def test_the_wall_line_cites_the_document_that_settles_it():
+    """WS-OPP-10. A wall is the one line here that never resolves and that
+    nobody on this side can fix, so the reader's only useful question is
+    "says who, and when was that checked?".
+
+    Two Grade A research files disagreed flatly about whether tal.net was
+    reachable at all until a probe settled it on 2026-09-02. The line points
+    at that probe, so a future reader can re-run it and find the claim either
+    still true or visibly out of date, instead of re-litigating it from
+    memory."""
+    _walled_run(["Nomura"], ago_minutes=60)
+    report = "\n".join(health.health_report())
+    assert "bot-walled" in report
+    assert health.WALL_EVIDENCE_DOC in report
+    assert (Path(settings.REPO_ROOT) / health.WALL_EVIDENCE_DOC).exists(), (
+        "the bot-walled line cites a document that must actually be in the repo"
+    )
 
 
 def test_a_never_yielding_walled_board_is_not_called_empty_or_broken(monkeypatch):
