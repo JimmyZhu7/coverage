@@ -1463,10 +1463,10 @@ def _get_my_pipeline(user, _args) -> dict:
 
 def _get_situation(user, _args) -> dict:
     """assistant.situation.build_situation, trimmed for the model: the same
-    three event kinds the Today page's own cards render from (deadline_moved,
-    role_closed, new_role_at_known_firm), untruncated in count (the module
-    already caps each type) but with every string run through `_s()` like
-    every other tool result here."""
+    two event kinds the Today page's own cards render from (deadline_moved,
+    new_role_at_known_firm), untruncated in count (the module already caps
+    each type) but with every string run through `_s()` like every other
+    tool result here."""
     situation = build_situation(user)
     events = []
     for e in situation.get("events", []):
@@ -1885,12 +1885,14 @@ def _track_opportunity(user, args) -> dict:
     # THE SAVE STILL HAPPENS, THE SENTENCE ABOUT IT CHANGES. Ids reach this
     # tool from `get_my_pipeline` and `get_situation` as well as from
     # `search_opportunities`, and only the last of those is filtered to open
-    # postings — a `role_closed` situation event carries the id of a posting
-    # the scraper watched the firm take down. Tracking a dead role is the
-    # student's call to make (it is still their application record), but
-    # handing the model a bare `deadline` on one is how it says "saved, that
-    # closes on the 30th" about a window that no longer exists. This is the
-    # same pairing `assistant/situation.py` had to make at its own merge:
+    # postings — `get_my_pipeline` returns every tracked row a student has,
+    # including the ones the scraper watched the firm take down (it carries
+    # `posting_closed` per row for exactly that reason). Tracking a dead
+    # role is the student's call to make (it is still their application
+    # record), but handing the model a bare `deadline` on one is how it says
+    # "saved, that closes on the 30th" about a window that no longer exists.
+    # This is the same pairing `assistant/situation.py` had to make at its
+    # own merge:
     # "a moved deadline is a promise about a window still open; on a dead
     # posting it is a stale row the scraper has already overtaken."
     if is_posting_closed(opp):
