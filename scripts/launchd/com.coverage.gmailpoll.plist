@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.coverage.gmailpoll</string>
+
+  <!-- The local stand-in for render.yaml's `coverage-gmail-live` WORKER
+       (not a cron, unlike gmailbackfill/autopilot beside it) — this is the
+       process that actually turns a new Gmail message into a touch.
+       docs/gmail-live-setup.md §8 says outright this needs
+       "launchd/tmux/systemd, whatever keeps a process alive on your
+       machine," and for two days that step was simply never done: found
+       2026-09-01 with GmailConnection.status="active", the watch
+       registered, but last_notification_at=None since connecting and 137
+       unread messages sitting behind history_id. Nothing had ever run
+       `sync_connection` against them, so no networking email had been
+       matched to a contact since Gmail was connected. This template exists
+       so that gap cannot reopen on the next machine.
+
+       The 120-second interval below matches render.yaml's
+       `coverage-gmail-live` dockerCommand exactly, for the same reason
+       gmailbackfill.plist gives for its own number: local latency should be
+       the latency a deployed student actually sees. (Written out in words
+       rather than quoting the flag, because a doubled hyphen inside an XML
+       comment is not well-formed XML. launchd's own parser tolerates it and
+       the hand-written copy of this file in ~/Library/LaunchAgents carries
+       one, but `plutil -lint` is the only checker that lets it through —
+       every strict XML reader, this repo's included, refuses the file.)
+
+       KeepAlive, not StartInterval: this command loops internally until
+       killed (SIGTERM-handled). StartInterval would relaunch a second copy
+       on top of a still-running first one, which is the wrong shape for a
+       loop — unlike gmailbackfill/autopilot's deliberate
+       one-tick-per-launch commands. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/.venv/bin/python</string>
+    <string>__REPO__/coverage_web/manage.py</string>
+    <string>gmail_poll</string>
+    <string>--interval</string>
+    <string>120</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DJANGO_SETTINGS_MODULE</key>
+    <string>coverage_web.settings.local</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/coverage-gmail-poll.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/coverage-gmail-poll.log</string>
+</dict>
+</plist>

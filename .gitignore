@@ -78,3 +78,14 @@ docs/research/
 data/
 scripts/import_hk_coffee_chats.py
 scripts/seed_founder.py
+
+# Undo journals from data-changing management commands. `backfill_contact_regions`
+# defaults its `--undo-file` to `region_backfill_undo_<timestamp>.json` in the
+# CURRENT DIRECTORY, which for a `manage.py` run is `coverage_web/` — beside the
+# source, where an untracked file is easy to sweep into a `git add`. One already
+# was (866d95b), and it carried the founder's email address and 34 of his live
+# contact IDs mapped to regions into this public repo.
+#
+# Ignored rather than relocated: the journal is what `--revert` reads, so it has
+# to survive on the machine that wrote it. It just must never travel.
+*_undo_*.json

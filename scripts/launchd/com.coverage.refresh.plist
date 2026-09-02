@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.coverage.refresh</string>
+
+  <!-- The local stand-in for render.yaml's `coverage-scrape` cron, and the
+       one job here that runs a shell script rather than a manage.py command:
+       scripts/refresh.sh wakes Postgres.app, takes the nightly pg_dump the
+       database's only copy of the user's outreach history depends on, and
+       only then scrapes. Render needs none of that — its database is managed
+       and always up — so the extra work lives in the script, not in this
+       file.
+
+       ONE run a day at 08:30 local, against Render's `0 */6 * * *`. The
+       deliberate exception to the "same number as production" rule the three
+       plists beside this one follow: a scrape is the one job with a real
+       cost outside this machine (every firm's careers site is hit), and a
+       laptop that is closed for most of the six-hour marks would fire them
+       all in a burst on wake anyway. Local freshness of a day is enough to
+       click around; the deployed board is what students read. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__REPO__/scripts/refresh.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <!-- False, unlike every other job here: this one scrapes the live boards
+       and writes a full database dump, so it must not fire on every login or
+       every `install.sh` re-run. The script is safe to run by hand when a
+       fresh pass is wanted. -->
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
