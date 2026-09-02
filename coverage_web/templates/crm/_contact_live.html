@@ -24,6 +24,35 @@ values.
 <section id="contact-live" class="cd-grid">
   <div class="cd-main">
 
+    {% comment %}
+    ---- The facts strip ----
+    Four things this page already knew and did not say
+    (`audit-crm-lifecycle.md` D8): the region (171 contacts carried one that
+    lived only on the edit form), the tier (219 of 265 sit at a tiered firm),
+    the firm's next confirmed date (34 do, and it was buried inside the Firm
+    Fit meta as "app close in Nd"), and an assessment firm's own recruiting
+    style.
+
+    Inside the swap fragment rather than up in the page header, so a saved
+    role or a logged touch re-renders it with everything else.
+
+    A blank region is a LINK, not a guess (P1): the unplaced tab is where
+    that question gets answered, and this is the moment the reader is looking
+    at the person it is about.
+    {% endcomment %}
+    <p class="cd-facts">
+      {% if facts.region_label %}
+        <span class="cd-fact"{% if facts.region_source_label %} title="{{ facts.region_source_label }}"{% endif %}>{{ facts.region_label }}</span>
+      {% else %}
+        <a class="cd-fact cd-fact-ask" href="{% url 'crm:contact_list' %}?scope=unplaced">Region unknown</a>
+      {% endif %}
+      {% if facts.tier %}<span class="cd-fact">Tier {{ facts.tier }}</span>{% endif %}
+      {% if facts.next_date %}
+        <span class="cd-fact">{{ facts.next_date.label }} {{ facts.next_date.date|date:"M j, Y" }} · {{ facts.next_date.market }}</span>
+      {% endif %}
+      {% if facts.recruiting_style %}<span class="cd-fact">{{ facts.recruiting_style }}</span>{% endif %}
+    </p>
+
     {# ---- Reach them ---- #}
     <div class="cd-card kin-reveal" style="--i:0">
       {% if contact.email %}
@@ -126,6 +155,12 @@ values.
         changing what any of them actually do.
         {% endcomment %}
         {% if park_note %}<p class="cd-park-note">{{ park_note }}</p>{% endif %}
+        {% comment %}
+        The date, off the park's own audit row (crm.views.park_ts). Absent
+        for a contact parked before the audit trail existed, and absent is
+        what it says: no date is drawn rather than a guessed one.
+        {% endcomment %}
+        {% if parked_at %}<p class="cd-park-note">Parked {{ parked_at|date:"M j, Y" }}</p>{% endif %}
       </div>
       <div class="meter">
         <div class="meter-track">
@@ -215,6 +250,44 @@ values.
       {% else %}
         <p class="cd-none">Nothing logged yet.</p>
       {% endif %}
+
+      {% comment %}
+      ---- Chats ----
+      Twelve debriefs existed on the founder's account and this page linked
+      none of them: what a conversation taught him was written once and never
+      read again. Three of them answered "would advocate: yes" and none had
+      been promoted, because the offer only ever appeared on the debrief form
+      itself, at the moment of writing, once.
+
+      The promote control is the EXISTING `debrief_promote` POST — the same
+      one the form offers, going through `crm.debrief.promote` and therefore
+      through `set_contact_state`, so the warmth move lands in the touches
+      audit trail like every other state change. A debrief already promoted
+      says so instead of offering again.
+
+      Renders nothing at all when there are no debriefs.
+      {% endcomment %}
+      {% if debriefs %}
+        <h3 class="cd-subh">Chats <span class="cd-count">{{ debriefs|length }}</span></h3>
+        <ul class="cd-chats">
+          {% for d in debriefs %}
+            <li class="cd-chat">
+              <a class="cd-chat-when" href="{% url 'crm:debrief' d.touch_id %}">{{ d.created|date:"M j, Y" }}</a>
+              {% if d.learned %}<span class="cd-chat-note">{{ d.learned|truncatechars:120 }}</span>{% endif %}
+              {% if d.advocate_answer == "yes" %}
+                {% if d.promoted %}
+                  <span class="cd-chat-done">Advocate</span>
+                {% else %}
+                  <form method="post" action="{% url 'crm:debrief_promote' d.touch_id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="btn">Make advocate</button>
+                  </form>
+                {% endif %}
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
     </div>
   </div>
 
@@ -277,6 +350,28 @@ values.
           while silently moving real Leverage scores off
           leverage_unknown_role.{% endcomment %}
           <span class="meta">{% if contact_score.axes.leverage.seniority != None %}seniority {{ contact_score.axes.leverage.seniority }}/100 from role{% elif contact_score.axes.leverage.role_given %}no seniority read from this role{% else %}no role on file{% endif %}{% if contact_score.axes.leverage.school_affiliation %} · alum{% endif %}</span>
+          {% comment %}
+          THE ASK, where the fact is missed. "No role on file" was a dead
+          sentence on the one axis that needs the fact, and the only place to
+          answer it was the fourteen-field edit form on another page — which
+          is why role is blank on 137 of 265 live contacts and on 44 of the
+          44 cards the queue was about to prompt a send to.
+
+          One field, saved in place (crm.views.contact_role). It renders only
+          when the role is genuinely blank: a role already on file is not a
+          question, and a role the keyword table simply did not recognise is
+          a different sentence, kept above.
+          {% endcomment %}
+          {% if not contact_score.axes.leverage.role_given %}
+            <form class="axis-ask" hx-post="{% url 'crm:contact_role' contact.pk %}"
+                  hx-target="#contact-live" hx-swap="outerHTML">
+              {% csrf_token %}
+              <input type="text" name="role" maxlength="255" autocomplete="off"
+                     aria-label="Their role at {{ contact.name }}'s firm"
+                     placeholder="Analyst, Associate, VP">
+              <button type="submit" class="btn">Save</button>
+            </form>
+          {% endif %}
         </div>
       </div>
     </div>

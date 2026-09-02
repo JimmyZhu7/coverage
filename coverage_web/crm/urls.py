@@ -142,6 +142,10 @@ urlpatterns = [
     path("contacts/<int:pk>/touch/", views.log_touch, name="log_touch"),
     # htmx: save the Compose draft (contact.opener) in place.
     path("contacts/<int:pk>/opener/", views.contact_opener, name="contact_opener"),
+    # htmx: answer the Leverage axis' own question, in place. See
+    # `views.contact_role` — the fact was read everywhere and asked for
+    # nowhere.
+    path("contacts/<int:pk>/role/", views.contact_role, name="contact_role"),
     path("contacts/<int:pk>/ai-brief/", views.contact_ai_brief, name="contact_ai_brief"),
     # htmx: (re)write the AI relationship summary. POST for the same reason
     # ai-brief is — a paid call must never fire from a prefetch or a crawl.

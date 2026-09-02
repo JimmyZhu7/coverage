@@ -190,6 +190,16 @@ class Contact(PrivateModel):
     gender = models.CharField(max_length=16, blank=True, default="")
     created = models.DateTimeField(auto_now_add=True)
     archived = models.BooleanField(default=False)
+    # WHEN the boolean above was last flipped on. Archiving writes no touch —
+    # it is a UI/lifecycle flag, deliberately outside the warmth ratchet (see
+    # `crm.views._set_archived`) — so before this column the archived ledger
+    # could list 41 people and not say when any of them left, and sorted them
+    # by name, which is the one order that carries no information about the
+    # decision. Nullable rather than defaulted: every row that was archived
+    # before this column existed has no honest answer, and inventing one
+    # (created, last touch, migration time) would be a fabricated fact on a
+    # page whose whole job is recovery. They sort last and say nothing (P1).
+    archived_at = models.DateTimeField(null=True, blank=True)
     email_pattern_recorded = models.BooleanField(default=False)
     # UI-only dismissal from the Today queue (Snooze / Skip). Not a touch and
     # not part of the pipeline ratchet — set directly via the ORM. A contact

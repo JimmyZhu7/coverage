@@ -19,6 +19,33 @@
   .cf-actions { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s4); }
   .cf-cancel { font-size: var(--fs-s); }
   .cf-err { color: var(--danger); font-size: var(--fs-xs); margin: 2px 0 var(--s2); }
+  .cf-req { font-size: var(--fs-s); color: var(--ink-2); margin: 0 0 var(--s3); }
+  /* The disclosure that holds the seven fields which only matter after the
+     first touch. Same shape as the Opportunities filter bar's "Filters"
+     summary (templates/directory/_styles.html `.filters-more > summary`):
+     `--r-ctl` like every other pressable thing, and an explicitly drawn
+     caret because Chrome drops the native marker on an inline-flex summary
+     and a disclosure with no visible affordance is a disclosure nobody
+     opens. */
+  .cf-more { margin-top: var(--s4); }
+  .cf-more > summary { display: inline-flex; align-items: center; gap: 6px;
+    width: fit-content; cursor: pointer; list-style: none;
+    padding: 9px var(--s4) 9px 14px; border: 1px solid var(--line);
+    border-radius: var(--r-ctl); background: var(--surface); color: var(--ink-2);
+    font-size: var(--fs-s); font-weight: var(--w-med);
+    box-shadow: var(--shadow-1);
+    transition: border-color var(--t-fast), color var(--t-fast); }
+  .cf-more > summary::-webkit-details-marker { display: none; }
+  .cf-more > summary::before { content: ""; width: 7px; height: 7px;
+    flex: none; border-right: 1.6px solid currentColor;
+    border-bottom: 1.6px solid currentColor; transform: rotate(-45deg);
+    margin-top: -2px; transition: transform var(--t-med); }
+  .cf-more[open] > summary::before { transform: rotate(45deg); margin-top: -4px; }
+  .cf-more > summary:hover { border-color: var(--accent-line);
+    color: var(--accent-ink); }
+  .cf-more > summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
+  .cf-more[open] > summary { margin-bottom: var(--s3); }
   @media (max-width: 560px) { .cf-grid { grid-template-columns: 1fr; } }
 </style>
 {% endblock %}
@@ -35,6 +62,13 @@
     <form method="post">
       {% csrf_token %}
       {% if form.non_field_errors %}<p class="cf-err">{{ form.non_field_errors|striptags }}</p>{% endif %}
+
+      {% comment %}
+      Said once, above the first field, because the form asked fourteen
+      questions and marked none of them optional: a student who does not
+      know that a name is enough answers all fourteen or abandons the page.
+      {% endcomment %}
+      <p class="cf-req">Only a name is required.</p>
 
       <div class="cf-full">
         <label for="{{ form.name.id_for_label }}">Name</label>
@@ -57,78 +91,113 @@
           {{ form.role }}
         </div>
         <div>
-          <label for="{{ form.school.id_for_label }}">School</label>
-          {{ form.school }}
-        </div>
-        <div>
           <label for="{{ form.email.id_for_label }}">Email</label>
           {{ form.email }}
           {% if form.email.errors %}<p class="cf-err">{{ form.email.errors|striptags }}</p>{% endif %}
         </div>
-        <div>
-          <label for="{{ form.linkedin.id_for_label }}">LinkedIn URL</label>
-          {{ form.linkedin }}
-          {% if form.linkedin.errors %}<p class="cf-err">{{ form.linkedin.errors|striptags }}</p>{% endif %}
-        </div>
-        <div>
-          <label for="{{ form.region.id_for_label }}">Region</label>
-          {{ form.region }}
-          {% if form.region.errors %}<p class="cf-err">{{ form.region.errors|striptags }}</p>{% endif %}
-        </div>
-        {% comment %}
-        The override for the queue's coffee-chat rule. Three choices rather
-        than a checkbox because the stored value is nullable and blank is a
-        real answer: leave it and Coverage reads the role text, set it and
-        your answer wins either way. Sits next to Role on purpose — it is a
-        question about the same fact.
-        {% endcomment %}
-        <div>
-          <label for="{{ form.recruiting_contact.id_for_label }}">Recruiting contact?</label>
-          {{ form.recruiting_contact }}
-          <p class="note">{{ form.recruiting_contact.help_text }}</p>
-        </div>
-        {% comment %}
-        The override for the recruitment-relevance rule (crm/recruitment.py):
-        the rule hides professors, campus offices and off-track roles from
-        the board and queue; this is where the user's own word beats it, in
-        either direction, permanently. Same three-choice shape as the field
-        above, for the same nullable-column reason.
-        {% endcomment %}
-        <div>
-          <label for="{{ form.recruitment_related.id_for_label }}">{{ form.recruitment_related.label }}</label>
-          {{ form.recruitment_related }}
-          <p class="note">{{ form.recruitment_related.help_text }}</p>
-        </div>
-        {% comment %}
-        The rescue hatch for one person inside a bulk send you have said was
-        not your job search. Sits here rather than on the Campaigns card
-        because the decision is about this person, and the card is about two
-        hundred of them. See crm/campaigns.py.
-        {% endcomment %}
-        <div>
-          <label for="{{ form.campaign_exempt.id_for_label }}">{{ form.campaign_exempt.label }}</label>
-          {{ form.campaign_exempt }}
-          <p class="note">{{ form.campaign_exempt.help_text }}</p>
-        </div>
         {% endif %}
       </div>
 
-      {% if not quick %}
-      <div class="cf-full">
-        <label for="{{ form.angle.id_for_label }}">Angle</label>
-        {{ form.angle }}
-        <p class="note">Your reason to reach out. Private to you, never sent.</p>
-      </div>
-      <div class="cf-full">
-        <label for="{{ form.opener.id_for_label }}">Opener</label>
-        {{ form.opener }}
-        <p class="note">The draft email itself. Seeds the compose body.</p>
-      </div>
-      {% endif %}
+      {% comment %}
+      Everything below this line only starts mattering AFTER the first touch:
+      School, LinkedIn, Region, the two rule overrides, the campaign hatch,
+      Angle, Opener and Notes. Nine of the fourteen fields behind one
+      disclosure, leaving the five a first contact is actually made of —
+      name, firm, the firm you had to type yourself, role, email.
+
+      NINE, NOT THE SEVEN THE ITEM NAMED, and the reason is the other
+      acceptance criterion: measured at 375x812 (the audit's own viewport)
+      with seven folded, Save sat at 887px — still 75px below the fold, so
+      the change would have satisfied its description and missed its point.
+      School and LinkedIn belong to the same class as the other seven: both
+      are read only after a relationship exists (School by the affinity
+      multiplier, LinkedIn by a link on the contact page), and LinkedIn is
+      blank on all 265 of the founder's live contacts, which is to say no
+      student has ever answered it here. Folded, Save measures 723px.
+
+      Open on the edit form and whenever a folded field came back with an
+      error: a field the student has already filled in, or that is refusing
+      their answer, is not a field to hide from them.
+
+      Same `<details>` the Opportunities filter bar uses for its own second
+      rank of controls; nothing here needs JS.
+      {% endcomment %}
+      {% if quick %}
       <div class="cf-full">
         <label for="{{ form.notes.id_for_label }}">Notes</label>
         {{ form.notes }}
       </div>
+      {% else %}
+      <details class="cf-more"{% if mode == "edit" or form.region.errors or form.linkedin.errors %} open{% endif %}>
+        <summary>More</summary>
+
+        <div class="cf-grid">
+          <div>
+            <label for="{{ form.school.id_for_label }}">School</label>
+            {{ form.school }}
+          </div>
+          <div>
+            <label for="{{ form.linkedin.id_for_label }}">LinkedIn URL</label>
+            {{ form.linkedin }}
+            {% if form.linkedin.errors %}<p class="cf-err">{{ form.linkedin.errors|striptags }}</p>{% endif %}
+          </div>
+          <div>
+            <label for="{{ form.region.id_for_label }}">Region</label>
+            {{ form.region }}
+            {% if form.region.errors %}<p class="cf-err">{{ form.region.errors|striptags }}</p>{% endif %}
+          </div>
+          {% comment %}
+          The override for the queue's coffee-chat rule. Three choices rather
+          than a checkbox because the stored value is nullable and blank is a
+          real answer: leave it and Coverage reads the role text, set it and
+          your answer wins either way.
+          {% endcomment %}
+          <div>
+            <label for="{{ form.recruiting_contact.id_for_label }}">Recruiting contact?</label>
+            {{ form.recruiting_contact }}
+            <p class="note">{{ form.recruiting_contact.help_text }}</p>
+          </div>
+          {% comment %}
+          The override for the recruitment-relevance rule (crm/recruitment.py):
+          the rule hides professors, campus offices and off-track roles from
+          the board and queue; this is where the user's own word beats it, in
+          either direction, permanently. Same three-choice shape as the field
+          above, for the same nullable-column reason.
+          {% endcomment %}
+          <div>
+            <label for="{{ form.recruitment_related.id_for_label }}">{{ form.recruitment_related.label }}</label>
+            {{ form.recruitment_related }}
+            <p class="note">{{ form.recruitment_related.help_text }}</p>
+          </div>
+          {% comment %}
+          The rescue hatch for one person inside a bulk send you have said was
+          not your job search. Sits here rather than on the Campaigns card
+          because the decision is about this person, and the card is about two
+          hundred of them. See crm/campaigns.py.
+          {% endcomment %}
+          <div>
+            <label for="{{ form.campaign_exempt.id_for_label }}">{{ form.campaign_exempt.label }}</label>
+            {{ form.campaign_exempt }}
+            <p class="note">{{ form.campaign_exempt.help_text }}</p>
+          </div>
+        </div>
+
+        <div class="cf-full">
+          <label for="{{ form.angle.id_for_label }}">Angle</label>
+          {{ form.angle }}
+          <p class="note">Your reason to reach out. Private to you, never sent.</p>
+        </div>
+        <div class="cf-full">
+          <label for="{{ form.opener.id_for_label }}">Opener</label>
+          {{ form.opener }}
+          <p class="note">The draft email itself. Seeds the compose body.</p>
+        </div>
+        <div class="cf-full">
+          <label for="{{ form.notes.id_for_label }}">Notes</label>
+          {{ form.notes }}
+        </div>
+      </details>
+      {% endif %}
 
       <div class="cf-actions">
         {% if quick %}<input type="hidden" name="quick" value="1">{% endif %}

@@ -292,6 +292,27 @@
               <button type="button" class="lane-all" data-place-all hidden>Select all</button>
               <span class="scrub-count">{{ group.count }}</span>
             </div>
+            {% comment %}
+            One tap for the whole firm, and only the markets that firm
+            actually recruits in (crm/views.py::_group_unplaced builds
+            `group.chips` off `Contact.firm_markets`). Ninety of the
+            founder's ninety-four unplaced rows sit at a firm that recruits
+            in both us and hk, so the three-way control was asking a two-way
+            question everywhere it fired.
+
+            `hidden` in markup and revealed by the script, the same
+            progressive-enhancement contract as "Select all" above it: with
+            JS off the checkboxes and the three-verb bar below are the whole
+            control, exactly as before this row existed. Nothing is removed
+            either way — the bar still carries all three verbs, including
+            the "Other countries" nothing will ever infer.
+            {% endcomment %}
+            <div class="net-group-chips" data-place-chips hidden>
+              {% for verb, label in group.chips %}
+                <button type="submit" name="verb" value="{{ verb }}"
+                        class="btn net-group-chip" data-place-chip>{{ label }}</button>
+              {% endfor %}
+            </div>
             <div class="net-minis">
               {% for c in group.contacts %}
                 <label class="net-mini">
@@ -312,10 +333,13 @@
         <div class="bulk-bar" data-place-bar hidden>
           <span class="bulk-count"><b data-place-n>0</b> selected</span>
           <span class="bulk-acts">
-            {% for verb, code in region_verbs.items %}
-              <button type="submit" name="verb" value="{{ verb }}" class="btn">
-                {% if code == 'us' %}United States{% elif code == 'hk' %}Hong Kong{% else %}Other countries{% endif %}
-              </button>
+            {% comment %}
+            Labels off `crm.views.REGION_BULK_LABELS`, not an `{% if %}` chain
+            here: the per-group chips above name the same three verbs, and a
+            second copy of the words is a second place for them to drift.
+            {% endcomment %}
+            {% for verb, label in region_verb_labels.items %}
+              <button type="submit" name="verb" value="{{ verb }}" class="btn">{{ label }}</button>
             {% endfor %}
             <button type="button" class="btn bulk-clear" data-place-clear>Clear</button>
           </span>
@@ -1035,6 +1059,30 @@
         mine.forEach(function (b) { b.checked = fill; });
         btn.textContent = fill ? "Clear firm" : "Select all";
         sync();
+      });
+    });
+
+    // The per-firm region chips: one tap files the whole group. Revealed
+    // here rather than rendered visible for the same reason "Select all"
+    // is — without this script a chip would post whatever happened to be
+    // ticked elsewhere on the page, which is not what its label says.
+    //
+    // The click CLEARS every box first and then fills this group's. A chip
+    // means "this firm, all of them", not "this firm plus whatever I left
+    // selected two groups up", and the submit that follows is the form's
+    // own — no fetch, no preventDefault, so JS off and JS on end at the
+    // same POST.
+    form.querySelectorAll("[data-place-chips]").forEach(function (row) {
+      row.hidden = false;
+      row.querySelectorAll("[data-place-chip]").forEach(function (chip) {
+        chip.addEventListener("click", function () {
+          var group = chip.closest("[data-place-group]");
+          boxes.forEach(function (b) { b.checked = false; });
+          group.querySelectorAll(".place-check").forEach(function (b) {
+            b.checked = true;
+          });
+          sync();
+        });
       });
     });
 

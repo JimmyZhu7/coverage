@@ -301,9 +301,17 @@ def test_leverage_does_not_call_a_shown_role_unknown(client):
 
 
 @pytest.mark.django_db
-def test_leverage_says_no_role_on_file_when_there_is_no_role(client):
-    """The other half of the split. A blank role is the ONE case the old
-    string was true for, and it keeps a true string."""
+def test_leverage_asks_for_the_role_when_there_is_none(client):
+    """REWRITTEN 2026-09-02 (WS-CRM-03). The old test pinned "no role on
+    file" and nothing else, which was true and useless: this is the one axis
+    on the page that needs the fact, and it said the fact was missing and
+    stopped. The only way to answer was the fourteen-field edit form on
+    another page — which is why role is blank on 137 of the founder's 265
+    live contacts and on 44 of the 44 cards his queue was about to prompt a
+    send to (`audit-crm-lifecycle.md` D2).
+
+    The sentence stays (it is still true, and it is what the ask is about);
+    a one-field form now sits under it."""
     user = _user()
     contact = Contact.all_objects.create(user=user, name="Nameless Role", role="")
 
@@ -313,6 +321,48 @@ def test_leverage_says_no_role_on_file_when_there_is_no_role(client):
 
     assert "no role on file" in body
     assert "no seniority read from this role" not in body
+    assert reverse("crm:contact_role", args=[contact.id]) in body
+    assert 'name="role"' in body
+
+
+@pytest.mark.django_db
+def test_a_contact_with_a_role_is_not_asked_for_one(client):
+    """A role already on file is not a question. The ask renders only where
+    the blank is."""
+    user = _user()
+    contact = Contact.all_objects.create(user=user, name="Dana MD",
+                                         role="Managing Director")
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_detail", args=[contact.id])).content.decode()
+    assert reverse("crm:contact_role", args=[contact.id]) not in body
+
+
+@pytest.mark.django_db
+def test_the_role_ask_saves_and_the_page_stops_asking(client):
+    user = _user()
+    contact = Contact.all_objects.create(user=user, name="Nameless Role", role="")
+    client.force_login(user)
+    resp = client.post(reverse("crm:contact_role", args=[contact.id]),
+                       {"role": "  Vice President  "})
+    assert resp.status_code == 200
+    contact.refresh_from_db()
+    assert contact.role == "Vice President"
+    body = resp.content.decode()
+    assert "no role on file" not in body
+
+
+@pytest.mark.django_db
+def test_the_role_ask_is_scoped_to_its_owner(client):
+    """E5. Another tenant's id 404s indistinguishably from a missing one."""
+    a = _user("a@example.com")
+    b = _user("b@example.com")
+    contact = Contact.all_objects.create(user=a, name="Theirs")
+    client.force_login(b)
+    resp = client.post(reverse("crm:contact_role", args=[contact.id]),
+                       {"role": "Analyst"})
+    assert resp.status_code == 404
+    contact.refresh_from_db()
+    assert contact.role == ""
 
 
 @pytest.mark.django_db

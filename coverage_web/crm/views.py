@@ -20,7 +20,7 @@ from urllib.parse import quote
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count as models_Count, Max as models_Max, Q
+from django.db.models import Count as models_Count, F, Max as models_Max, Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -88,6 +88,7 @@ from .utils import (  # noqa: F401
     _warmth_pct,
     confirmed_firm_dates,
     firm_date_confidence,
+    firm_date_market,
 )
 
 # ---------------------------------------------------------------------------
@@ -851,18 +852,47 @@ def _group_unplaced(contacts) -> list[dict]:
     `firm_text`, and failing that under one "No firm" bundle. Dropping them
     would be the quiet kind of wrong: they are exactly the people a student
     added by hand, which is to say the ones most likely to be unplaced.
+
+    Each group also carries `chips`: the region verbs that are POSSIBLE for
+    this firm, in `REGION_BULK_LABELS` order. Measured on the founder's board
+    (`audit-crm-lifecycle.md` E5), 90 of the 94 blank-region rows sit at a
+    firm that recruits in both us and hk, 1 has no firm at all, and 0 sit at
+    a single-market firm — which is to say the deterministic rule
+    (`Contact.default_region_from_firm`) already fired everywhere it could,
+    and every remaining row is a genuine two-way question being asked with a
+    three-way control.
+
+    `Contact.firm_markets()` is the one definition of "which deadline markets
+    does this person's firm recruit in" (P5) — the same method
+    `default_region_from_firm` and `resolve_region` read. A firm with no
+    declared markets, or no firm at all, keeps all three chips: the honest
+    answer there is that we know nothing, and "Other countries" is the only
+    way a human ever says London.
+
+    The three-verb bulk bar below the groups is untouched, so narrowing a
+    group's chips takes nothing away (P4) — it only stops offering Hong Kong
+    to a group of people at a US-only firm.
     """
     groups: dict[str, dict] = {}
     for c in contacts:
         label = (c.firm.name if c.firm_id and c.firm else c.firm_text) or "No firm"
         group = groups.setdefault(
-            label, {"label": label, "key": f"g{len(groups)}", "contacts": []}
+            label,
+            {"label": label, "key": f"g{len(groups)}", "contacts": [],
+             "markets": set()},
         )
         group["contacts"].append(c)
+        group["markets"] |= c.firm_markets()
     out = list(groups.values())
     for g in out:
         g["contacts"].sort(key=lambda c: (c.name or "").lower())
         g["count"] = len(g["contacts"])
+        markets = g["markets"]
+        g["chips"] = [
+            (verb, label)
+            for verb, label in REGION_BULK_LABELS.items()
+            if not markets or REGION_BULK_VERBS[verb] in markets
+        ]
     out.sort(key=lambda g: (-g["count"], g["label"].lower()))
     return out
 
@@ -1565,7 +1595,7 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # test writes itself.
             "unplaced_total": unplaced_total,
             "unplaced_groups": unplaced_groups,
-            "region_verbs": REGION_BULK_VERBS,
+            "region_verb_labels": REGION_BULK_LABELS,
             "gaps": gaps,
             # `coverage.advocate_summary(...)`: advocates across the tiered
             # firms, the firm count, and the 2-20 range, plus a ready `line`.
@@ -1761,11 +1791,18 @@ def _set_archived(request: HttpRequest, pk: int, *, archived: bool) -> Contact:
     purpose: `archived` is a UI/lifecycle flag, not part of the
     warmth/thread_state ratchet that must go through `crm.services`. It
     changes nothing about the relationship's history — every touch stays on
-    the row and comes back with it."""
+    the row and comes back with it.
+
+    `archived_at` moves with the flag and is CLEARED on the way back, so the
+    column answers exactly one question — when did this contact last leave
+    the board — rather than accumulating a half-history the ledger would
+    then have to explain. A contact archived twice reports the second time,
+    which is the time the row's current state was decided."""
     contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
     if contact.archived != archived:
         contact.archived = archived
-        contact.save(update_fields=["archived"])
+        contact.archived_at = timezone.now() if archived else None
+        contact.save(update_fields=["archived", "archived_at"])
     return contact
 
 
@@ -1808,6 +1845,23 @@ REGION_BULK_VERBS = {
     "region_us": "us",
     "region_hk": "hk",
     "region_other": "other",
+}
+
+# verb -> the words on the button, in the order the buttons appear.
+#
+# ONE definition (P5). `contact_list.html` used to carry its own
+# `{% if code == 'us' %}United States{% elif code == 'hk' %}...` chain inside
+# the bulk bar's loop, so the page and this module each held half the answer
+# to "what is this verb called". The per-group chips added by WS-CRM-15 would
+# have made that two halves and a third.
+#
+# "Other countries", not `directory.classify.REGION_LABELS`' "Other Markets":
+# that vocabulary belongs to postings, and this one is about a person, who
+# sits in a country. Same split `network_scopes` makes one screen above.
+REGION_BULK_LABELS = {
+    "region_us": "United States",
+    "region_hk": "Hong Kong",
+    "region_other": "Other countries",
 }
 
 
@@ -2030,9 +2084,13 @@ def contacts_bulk(request: HttpRequest) -> HttpResponse:
         # A plain ORM write, matching `_set_archived`: `archived` is a
         # UI/lifecycle flag, not part of the warmth/thread_state ratchet, so
         # it does not go through the pipeline.
+        # `archived_at` alongside the flag, the same pair `_set_archived`
+        # writes: a bulk archive is the door 83 people can leave through at
+        # once, so it is the LAST one that should leave the ledger unable to
+        # say when.
         Contact.objects.for_user(request.user).filter(
             pk__in=[cid for cid, _ in rows]
-        ).update(archived=True)
+        ).update(archived=True, archived_at=timezone.now())
 
     record_event(
         f"contacts_bulk_{verb}", user=request.user,
@@ -2137,7 +2195,14 @@ def contact_archived(request: HttpRequest) -> HttpResponse:
         .filter(archived=True)
         .select_related("firm")
         .annotate(last_touch_ts=models_Max("touches__ts", filter=_REAL_TOUCH_Q))
-        .order_by("name")
+        # NEWEST FIRST, nulls last, name to break ties. Alphabetical was the
+        # one order that says nothing about the decision: a recovery surface
+        # is read after a mistake, and the mistake is nearly always the most
+        # recent thing that happened. Rows archived before `archived_at`
+        # existed have no date and sort to the bottom rather than being given
+        # an invented one (P1) — `F(...).desc(nulls_last=True)` rather than
+        # `-archived_at`, which in Postgres sorts NULL FIRST.
+        .order_by(F("archived_at").desc(nulls_last=True), "name")
     )
     if firm_id.isdigit():
         contacts_qs = contacts_qs.filter(firm_id=int(firm_id))
@@ -2322,6 +2387,39 @@ def contact_unrelated_keep(request: HttpRequest, pk: int) -> HttpResponse:
 # click, Aug 10" is legible instead of 102 individual rows with no story
 # connecting them.
 # ---------------------------------------------------------------------------
+# The `column=value` pair `pipeline.set_state` writes into a park's audit
+# note. ONE spelling of it (P5): `_parked_cohorts` filters on it, `park_ts`
+# scans for it, and `_override_label` reads it to decide whether an override
+# gets the word "parked". A second literal would be a second answer to "was
+# this a park".
+PARK_OVERRIDE_FIELD = "thread_state=parked"
+
+
+def park_ts(contact: Contact, touches) -> _datetime | None:
+    """When this contact was parked, read off the audit ROW, never off its
+    prose.
+
+    `audit-crm-lifecycle.md` E6: park's time existed only inside the
+    override note's sentence, which meant the only way to date a park was to
+    parse a human-authored string — and that string is optional, is written
+    by two different actors, and is the one part of the note a student can
+    edit. The row's own `ts` is the fact; the note is the explanation.
+    `_MANUAL_OVERRIDE_PARSE` therefore reads the note's WORDS and nothing
+    else, and this function reads the timestamp and nothing else.
+
+    `touches` is the contact's own touch list, newest first — the one
+    `_contact_live_context` has already loaded, so this costs no query.
+    Returns None for a contact who is not parked, and for a park older than
+    the audit trail itself (an imported row), which is the same honest
+    "no record on file" the parked-cohort page already names."""
+    if contact.thread_state != "parked":
+        return None
+    for t in touches:
+        if t.kind == MANUAL_OVERRIDE_KIND and PARK_OVERRIDE_FIELD in (t.note or ""):
+            return t.ts
+    return None
+
+
 def _parked_cohorts(user) -> list[dict]:
     """Currently-parked, non-archived contacts grouped by the audit note
     that parked them (see the module comment above). Newest cohort first —
@@ -2347,7 +2445,7 @@ def _parked_cohorts(user) -> list[dict]:
         .filter(
             contact_id__in=[c.id for c in parked],
             kind=MANUAL_OVERRIDE_KIND,
-            note__icontains="thread_state=parked",
+            note__icontains=PARK_OVERRIDE_FIELD,
         )
         .order_by("contact_id", "-ts")
     ):
@@ -2684,6 +2782,7 @@ def _contact_live_context(
 ) -> dict[str, Any]:
     user = request.user
     now = timezone.now()
+    today_local = timezone.localdate()
 
     touches = list(
         Touch.objects.for_user(user).filter(contact=contact).order_by("-ts")
@@ -2736,6 +2835,11 @@ def _contact_live_context(
         firm_touches = _touch_dicts(
             Touch.objects.for_user(user).filter(contact_id__in=fc_ids)
         )
+        # ONE read of this firm's dates, held as a list: the fit score below
+        # needs all of them and the facts strip needs the next confirmed
+        # future one. A second queryset would be a second query for rows
+        # already in memory.
+        dated = list(FirmDate.objects.filter(firm=firm))
         firm_dates = [
             {
                 "event_kind": fd.event_kind,
@@ -2746,7 +2850,7 @@ def _contact_live_context(
                 # `crm.utils.firm_date_confidence`.
                 "confidence": firm_date_confidence(fd),
             }
-            for fd in FirmDate.objects.filter(firm=firm)
+            for fd in dated
         ]
         # The Network axis measures against `advocate_target` full-strength
         # advocates as its 100-point yardstick (scoring._score_network). Left
@@ -2818,6 +2922,92 @@ def _contact_live_context(
                 _FIRM_DATE_LABELS.get(nxt, nxt.replace("_", " "))
             )
 
+    # ---- The facts strip (WS-CRM-04) -------------------------------------
+    #
+    # `audit-crm-lifecycle.md` D8: this page was hiding four things the row
+    # already implied. 171 contacts carry a region that lived ONLY on the
+    # edit form; 219 of 265 sit at a tiered firm and the tier was not shown;
+    # 34 sit at a firm with a confirmed future close and the only trace of it
+    # was "app close in 34d" buried in the Firm Fit meta; and 12 debriefs
+    # existed with no list and no link, three of them answering "would
+    # advocate: yes" with nobody ever offered the promotion.
+    #
+    # Nothing here is computed: every value was already inside this
+    # function's reach. Two extra queries in total (the tier row, the
+    # debriefs) — see the budget assertion in `test_contact_facts_strip.py`.
+    facts = {
+        # The region AND where it came from, because the two are one fact:
+        # a region the student set outranks one the firm implied (P2), and
+        # `region_source` is the only thing that can say which this is.
+        "region": contact.region,
+        # "Other countries", not `REGION_LABELS`' "Other Markets": that
+        # vocabulary belongs to postings and this chip is about a person, who
+        # sits in a country. Same split `contact_list`'s region tabs make.
+        "region_label": (
+            "Other countries" if contact.region == "other"
+            else REGION_LABELS.get(contact.region, "")
+        ),
+        "region_source_label": dict(Contact.REGION_SOURCE_CHOICES).get(
+            contact.region_source, ""
+        ),
+        "tier": None,
+        "next_date": None,
+        "recruiting_style": "",
+    }
+    if firm is not None:
+        # One row, one query. `all_objects` is not needed: the tier is the
+        # student's own, so `.for_user` is the correct and only scope.
+        facts["tier"] = (
+            UserFirm.objects.for_user(user)
+            .filter(firm=firm)
+            .values_list("tier", flat=True)
+            .first()
+        )
+        if (firm.recruiting_style or "") not in ("", Firm.RECRUITING_STYLE_CAMPUS):
+            facts["recruiting_style"] = dict(
+                Firm.RECRUITING_STYLE_CHOICES
+            ).get(firm.recruiting_style, "")
+        # The next CONFIRMED future date, off the rows already fetched above
+        # for the fit score — no second query, and `firm_date_confidence` is
+        # the one definition of the bar (P5: same function `crm.today`'s
+        # deadlines rail and the calendar's layer 3 read).
+        #
+        # WITH ITS MARKET, always. `crm.utils.firm_date_market` is why: an
+        # unmarked row reads as global, and the founder's own September
+        # calendar said "Goldman Sachs · Applications close" on a row whose
+        # market nobody had recorded. A date from the wrong market is not a
+        # small omission on a page about one person.
+        upcoming = sorted(
+            (
+                fd for fd in dated
+                if fd.date and fd.date >= today_local
+                and firm_date_confidence(fd) == "confirmed_official"
+            ),
+            key=lambda fd: fd.date,
+        )
+        if upcoming:
+            fd = upcoming[0]
+            facts["next_date"] = {
+                "label": _FIRM_DATE_LABELS.get(
+                    fd.event_kind, fd.event_kind.replace("_", " ")
+                ),
+                "date": fd.date,
+                "market": firm_date_market(fd.region),
+            }
+
+    # ---- The chats this contact actually had -----------------------------
+    #
+    # Twelve debriefs existed on the founder's account and this page linked
+    # none of them, so the record of what a conversation taught him was
+    # written once and never read again. Three answered "would advocate:
+    # yes" and none had been promoted, because the offer only ever appeared
+    # on the debrief form itself, once, at the moment of writing.
+    debriefs = list(
+        ChatDebrief.objects.for_user(user)
+        .filter(contact=contact, dismissed=False)
+        .order_by("-created")
+    )
+
     # Warmth-meter animation endpoints. On a plain GET both are the current
     # level (no visible motion); on a POST that ratcheted, `from` is the old
     # level so the fill animates the jump.
@@ -2829,6 +3019,13 @@ def _contact_live_context(
         "touch_rows": touch_rows,
         "state_line": _status_line(contact),
         "park_note": _park_note(contact),
+        # Off the override ROW, not its prose (see `park_ts`). Free: it
+        # scans the `touches` list this context already loaded.
+        "parked_at": park_ts(contact, touches),
+        # The one-line strip under the eyebrow, and the chats list under
+        # History. See the two blocks above for what each hid.
+        "facts": facts,
+        "debriefs": debriefs,
         "contact_score": contact_score,
         "firm_score": firm_score,
         "firm": firm,
@@ -2871,6 +3068,37 @@ def contact_opener(request: HttpRequest, pk: int) -> HttpResponse:
     contact.opener = (request.POST.get("opener") or "").strip()
     contact.save(update_fields=["opener"])
     record_event("opener_saved", user=request.user)
+    return render(request, "crm/_contact_live.html",
+                  _contact_live_context(request, contact))
+
+
+@login_required
+@require_POST
+def contact_role(request: HttpRequest, pk: int) -> HttpResponse:
+    """Save the contact's role, from the one-field ask on the Leverage axis.
+
+    Mirrors `contact_opener` exactly, and exists for the same reason: the
+    fact was read everywhere and asked for nowhere. Role is blank on 137 of
+    the founder's 265 live contacts and on 44 of the 44 cards his queue was
+    about to prompt him to send (`audit-crm-lifecycle.md` D2,
+    `audit-personalization-networking.md` §1 Q1) — and the Leverage axis,
+    the one place on the page that needs it, said "no role on file" and
+    stopped. Until now the only way to answer was the fourteen-field edit
+    form on another page.
+
+    It matters because referrals flow downward: the seniority a student can
+    reach is a function of connection strength, so cold outreach belongs
+    with analysts and associates (`research-networking-norms.md` §2b and
+    §2d). Without a role the product cannot apply that rule at all.
+
+    A blank POST clears the field rather than refusing it: a role typed by
+    mistake must be removable from the same control that set it, and blank
+    is the state the whole page already knows how to render.
+    """
+    contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
+    contact.role = (request.POST.get("role") or "").strip()[:255]
+    contact.save(update_fields=["role"])
+    record_event("contact_role_saved", user=request.user)
     return render(request, "crm/_contact_live.html",
                   _contact_live_context(request, contact))
 

@@ -52,8 +52,18 @@
               <a href="{% url 'crm:contact_detail' c.pk %}">{{ c.name|smart_person_name|smart_title }}</a>
               <span class="arch-meta">{% if c.firm %}{{ c.firm.name|smart_title }}{% elif c.firm_text %}{{ c.firm_text|smart_title }}{% endif %}{% if c.role %} · {{ c.role }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}</span>
             </div>
+            {% comment %}
+            The date this page is actually about, labelled, because the
+            column used to be a bare date that meant "last touch" on the one
+            ledger whose subject is a different event entirely. Rows archived
+            before `Contact.archived_at` existed have no answer and fall back
+            to the last touch, still labelled, rather than being handed an
+            invented archive date (P1). They sort to the bottom.
+            {% endcomment %}
             <span class="arch-when">
-              {% if c.last_touch_ts %}{{ c.last_touch_ts|date:"M j, Y" }}{% else %}No touches{% endif %}
+              {% if c.archived_at %}Archived {{ c.archived_at|date:"M j, Y" }}
+              {% elif c.last_touch_ts %}Last touch {{ c.last_touch_ts|date:"M j, Y" }}
+              {% else %}No touches{% endif %}
             </span>
             <form method="post" action="{% url 'crm:contact_unarchive' c.pk %}">
               {% csrf_token %}
