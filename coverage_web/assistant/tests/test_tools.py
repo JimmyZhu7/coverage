@@ -440,6 +440,125 @@ def test_get_my_firms_reports_every_tiered_firm_with_coverage_at_each(user, firm
     assert [f["firm"] for f in result["firms"]] == ["North Bank", "South Bank"]
 
 
+def test_get_my_firms_counts_parked_contacts_beside_coverage_not_inside_it(user, firm):
+    """A parked contact is a thread the student has stopped working, and
+    `contact_count` counted them as coverage. Measured on the founder's
+    account, 2026-09-01: 219 contacts at his tiered firms, 89 of them not
+    parked; Nomura read 13 and had 1 live thread; Macquarie, Standard
+    Chartered, Amazon, BCG and Blackstone were 100% parked and read as
+    covered. This tool's whole job is "across my targets, where am I
+    thinnest".
+
+    `contact_count` is UNCHANGED on purpose — silently redefining a number
+    the model has been reading is its own kind of lie — so the honest one is
+    added beside it, and `warmest_active_contact` with it: a firm whose only
+    `chatted` contact is parked is not a firm with a warm relationship."""
+    UserFirm(user=user, firm=firm, tier=1).save()
+    Contact(user=user, firm=firm, name="Live One", warmth="cold").save()
+    Contact(user=user, firm=firm, name="Parked Warm", warmth="chatted",
+            thread_state="parked").save()
+    Contact(user=user, firm=firm, name="Quiet One", warmth="replied",
+            thread_state="quiet").save()
+
+    result, is_error = _call(user, "get_my_firms")
+
+    assert not is_error
+    row = {f["firm"]: f for f in result["firms"]}["North Bank"]
+    assert row["contact_count"] == 3
+    assert row["parked_count"] == 2
+    assert row["active_count"] == 1
+    # The warmest person on file is parked; the warmest LIVE thread is cold.
+    assert row["warmest_contact"] == "chatted"
+    assert row["warmest_active_contact"] == "cold"
+
+
+def test_get_my_firms_says_which_number_means_coverage(user):
+    """The counts are useless if the model cannot tell which one answers the
+    question. A schema-text test, deliberately: the description is the only
+    thing the model reads before it picks a number."""
+    schema = {t["name"]: t for t in tools.TOOL_SCHEMAS}["get_my_firms"]
+    assert "active_count" in schema["description"]
+    assert "parked" in schema["description"]
+
+
+def test_get_firm_counts_parked_contacts_off_the_database_not_the_capped_list(user, firm):
+    """`my_contacts` is capped at MAX_ROWS, so a count taken from it would be
+    wrong at exactly the firms where coverage matters most — the founder has
+    26 contacts at Morgan Stanley and the slice shows 25. The three counts
+    come from the database."""
+    for i in range(tools.MAX_ROWS + 3):
+        Contact(user=user, firm=firm, name=f"Parked {i:02d}", warmth="cold",
+                thread_state="parked").save()
+    Contact(user=user, firm=firm, name="Live One", warmth="replied").save()
+
+    result, is_error = _call(user, "get_firm", {"name_or_slug": "north bank"})
+
+    assert not is_error
+    assert len(result["my_contacts"]) == tools.MAX_ROWS  # the list is capped
+    assert result["my_contacts_total"] == tools.MAX_ROWS + 4  # the count is not
+    assert result["my_contacts_parked"] == tools.MAX_ROWS + 3
+    assert result["my_contacts_active"] == 1
+
+
+def test_search_contacts_last_touch_ignores_the_kinds_the_queue_ignores(user, firm):
+    """`last_touch_calendar_days` took the max over EVERY touch kind, so a
+    park (which writes a `manual_override` audit row) or an inbound bulk send
+    read back to the advisor as contact. Measured on the founder's account,
+    2026-09-01: 165 of 265 live contacts had a clock-silent kind as their
+    most recent row, 44 of them parked that evening and therefore reading
+    "last touch 0 days" while the Today page correctly called them idle.
+
+    The definition is imported from `coverage_domain.cadence`, not restated
+    here — this test pins that the tool agrees with the engine, and
+    `coverage_domain/tests/test_stress_invariants.py` pins the set itself."""
+    now = timezone.now()
+    c = Contact(user=user, firm=firm, name="Jane Banker")
+    c.save()
+    Touch(user=user, contact=c, kind="outreach", channel="email",
+          ts=now - timedelta(days=20)).save()
+    # The student parked them today. An audit row, not an interaction.
+    Touch(user=user, contact=c, kind="manual_override", channel="other", ts=now).save()
+    # And a newsletter landed an hour ago.
+    Touch(user=user, contact=c, kind="bulk_received", channel="email", ts=now).save()
+
+    result, is_error = _call(user, "search_contacts", {"query": "jane"})
+
+    assert not is_error
+    assert result["contacts"][0]["last_touch_calendar_days"] == 20
+
+
+def test_search_contacts_reports_no_real_touch_as_null_rather_than_zero(user, firm):
+    """A contact whose ONLY rows are clock-silent has never actually been
+    contacted, which is a different fact from "contacted just now" and from
+    "contacted a long time ago". Null, per P1, rather than a number."""
+    c = Contact(user=user, firm=firm, name="Jane Banker")
+    c.save()
+    Touch(user=user, contact=c, kind="bulk_received", channel="email",
+          ts=timezone.now()).save()
+
+    result, _ = _call(user, "search_contacts", {"query": "jane"})
+
+    assert result["contacts"][0]["last_touch_calendar_days"] is None
+
+
+def test_closing_within_days_says_it_returns_reported_deadlines_too(user):
+    """The schema promised "Only roles with a stated deadline" and the filter
+    has always been any deadline at all: measured 2026-09-01, a 14-day window
+    returned 22 `reported` and 3 `stated`.
+
+    REWORDED, NOT NARROWED. Filtering to `stated` would cut the window to a
+    handful of rows and hide the only closing signal that exists for most
+    postings (P9 — the board cannot see what the ATS does not publish). The
+    honest alternative to hiding a date Coverage read itself is labelling it,
+    which every row already does through `deadline_source`; the description
+    now points at that field instead of promising something else."""
+    schema = {t["name"]: t for t in tools.TOOL_SCHEMAS}["search_opportunities"]
+    text = schema["input_schema"]["properties"]["closing_within_days"]["description"]
+    assert "stated" in text.lower() and "reported" in text.lower()
+    assert "deadline_source" in text
+    assert "Only roles with a stated deadline" not in text
+
+
 def test_get_my_firms_with_no_targets_is_a_plain_empty_result(user):
     result, is_error = _call(user, "get_my_firms")
 

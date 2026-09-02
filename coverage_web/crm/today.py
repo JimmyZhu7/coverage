@@ -19,6 +19,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
 
@@ -107,6 +108,13 @@ TUNABLE_CADENCE_PARAMS: dict[str, tuple[int, int]] = {
     "chatted_touch_min_weeks": (1, 52),
     "pre_deadline_reping_days": (1, 90),
 }
+
+# The two `thread_state` values that mean "the student has told the queue to
+# stop asking about this person". One tuple rather than the separate literals
+# this module used to carry at each site, because `queue_silenced_contact_ids`
+# below turned this into a claim the daily brief acts on, and another copy is
+# how these drift apart (P5).
+QUEUE_SILENT_THREAD_STATES = ("parked", "quiet")
 
 
 def _cadence_params(user) -> dict[str, int]:
@@ -410,7 +418,7 @@ def _build_actions(user):
         c.firm_id for c in contacts
         if c.firm_id in tiers
         and c.warmth in _WARM_UPKEEP_WARMTHS
-        and c.thread_state not in ("parked", "quiet")
+        and c.thread_state not in QUEUE_SILENT_THREAD_STATES
     }
     openings = rel.firm_openings(user, warm_firm_ids, today) if warm_firm_ids else {}
     actions += _opening_keep_warms(
@@ -585,7 +593,7 @@ def _opening_keep_warms(
             continue
         if c.get("warmth") not in _WARM_UPKEEP_WARMTHS:
             continue
-        if c.get("thread_state") in ("parked", "quiet"):
+        if c.get("thread_state") in QUEUE_SILENT_THREAD_STATES:
             continue
         opening = openings.get(c.get("firm_id"))
         if not opening:
@@ -1476,6 +1484,28 @@ _TODAY_LANES = [
     ("momentum", "Move it forward"),
     ("cold", "Cold follow-ups"),
 ]
+
+# The cold lane holds TWO action kinds — `first_outreach` and `follow_up` —
+# and its fixed heading only ever described the second. Measured on a
+# five-minute-old account, 2026-09-01: the first contact a student ever adds
+# produces one `first_outreach` card, and the page filed it under "Cold
+# follow-ups", telling someone who has sent nothing to follow up. The lane
+# says what its cards ARE, so the heading is read off them.
+_COLD_LANE_LABELS = {
+    frozenset({"first_outreach"}): "First outreach",
+    frozenset({"follow_up"}): "Cold follow-ups",
+}
+_COLD_LANE_MIXED = "Cold outreach"
+
+
+def _lane_label(key: str, items: list[dict], default: str) -> str:
+    """The heading for one rendered lane. Only the cold lane varies; the other
+    two hold a single kind of work each and their fixed labels are exact."""
+    if key != "cold" or not items:
+        return default
+    return _COLD_LANE_LABELS.get(
+        frozenset(a["action"] for a in items), _COLD_LANE_MIXED
+    )
 
 
 def _today_class(a: dict) -> int:
@@ -2723,6 +2753,21 @@ def _cockpit_context(user) -> dict:
             held.append(a)
     planned = critical + planned_rest
 
+    # WHAT THE DAILY BRIEF READS (see `_actions_for_brief` in the return dict
+    # below for the measurement and the argument). The plan, then the rest of
+    # the queue in the same ranked order, minus the two flags that mean "the
+    # page is deliberately not asking for this today". Stamped with the lane
+    # so `assistant.brief._summarize_actions` can print it: a brief that lists
+    # eight people on a day the plan budgets three has to say which three.
+    for a in planned:
+        a["plan_lane"] = "today"
+    brief_actions = list(planned)
+    for a in held:
+        if a.get("firm_paced") or a.get("blackout"):
+            continue
+        a["plan_lane"] = "up_next"
+        brief_actions.append(a)
+
     planned_lanes = {key: [] for key, _ in _TODAY_LANES}
     for a in planned:
         planned_lanes["critical" if _is_critical(a) else
@@ -2740,7 +2785,7 @@ def _cockpit_context(user) -> dict:
         total = len(items) + held_by_lane[key]
         lanes.append({
             "key": key,
-            "label": label,
+            "label": _lane_label(key, items, label),
             "items": items,
             "count": len(items),
             "total": total,
@@ -3109,14 +3154,74 @@ def _cockpit_context(user) -> dict:
         # zero queries on a day when nothing new arrived unplaced, which is
         # most days. See `_unplaced_arrivals`.
         "unplaced_arrivals": _unplaced_arrivals(user, contacts, timezone.now()),
-        # The raw, uncapped queue — carried through only so week() (the full
-        # page view, below) can hand it to the daily brief. Deliberately NOT
-        # used by _cockpit.html itself: that template is also rendered by
-        # crm.views' htmx partial refresh (e.g. after dismissing a debrief),
-        # and generating a brief is a real LLM call that has no business
-        # firing as a side effect of an unrelated card action.
-        "_actions_for_brief": actions,
+        # THE PLAN, in the plan's own order — carried through only so week()
+        # (the full page view, below) and crm.views.daily_brief can hand it to
+        # the daily brief. Deliberately NOT used by _cockpit.html itself: that
+        # template is also rendered by crm.views' htmx partial refresh (e.g.
+        # after dismissing a debrief), and generating a brief is a real LLM
+        # call that has no business firing as a side effect of an unrelated
+        # card action.
+        #
+        # It used to be `actions` — the ENGINE's list, before `_today_sort_key`
+        # ranked it, before the daily cap split it, before the per-firm pace
+        # and the blackout marked anyone. So the sentence at the top of the
+        # page and the cards under it were two different rankings of the same
+        # day. Measured on the demo account, 2026-09-01: the engine list ran
+        # Jane Reyes then FIVE Morgan Stanley first-outreach strangers (two
+        # already `firm_paced`, i.e. the page itself says they read better
+        # tomorrow) then Grace Huang, Nick Tehle; the plan ran Jane Reyes,
+        # Nick Tehle (ev 13.7), Daniel Kim and Sarah Goldberg at Apollo
+        # (7.68), Grace Huang. The brief could lead with a stranger the plan
+        # was deliberately holding back — the exact tier-over-momentum
+        # inversion `_TODAY_CLASS` exists to kill, arriving through the one
+        # surface that had its own copy of the queue.
+        #
+        # `firm_paced` and `blackout` rows are the one thing dropped rather
+        # than marked, and only from THIS list: they still render, still carry
+        # every button, still say why they wait (P4 is about the page, and the
+        # page keeps them). What they must not do is be summarised as work,
+        # because both flags mean "not today" for a reason the student cannot
+        # act against. Everything else carries `plan_lane` so the sentence can
+        # say which side of the cap it is talking about.
+        "_actions_for_brief": brief_actions,
     }
+
+
+def queue_silenced_contact_ids(user, now=None) -> set[int]:
+    """Every contact of this student's the Today queue currently refuses to
+    speak about AT ALL: parked, quiet, archived, or snoozed past now.
+
+    THE ONE CALLER, and why it exists. `assistant.brief._is_stale` has to
+    decide whether this morning's cached sentence has been overtaken, and on a
+    day the queue is EMPTY the queue cannot tell it — an empty action list is
+    equally consistent with "you finished everything" and with "you parked
+    everyone it named". Measured on the founder's account, 2026-09-01: the
+    07:53 brief named eight Citi contacts, he parked all eight that evening,
+    the queue went to zero behind them, and the card kept telling him to
+    follow up with all of them. This is the second question, asked of the
+    contacts directly.
+
+    It lives HERE and not in `assistant.brief` for the reason that module's
+    docstring gives (it may never import from `crm`), and because this is the
+    queue's own vocabulary: `archived=False` is `_build_actions`' own base
+    filter, `snoozed_until > now` is its own `snoozed_ids`, and
+    `QUEUE_SILENT_THREAD_STATES` is what `_opening_keep_warms` and the
+    keep-warm firm scan already test. One definition, in the module that owns
+    it.
+
+    ONE QUERY, ids only, and the caller only runs it on an empty-queue day —
+    which is the only day the answer changes anything.
+    """
+    now = now or timezone.now()
+    return set(
+        Contact.objects.for_user(user)
+        .filter(
+            Q(archived=True)
+            | Q(thread_state__in=QUEUE_SILENT_THREAD_STATES)
+            | Q(snoozed_until__gt=now)
+        )
+        .values_list("id", flat=True)
+    )
 
 
 @login_required
@@ -3154,23 +3259,32 @@ def week(request: HttpRequest) -> HttpResponse:
     from assistant.situation import build_situation
 
     situation = build_situation(request.user)
-    # `_actions_for_brief` is the SAME already-filtered queue `_cockpit_context`
-    # just built for the cards above — parked, campaign-excluded, recruitment-
-    # hidden and snoozed contacts are already gone from it. Popped rather than
+    # `_actions_for_brief` is the SAME ordered plan `_cockpit_context` just
+    # built for the cards above — parked, campaign-excluded, recruitment-
+    # hidden and snoozed contacts are already gone from it, the ranking and
+    # the cap have run, and the firm-paced and blacked-out cards are out (see
+    # the key's own comment for the measurement). Popped rather than
     # left on `cockpit` (the template has no business reading it directly, see
     # the key's own comment) but handed to `get_cached`/`is_pending` first: a
     # cached brief that named someone who has since dropped out of THIS list
     # entirely (parked from the queue an hour after this morning's generation,
     # the founder's live case) is stale, and these two calls are what notice.
     brief_actions = cockpit.pop("_actions_for_brief", None) or []
-    daily_brief = get_cached_brief(request.user, brief_actions)
+    # And on the one day the plan cannot answer the staleness question — the
+    # day it is EMPTY — ask the contacts the sentence named directly. One
+    # query, only on that day, and it is what stops this morning's "follow up
+    # with all eight" surviving the evening the student parked all eight. See
+    # `queue_silenced_contact_ids` and `assistant.brief._is_stale`.
+    silenced = queue_silenced_contact_ids(request.user) if not brief_actions else None
+    daily_brief = get_cached_brief(request.user, brief_actions, silenced_ids=silenced)
     return render(
         request,
         "crm/week.html",
         {**cockpit, **_dashboard_context(request.user),
          "daily_brief": daily_brief,
          # Only when there is nothing cached AND the feature is live.
-         "daily_brief_pending": daily_brief is None and brief_pending(request.user, brief_actions),
+         "daily_brief_pending": daily_brief is None and brief_pending(
+             request.user, brief_actions, silenced_ids=silenced),
          # Capped to 3 for the card strip — same number the brief's own
          # queue-card cap uses (assistant.brief.MAX_SITUATION_SUMMARIZED),
          # so the sentence above never references a 4th change nobody can
@@ -3213,6 +3327,99 @@ def today_park_all(request: HttpRequest) -> HttpResponse:
     return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
 
 
+# The one `today_act` touch kind that carries a DATE and is refused without
+# one. Named rather than spelled twice (the view tests it, `_reschedule_chat`
+# writes it).
+CHAT_SCHEDULED_KIND = "chat_scheduled"
+
+
+def _posted_datetime(raw: str | None):
+    """An `<input type="datetime-local">` value as an aware datetime on the
+    account's own clock, or None if it was absent or unparseable.
+
+    `datetime-local` posts a naive wall-clock string ("2026-09-04T14:30") on
+    purpose — it has no timezone to give. The account's timezone is already
+    activated for this request (`accounts.middleware`), so `make_aware` reads
+    the same clock every other date on this page is printed in; anchoring it
+    to UTC instead would move a 2pm chat by the offset, which on the founder's
+    account is seven hours.
+
+    None rather than a guess, per P1: a caller that gets None must refuse the
+    write, never fall back to "now"."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    parsed = parse_datetime(text)
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed):
+        try:
+            return timezone.make_aware(parsed)
+        except Exception:  # noqa: BLE001 — a nonexistent/ambiguous local time
+            return None
+    return parsed
+
+
+def _reschedule_chat(user, contact, starts_at, *, now):
+    """Record that a scheduled chat moved to `starts_at`: the touch AND the
+    date, which is what "Reschedule" always claimed to do and never did.
+
+    THE TOUCH is stamped at `now`, not at `starts_at`. The student rescheduled
+    just now; the chat is in the future. A touch is a record of an interaction
+    that HAPPENED, and dating one forward would tell the cadence engine's
+    business-day math, the fit score's recency axis and the debrief prompt
+    that something occurred on a day nobody has lived yet. The warmth ratchet
+    that rides on `chat_scheduled` is left exactly as
+    `coverage_domain.pipeline.TOUCH_TRANSITIONS` defines it — the objection
+    was never the ratchet, it was firing the ratchet on a click that carried
+    no scheduling information at all.
+
+    THE DATE goes on the CalendarEvent, the only place in this product that
+    holds when a chat actually is (see `crm.models.CalendarEvent`, and
+    `_build_actions`' `scheduled_chats` note for what reads it). The live
+    chat row for this contact MOVES if there is one — the whole complaint
+    about the old button was that a captured invite's `starts_at` sat
+    untouched and the card kept asking about the superseded time — and one is
+    created if there is not. `invite_sent_at` is set to now so a later Gmail
+    invite that was SENT before this click cannot drag the chat back to the
+    old time (`capture.gmail._upsert_scheduled_chat` compares exactly that).
+    A cancelled row is left alone and a fresh one written beside it: a
+    cancellation is a fact about a meeting that was called off, not a slot to
+    be reused."""
+    services.log_touch(
+        user.id, contact.id, CHAT_SCHEDULED_KIND, "email",
+        f"Rescheduled to {timezone.localtime(starts_at):%b %-d, %-I:%M %p}",
+        now=now,
+    )
+    row = (
+        CalendarEvent.objects.for_user(user)
+        .filter(contact_id=contact.id, kind=CalendarEvent.KIND_CHAT,
+                cancelled_at__isnull=True)
+        .order_by("-starts_at")
+        .first()
+    )
+    if row is None:
+        # `all_objects` for the CREATE only, the same deliberate exception
+        # every other writer in this module makes: the tenant-scoped manager
+        # raises on an unscoped queryset, and a create is not a query. The
+        # row carries `user=user` explicitly, which is the scope.
+        CalendarEvent.all_objects.create(
+            user=user, contact=contact, kind=CalendarEvent.KIND_CHAT,
+            source=CalendarEvent.SOURCE_MANUAL,
+            title=f"Coffee chat with {contact.name}",
+            starts_at=starts_at, invite_sent_at=now,
+        )
+        return
+    row.starts_at = starts_at
+    # The old end time belonged to the old start. Keeping it would put a
+    # backwards block on the calendar; inventing a new one would be this
+    # function guessing how long a chat the student did not describe runs for.
+    row.ends_at = None
+    row.all_day = False
+    row.invite_sent_at = now
+    row.save(update_fields=["starts_at", "ends_at", "all_day", "invite_sent_at"])
+
+
 @login_required
 @require_POST
 def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
@@ -3223,12 +3430,31 @@ def today_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 
     Compose is deliberately not in this list: a `mailto:` is not a send, so
     clicking it must never write a touch (E5). Only an explicit attestation
-    does."""
+    does.
+
+    `chat_scheduled` is the one kind that will not take a bare click, and the
+    reason is what a bare click was actually doing. The confirm-chat card's
+    "Reschedule" button posted this verb with no date at all: it wrote a
+    `chat_scheduled` touch stamped at click time, which ratchets warmth to
+    `replied` (`coverage_domain.pipeline.TOUCH_TRANSITIONS`) on the strength
+    of the STUDENT clicking a button, and reset cadence branch 2's clock off
+    the new touch — a five-working-day snooze wearing the label "Record that
+    it moved to a new time". Meanwhile the chat's real date, if a Gmail
+    invite had ever put one on the calendar, was left exactly where it was,
+    so the same card came back later still asking about the old time. A
+    reschedule with no new time is not a reschedule; the button now carries
+    one (`_act_card.html`) and this rejects the post without it."""
     contact = get_object_or_404(Contact.objects.for_user(request.user), pk=pk)
     now = timezone.now()
     if verb == "sent":
         kind = (request.POST.get("kind") or "outreach").strip()
-        if kind in TOUCH_TRANSITIONS:
+        if kind == CHAT_SCHEDULED_KIND:
+            starts_at = _posted_datetime(request.POST.get("scheduled_at"))
+            if starts_at is None:
+                return HttpResponse(status=400)
+            _reschedule_chat(request.user, contact, starts_at, now=now)
+            record_event("touch_logged", user=request.user, source="today")
+        elif kind in TOUCH_TRANSITIONS:
             services.log_touch(request.user.id, contact.id, kind, "email", None)
             record_event("touch_logged", user=request.user, source="today")
     elif verb == "reply":

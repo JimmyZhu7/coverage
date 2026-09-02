@@ -14,6 +14,19 @@ import the moment either app loads. The caller (crm/today.py's own view,
 which already computes the day's actions for the queue itself) passes the
 action list IN; this module never goes and fetches it.
 
+AND WHAT IT PASSES IN IS THE PLAN, not the engine's raw output. The two are
+different lists and they used to disagree in public: `_cockpit_context` hands
+the cards `planned + held` after `_gate_and_rank`, the per-firm pace cap and
+the blackout have all had their say, while this module was handed the list
+from BEFORE any of that. Measured on the demo account, 2026-09-01: the brief
+read five Morgan Stanley strangers as rows 2-6, two of them already marked
+"reads better tomorrow" by the pace cap, while the plan on the same screen
+ran Jane Reyes, Nick Tehle (ev 13.7), two Apollo advances, Grace Huang. The
+sentence at the top of the page was describing a ranking the page itself had
+overruled. It now reads the cockpit's own ordered list, with the firm-paced
+and blacked-out cards left out and the rest marked with the lane they sit in
+(`_LANE_WORDS`) — one ranking, computed once, in crm/today.py, per P5.
+
 COST SHAPE: one model call per student per calendar day IN THE ORDINARY
 CASE — the `DailyBrief` row is the cache, checked before anything else runs,
 and once it exists this function is a single indexed read for the rest of
@@ -206,6 +219,16 @@ def _quiet_day_message(user, today) -> str:
     return _QUIET_DAY_MESSAGES[idx]
 
 
+# The lane marker each prompt line carries, when the caller stamped one.
+# P4, MARK NEVER DROP, applied to the sentence as well as to the card: the
+# list this module now reads is the cockpit's OWN plan (crm.today's
+# `_actions_for_brief`), which is a capped "today" head followed by an
+# uncapped "up next" tail. Printing both without saying which is which is
+# how the brief came to tell the founder to work eight cards on a day the
+# plan budgeted three. The words are the ones the page itself uses.
+_LANE_WORDS = {"today": "today", "up_next": "up next"}
+
+
 def _summarize_actions(actions: list[dict], today: _date | None = None) -> str:
     today = today or timezone.localdate()
     lines = []
@@ -234,6 +257,12 @@ def _summarize_actions(actions: list[dict], today: _date | None = None) -> str:
         label = _fact(a.get("label"), 60) or _fact(a.get("action"), 60) or "follow up"
         reason = _fact(a.get("reason"))
         line = f"- {name} ({firm}): {label} — {reason}".rstrip(" —")
+        # Optional: a caller with no plan to describe (a test, or any future
+        # caller handing over a bare action list) simply omits the key and
+        # gets the unlabelled line it always got.
+        lane = _LANE_WORDS.get(a.get("plan_lane"))
+        if lane:
+            line += f" [{lane}]"
         # The day count comes from `_dated`, not from the model — see its
         # docstring. A `closes_on` that was never a date prints nothing at
         # all rather than a bare string the model would have to interpret.
@@ -313,10 +342,22 @@ def _live_contact_ids(actions: list[dict]) -> set[int]:
     hidden and snoozed contacts before this ever sees the list — so a plain
     `id` collection is enough; this function has no relevance opinion of its
     own to apply."""
-    return {
-        cid for a in actions
-        if (cid := (a.get("contact") or {}).get("id")) is not None
-    }
+    return set(_ordered_contact_ids(actions))
+
+
+def _ordered_contact_ids(actions: list[dict]) -> list[int]:
+    """The same ids `_live_contact_ids` collects, in the order the caller's
+    list ranks them and deduplicated on first appearance. One function so the
+    set and the sequence can never disagree about which contacts a brief was
+    written from (P5)."""
+    out: list[int] = []
+    seen: set[int] = set()
+    for a in actions:
+        cid = (a.get("contact") or {}).get("id")
+        if cid is not None and cid not in seen:
+            seen.add(cid)
+            out.append(cid)
+    return out
 
 
 def _cache_text(user, today, text: str, contact_ids: list[int], *, stale: bool) -> str:
@@ -349,7 +390,11 @@ def _cache_text(user, today, text: str, contact_ids: list[int], *, stale: bool) 
     return row.text
 
 
-def _is_stale(existing: DailyBrief, actions: list[dict]) -> bool:
+def _is_stale(
+    existing: DailyBrief,
+    actions: list[dict],
+    silenced_ids: set[int] | None = None,
+) -> bool:
     """Whether `existing`'s text names someone the CURRENT queue no longer
     has anything to say about — the founder's Anant Taparia / Xinyi Xu case.
 
@@ -370,38 +415,68 @@ def _is_stale(existing: DailyBrief, actions: list[dict]) -> bool:
     time anyone asks, so it never trips this check to begin with — there is
     nothing here to suppress a real inbound reply.
 
-    An empty `contact_ids` (situation-only brief, or a row written before
-    this field existed) can never be stale by this test — there is nothing
-    recorded to have gone missing.
+    AN EMPTY `actions` IS NOT THE SAME KIND OF NOTHING, and it is not the
+    same kind of something either — it is a question this list cannot answer,
+    so it gets asked somewhere else.
 
-    AN EMPTY `actions` IS THE SAME KIND OF NOTHING, and missing that cost
-    the founder the brief on every clear day. `_live_contact_ids([])` is the
-    empty set, so before this guard ANY brief naming ANY contact failed the
-    subset test the moment the queue emptied — which is not "the person I
-    named was overruled", it is "there is no queue today to check against".
-    Measured on the founder's own account, 2026-08-29: queue at zero, the
-    morning's brief named Katy Chen (`chat_done` — the chat HAPPENED, the
-    opposite of a contradiction) about a Nomura deadline that had not moved,
-    and the page threw it away.
+    `_live_contact_ids([])` is the empty set, so a plain subset test failed
+    for ANY brief naming ANY contact the moment the queue emptied — which is
+    not "the person I named was overruled", it is "there is no queue today to
+    check against". Measured on the founder's account, 2026-08-29: queue at
+    zero, the morning's brief named Katy Chen (`chat_done` — the chat
+    HAPPENED, the opposite of a contradiction) about a Nomura deadline that
+    had not moved, and the page threw it away for nothing.
 
-    Throwing it away is also strictly worse than keeping it here, because of
-    what staleness is FOR. The check's whole promise is "discard this so
-    `crm.views.daily_brief` writes a better one" — and with no actions there
-    is nothing better to write from, so `get_or_build` returns None and the
-    slot renders empty. The student loses a true sentence and gets silence
-    in exchange, on precisely the day the brief is the only thing on the
-    page. The Anant Taparia / Xinyi Xu case this function exists for is
-    unaffected: it had a live queue, and every case with a live queue still
-    evaluates exactly as before.
+    Short-circuiting the whole check on an empty queue — the guard that fixed
+    that — then brought the original bug back through its own door. Measured
+    on the founder's account, 2026-09-01: the 07:53 brief named eight Citi
+    contacts (1036, 1038, 1040, 1046, 1048, 1054, 1056, 1064), he parked all
+    eight that evening in the 44-contact bulk park, the queue went to zero
+    behind them, and the card kept telling him to "follow up with all of
+    them" — the exact Anant Taparia sentence, on eight people at once,
+    surviving precisely because the queue was empty.
+
+    So the two cases are split rather than collapsed. With a queue, the
+    queue's own answer is the test, as before. WITHOUT one, the named
+    contacts are asked about DIRECTLY: `silenced_ids` is the set of this
+    student's contacts the queue currently refuses to speak about at all
+    (parked, quiet, archived or snoozed — `crm.today.queue_silenced_contact
+    _ids`, which owns that definition; this module never queries `crm`, see
+    the module docstring). A named contact in that set is a contradiction,
+    empty queue or not. Katy Chen was in none of them, so her sentence still
+    survives its clear day; the eight Citi contacts were all in it, so
+    theirs does not.
+
+    `silenced_ids=None` is "nobody asked", not "nobody is silenced": the
+    old, permissive behaviour, for any caller that has no queue verdict to
+    offer. Every caller that renders the founder's page passes one.
+
+    THE MIRROR CASE, and it is the one a NEW student meets on day one. A row
+    that named NOBODY is one of exactly two things — the quiet-day line, or a
+    situation-only sentence — and both were written from an empty queue,
+    because `contact_ids` is built from the actions themselves and every
+    action carries a contact. So an empty `contact_ids` with a queue now
+    standing in front of it is not "nothing recorded to have gone missing",
+    it is a sentence that describes a state the page has left. Measured on a
+    five-minute-old account, 2026-09-01: "Queue's clear, nothing changed
+    overnight", the student added their first contact, and the line stayed
+    cached directly above the queue card it denies. That is the whole promise
+    of the feature inverted on the first day anyone uses it.
     """
-    return (
-        bool(existing.contact_ids)
-        and bool(actions)
-        and not set(existing.contact_ids) <= _live_contact_ids(actions)
-    )
+    named = set(existing.contact_ids or ())
+    if not named:
+        return bool(actions)
+    if actions:
+        return not named <= _live_contact_ids(actions)
+    return bool(named & set(silenced_ids or ()))
 
 
-def get_cached(user, actions: list[dict] | None = None) -> str | None:
+def get_cached(
+    user,
+    actions: list[dict] | None = None,
+    *,
+    silenced_ids: set[int] | None = None,
+) -> str | None:
     """Today's brief IF it has already been generated AND it has not gone
     stale, else None. Never calls the model, never writes.
 
@@ -422,6 +497,11 @@ def get_cached(user, actions: list[dict] | None = None) -> str | None:
     what actually catches a park/exclude/archive/snooze that happened after
     generation — see `_is_stale`.
 
+    `silenced_ids` is what makes an EMPTY queue answerable rather than simply
+    unanswered — see `_is_stale`. The caller computes it (one query, and only
+    on the days the queue is empty, which is when it is the only thing that
+    can decide); omitting it keeps the permissive behaviour.
+
     `crm.views.daily_brief` is the htmx endpoint that does the generating,
     after the page is already interactive. See its docstring.
     """
@@ -429,12 +509,17 @@ def get_cached(user, actions: list[dict] | None = None) -> str | None:
     row = DailyBrief.objects.for_user(user).filter(date=today).first()
     if row is None:
         return None
-    if actions is not None and _is_stale(row, actions):
+    if actions is not None and _is_stale(row, actions, silenced_ids):
         return None
     return row.text
 
 
-def is_pending(user, actions: list[dict] | None = None) -> bool:
+def is_pending(
+    user,
+    actions: list[dict] | None = None,
+    *,
+    silenced_ids: set[int] | None = None,
+) -> bool:
     """Whether a brief could still be (re)generated for today — i.e. the
     feature is live and nothing USABLE has been written yet. False means the
     Today page must not render a placeholder that would never resolve.
@@ -443,10 +528,17 @@ def is_pending(user, actions: list[dict] | None = None) -> bool:
     `actions` through to `get_cached` is what lets a park/exclude/archive
     that happened after this morning's generation put the placeholder back
     on screen so `crm.views.daily_brief` gets a chance to rewrite it."""
-    return is_configured() and get_cached(user, actions) is None
+    return is_configured() and get_cached(user, actions, silenced_ids=silenced_ids) is None
 
 
-def get_or_build(user, actions: list[dict], situation: list[dict] | None = None, *, client=None) -> str | None:
+def get_or_build(
+    user,
+    actions: list[dict],
+    situation: list[dict] | None = None,
+    *,
+    silenced_ids: set[int] | None = None,
+    client=None,
+) -> str | None:
     """Today's brief. A quiet day (nothing in the queue, nothing in the
     situation feed) still gets a real, cached sentence — see
     `_QUIET_DAY_MESSAGES` — because the Today page opens every day, not just
@@ -473,7 +565,7 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     # Today page kept repeating "respond immediately" at two people he had
     # just told the product to leave alone. `stale` short-circuits nothing by
     # itself — it only decides which branch below WRITES the refreshed text.
-    stale = existing is not None and _is_stale(existing, actions)
+    stale = existing is not None and _is_stale(existing, actions, silenced_ids)
     if existing is not None and not stale:
         return existing.text
 
@@ -505,7 +597,17 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
     )
     prompt += "\n\n" + _BEGIN_DATA
     if queue_summary:
-        prompt += "\n\nToday's queue:\n" + queue_summary
+        header = "Today's queue:"
+        if "[today]" in queue_summary or "[up next]" in queue_summary:
+            # The lane words are the page's own, so the sentence and the
+            # cards agree about what is actually owed today — see
+            # `_LANE_WORDS`.
+            header = (
+                "Today's plan, in the order the page ranks it. A line marked "
+                "[today] is in the plan on screen; a line marked [up next] is "
+                "queued behind the day's cap and is not owed today:"
+            )
+        prompt += "\n\n" + header + "\n" + queue_summary
     if situation_summary:
         prompt += (
             "\n\nThings that changed recently on roles this student tracks "
@@ -537,7 +639,13 @@ def get_or_build(user, actions: list[dict], situation: list[dict] | None = None,
         return None
     text = text[:MAX_BRIEF_CHARS]
     # The queue slice `_summarize_actions` actually read from, capped the
-    # same way — this is the staleness fingerprint `_is_stale` compares
-    # against tomorrow (or later today), not a display field.
-    contact_ids = sorted(_live_contact_ids(actions[:MAX_ACTIONS_SUMMARIZED]))
+    # same way — the staleness fingerprint `_is_stale` compares against later
+    # today, and (since it is now the cockpit's own ordered plan, not the
+    # engine's raw output) the record of WHICH CARD the sentence led with.
+    # Stored in PLAN ORDER rather than sorted by id for exactly that second
+    # reading: `assistant.views._about_prefill` hands the first id to the
+    # advisor when the student clicks "Talk about it", and an id-sorted list
+    # would hand it whichever contact happened to be created first. Order is
+    # irrelevant to `_is_stale`, which compares sets.
+    contact_ids = _ordered_contact_ids(actions[:MAX_ACTIONS_SUMMARIZED])
     return _cache_text(user, today, text, contact_ids, stale=stale)

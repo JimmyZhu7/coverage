@@ -258,6 +258,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @media (max-width: 700px) { .act-primary { justify-content: flex-start; } }
   .act-primary .btn { flex: 1 1 auto; padding: 6px 10px; font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; }
+  /* Reschedule's disclosure: the summary IS the button, so the browser's own
+     triangle has to go or the row shows a marker no other control here has.
+     Closed, it occupies exactly the width the old bare button did. */
+  .act-when { flex: 1 1 auto; }
+  .act-when > summary { list-style: none; cursor: pointer; display: block; }
+  .act-when > summary::-webkit-details-marker { display: none; }
+  .act-when-form { margin-top: 6px; gap: 6px; }
+  .act-when-form input[type="datetime-local"] { flex: 1 1 150px; width: auto;
+    font-size: var(--fs-xs); }
   .act-ghosts { display: flex; gap: var(--s4); }
   .act-ghost { background: transparent; border-color: transparent; color: var(--ink-3);
     padding: 3px var(--s2); font-size: var(--fs-xs); }

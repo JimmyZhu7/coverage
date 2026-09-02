@@ -25,7 +25,7 @@ import json
 import re
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -51,7 +51,9 @@ from . import attachments as attachments_mod
 from . import drafts as drafts_mod
 from . import plans
 from .client import is_configured
-from .models import AdvisorMemory, ChatConversation, ChatFolder, ChatMessage
+from .models import (
+    AdvisorMemory, ChatConversation, ChatFolder, ChatMessage, DailyBrief,
+)
 
 # What the student can type in one go. Long enough for a real situation
 # ("I have two chats at Goldman and nothing at Morgan Stanley, plus..."),
@@ -246,7 +248,30 @@ _tool_labels = agent.tool_labels
 
 
 def _conversations(user):
-    return ChatConversation.objects.for_user(user)[:HISTORY_LIMIT]
+    """The chats the history panel lists: the ones that have actually been
+    used.
+
+    A ChatConversation is created before the student types anything —
+    `_current_conversation` mints one on the first GET of /talk/ so the
+    composer has something to post to — and every one of those rows was
+    being listed as history. Measured on a brand-new account, 2026-09-01: a
+    student who had sent zero messages opened Talk and was shown a past
+    conversation, "New chat · Sep 1", which was the empty one they were
+    standing in. History that lists a chat nobody has had is the same class
+    of claim as a brief that names a contact nobody has parked.
+
+    Filtered rather than deleted-on-leave, which was the other candidate: a
+    delete needs a hook on every route out of the page (a link, a back
+    button, a closed tab) and none of them is reliable, whereas "has it been
+    used" is a property of the row that is true or false at read time. The
+    empty row costs one integer id and disappears from view the moment it is
+    superseded; the FIRST message the student sends puts it in the list.
+    """
+    return (
+        ChatConversation.objects.for_user(user)
+        .annotate(_message_count=Count("messages"))
+        .filter(_message_count__gt=0)[:HISTORY_LIMIT]
+    )
 
 
 def _history_context(user, conversation: ChatConversation) -> dict:
@@ -335,15 +360,54 @@ def _about_prefill(user, raw: str) -> str | None:
     filter to apply — only existence is checked, same as `search_opportunities`
     reading the open board for anyone.
 
-    A bare `"today"` (the daily brief card, which is about the whole day
-    rather than one role or contact) gets a generic opener with no lookup at
-    all.
+    A bare `"today"` (the daily brief card) resolves TODAY'S BRIEF ROW and
+    quotes it. It used to be a fixed string, "Let's talk about today's
+    move." — which asked the advisor about a card it could not see. The
+    advisor then re-derived the day from `get_today_queue`/`get_situation`,
+    which on 2026-09-01 returned a different picture from the sentence on
+    screen: the cached card named eight parked Citi contacts and the queue
+    named nobody. Two answers to one question, and the student was looking
+    at the one the advisor did not have.
+
+    So the opener carries the brief's own words and the top card it led with
+    — `DailyBrief.contact_ids` is stored in the plan's own order
+    (`assistant.brief._ordered_contact_ids`), so `[0]` is the card at the
+    head of the day, not whichever contact was created first. Resolved
+    through `Contact.objects.for_user`, so it is a name off a row of THEIRS
+    or nothing; a row whose contact has since been deleted simply drops the
+    clause. It is composer text rather than a hidden field on purpose: the
+    student can see, and edit, exactly what they are about to ask.
     """
     raw = (raw or "").strip()
     if not raw:
         return None
     if raw == "today":
-        return "Let's talk about today's move."
+        row = (
+            DailyBrief.objects.for_user(user)
+            .filter(date=timezone.localdate())
+            .first()
+        )
+        if row is None or not (row.text or "").strip():
+            return "Let's talk about today's move."
+        # The brief's own bold marker is markdown for the card, noise in a
+        # question. Everything else is kept verbatim: this is a quote.
+        quoted = " ".join((row.text or "").replace("**", "").split())
+        opener = f'Today\'s move says: "{quoted}"'
+        # `contact_ids` is a JSONField, so its contents are only ever ints
+        # because this app is the only writer. The isinstance check is the
+        # cheap version of trusting that: a hand-edited row must not turn a
+        # composer prefill into a 500.
+        top_id = next(iter(row.contact_ids or ()), None)
+        contact = (
+            Contact.objects.for_user(user).filter(pk=top_id).first()
+            if isinstance(top_id, int) else None
+        )
+        if contact is not None:
+            opener += (
+                f" The card it led with is {contact.name} "
+                f"(contact {contact.pk})."
+            )
+        return opener + " Is that still the right call?"
 
     match = _ABOUT_RE.match(raw)
     if not match:
