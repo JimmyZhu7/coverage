@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load textstyle %}
+{% load textstyle %}{% load csp %}
 
 {% block title %}Parked Contacts · Coverage{% endblock %}
 
@@ -91,15 +91,35 @@
   {% endif %}
 </div>
 
-<script>
+{% comment %}
+This block was a bare `<script>`, and it was the only one left in
+templates/. Under `script-src 'self' <nonce>` (settings/base.py's
+CONTENT_SECURITY_POLICY) an inline script with no nonce is blocked outright,
+so none of this ran in a browser: every unpark form on this page has been
+submitting with no confirmation at all, silently, since the CSP landed. It is
+django-csp's `{% script %}` now, like every other inline script on the site,
+which is what puts the nonce on it.
+
+The copy below is untouched.
+{% endcomment %}
+{% script %}
 (function () {
   // Honest confirm copy — the same "no timer, only a tap" posture the
   // bench card holds, stated in the one place a whole cohort moves at
   // once. Cold contacts get the plain warning that nothing here changes
   // the cadence's own judgment: with no new touch, it will propose parking
   // them again in about two weeks.
+  //
+  // Asked through base.html's `window.covConfirm` — the site's own dialog
+  // rather than the browser's box. It answers with a promise, so the submit
+  // is cancelled and re-issued on a yes; `submitted` stops that re-issue
+  // coming back through here. `submit()` is safe on these forms (unlike the
+  // Network board's bulk bar) because every one of them carries its ids in
+  // hidden inputs and its button contributes no name or value.
   document.querySelectorAll("[data-unpark-form]").forEach(function (form) {
+    var submitted = false;
     form.addEventListener("submit", function (e) {
+      if (submitted) return;
       var n = parseInt(form.dataset.count, 10) || 0;
       var cold = parseInt(form.dataset.cold, 10) || 0;
       var msg = "Bring " + n + " contact" + (n === 1 ? "" : "s") + " back into the queue?";
@@ -108,9 +128,14 @@
                " cold — with nothing new, the cadence will propose parking " +
                (cold === 1 ? "it" : "them") + " again in about two weeks.";
       }
-      if (!confirm(msg)) e.preventDefault();
+      e.preventDefault();
+      window.covConfirm(msg).then(function (ok) {
+        if (!ok) return;
+        submitted = true;
+        form.submit();
+      });
     });
   });
 })();
-</script>
+{% endscript %}
 {% endblock %}

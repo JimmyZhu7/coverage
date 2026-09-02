@@ -1009,25 +1009,62 @@
     // fresh from the checked boxes at submit time, same as `sync()` above —
     // the number named in the dialog is the number that gets posted, never
     // a separately-derived count.
+    //
+    // Both questions go through base.html's `window.covConfirm`, which is
+    // the site's own dialog rather than the browser's box. Neither sentence
+    // changed. The shape did: covConfirm answers with a promise, so the
+    // submit is cancelled first and re-issued on a yes.
+    //
+    // `confirmed` is what stops that re-issue looping back in here. It has
+    // to be `requestSubmit(submitter)` and not `submit()`, because the verb
+    // this whole handler branches on IS the pressed button's value
+    // (`name="verb"`), and `submit()` drops the submitter — the POST would
+    // arrive with no verb at all. `requestSubmit` re-fires this event, which
+    // is exactly what the flag is for.
+    var confirmed = false;
     form.addEventListener("submit", function (e) {
+      if (confirmed) { confirmed = false; return; }
       var verb = e.submitter && e.submitter.value;
       var n = boxes.filter(function (b) { return b.checked; }).length;
       if (!n) return;
-      if (verb === "archive" &&
-          !confirm("Archive " + n + " contact" + (n === 1 ? "" : "s") +
-                   "? They keep every touch and come back in one click.")) {
-        e.preventDefault();
+      var question = null;
+      var opts = null;
+      if (verb === "archive") {
+        question = "Archive " + n + " contact" + (n === 1 ? "" : "s") +
+                   "? They keep every touch and come back in one click.";
+        // The one verb here that takes people off the board gets the
+        // destructive weighting; park below is reversible and keeps the
+        // accent primary.
+        opts = { ok: "Archive", tone: "danger" };
       }
       // Park asks too now. 98 contacts left the queue here in one tap on
       // 2026-08-10 and the count first appeared in the flash afterwards.
       // The dialog names the number and both ways back, so it describes
       // the action rather than warning about it.
-      if (verb === "park" &&
-          !confirm("Stop following up with " + n + " contact" +
+      if (verb === "park") {
+        question = "Stop following up with " + n + " contact" +
                    (n === 1 ? "" : "s") + "? A reply puts anyone back, and " +
-                   "you can undo this straight after.")) {
-        e.preventDefault();
+                   "you can undo this straight after.";
       }
+      if (!question) return;
+      e.preventDefault();
+      var submitter = e.submitter;
+      window.covConfirm(question, opts).then(function (ok) {
+        if (!ok) return;
+        if (form.requestSubmit) {
+          confirmed = true;
+          form.requestSubmit(submitter);
+          return;
+        }
+        // No requestSubmit: carry the verb by hand rather than posting
+        // without it.
+        var hidden = document.createElement("input");
+        hidden.type = "hidden";
+        hidden.name = "verb";
+        hidden.value = verb;
+        form.appendChild(hidden);
+        form.submit();
+      });
     });
 
     sync();

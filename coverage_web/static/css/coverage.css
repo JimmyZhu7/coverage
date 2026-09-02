@@ -2619,3 +2619,31 @@ select:focus-visible, input:focus-visible {
 .palette-none { padding: 14px 10px; color: var(--ink-3); font-size: var(--fs-s); }
 .palette-hint { margin: 0; padding: 7px var(--s3); border-top: 1px solid var(--line);
   font-family: var(--font-mono); font-size: var(--fs-micro); color: var(--ink-3); }
+
+
+/* ---- Confirm dialog --------------------------------------------------------
+   The one box every bulk write in the product asks through (base.html's
+   `#cov-confirm`, reached by `window.covConfirm` and by the global
+   `htmx:confirm` listener). Same recipe as the palette above and as
+   `.se-dialog`: `panel` for the shape, the one property a modal overrides
+   because it casts over a backdrop rather than over the page, and the
+   palette's own open animation.
+
+   `color` is set explicitly and is not decoration. A native <dialog> carries
+   the browser's own default text colour rather than reliably inheriting the
+   page's, so a dialog whose children set no colour of their own renders
+   near-black text on the dark theme's dark surface. `.as-confirm` in
+   assistant/chat.html hit exactly that live and fixed it the same way. */
+.confirm { width: min(400px, calc(100vw - 32px)); padding: var(--s5);
+  color: var(--ink); box-shadow: 0 24px 64px rgba(15, 27, 42, 0.22);
+  margin: auto; animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
+.confirm::backdrop { background: rgba(15, 27, 42, 0.32); }
+.confirm-text { margin: 0 0 var(--s4); font-size: var(--fs-m);
+  line-height: var(--lh-body); color: var(--ink); }
+/* Cancel reads left and the confirm button right, which is where the eye
+   already looks for it on this site. Source order is the other way round on
+   purpose (see base.html): the first button in a `method="dialog"` form is
+   the one Enter presses. */
+.confirm-actions { display: flex; justify-content: flex-end; gap: var(--s2);
+  margin: 0; }
+@media (prefers-reduced-motion: reduce) { .confirm { animation: none; } }
