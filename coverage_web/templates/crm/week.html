@@ -362,6 +362,58 @@
     var cockpit = document.getElementById("today-cockpit");
     if (!cockpit) return;
 
+    // COPY THE NAMES IN ONE LANE. Delegated from the cockpit rather than
+    // bound to the buttons, because every quick action swaps this whole
+    // subtree and a bound handler would die on the first Snooze -- the
+    // same failure the calendar's Today control hit on 2026-09-02.
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+      }
+      // Same fallback shape the assistant's draft-copy uses.
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.top = "-1000px";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      var ok = false;
+      try { ok = document.execCommand("copy"); } catch (err) {}
+      document.body.removeChild(area);
+      return ok ? Promise.resolve() : Promise.reject(new Error("copy unavailable"));
+    }
+
+    cockpit.addEventListener("click", function (e) {
+      var button = e.target.closest ? e.target.closest("[data-lane-copy]") : null;
+      if (!button) return;
+      var lane = button.closest(".lane");
+      if (!lane) return;
+      // The card's own name node, so what is copied is what is on screen.
+      var names = Array.prototype.map.call(
+        lane.querySelectorAll(".act-name"),
+        function (n) { return n.textContent.trim(); }
+      ).filter(Boolean);
+      if (!names.length) return;
+      var label = button.querySelector(".lane-copy-label");
+      copyText(names.join("\n")).then(function () {
+        if (!label || button.dataset.copied) return;
+        var was = label.textContent;
+        button.dataset.copied = "1";
+        label.textContent = names.length + " copied";
+        setTimeout(function () {
+          label.textContent = was;
+          delete button.dataset.copied;
+        }, 1600);
+      }).catch(function () {
+        if (!label) return;
+        var was = label.textContent;
+        label.textContent = "Press Ctrl C";
+        setTimeout(function () { label.textContent = was; }, 1600);
+      });
+    });
+
     // Keyed by the lane's own class list ("lane lane-critical"), which is
     // the only stable identity a lane has across a swap — the sections are
     // rebuilt, so an element reference would be stale by the time it is

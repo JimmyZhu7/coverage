@@ -230,6 +230,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-size: var(--fs-s); color: var(--ink-3);
     display: inline-block; }
   {% comment %}
+  Copy names. `margin-left: auto` puts it at the far end of the heading
+  rather than beside the count, so it reads as the lane's one utility and
+  not as part of the lane's identity. Quiet until wanted: it is the ghost
+  weight the row's own Snooze and Skip use, and it takes the accent only
+  on hover, because a lane heading is a label and this is the only thing
+  in it a student can press.
+  {% endcomment %}
+  .lane-copy { margin-left: auto; padding: 2px var(--s2);
+    font-size: var(--fs-xs); color: var(--ink-3);
+    border-color: transparent; background: none; }
+  .lane-copy:hover, .lane-copy:focus-visible {
+    color: var(--accent-ink); border-color: var(--line); background: var(--surface); }
+  @media (pointer: coarse) { .lane-copy { min-height: 44px; } }
+  {% comment %}
   The receipt for an act. The cards move under a view transition and the
   count above them used to just flip between two frames, which is the one
   case motion rule M4 (coverage.css §15b) explicitly allows: a number that

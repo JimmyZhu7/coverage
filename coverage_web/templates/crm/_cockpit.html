@@ -240,10 +240,27 @@ copy exactly once, and this is the once.
     {% endif %}
     {% for lane in lanes %}
       <section class="lane lane-{{ lane.key }}">
+        {% comment %}
+        COPY THE NAMES (2026-09-02, the founder's own ask). A lane is a list
+        of people he is about to write to somewhere else, and retyping six
+        names out of a queue is the kind of transcription a page holding the
+        names should not make anybody do.
+
+        The button copies THIS lane's names only, read out of the rendered
+        cards at click time rather than from a data attribute built here.
+        That is deliberate: the cards are what the swap rebuilds, so reading
+        them means the copy can never be a stale snapshot of a lane that has
+        since lost a card to a Snooze. `crm/week.html` carries the handler,
+        beside the lane-count animation that already reads these same nodes.
+        {% endcomment %}
         <h2 class="lane-title">
           {% if lane.key == "critical" %}<span class="lane-dot"></span>{% endif %}
           {{ lane.label }}
           <span class="lane-count" aria-live="polite">{% if lane.capped %}{{ lane.count }} of {{ lane.total }} today{% else %}{{ lane.count }}{% endif %}</span>
+          <button type="button" class="btn lane-copy" data-lane-copy
+                  aria-label="Copy the {{ lane.count }} name{{ lane.count|pluralize }} in {{ lane.label }}">
+            <span class="lane-copy-label">Copy names</span>
+          </button>
         </h2>
         <div class="act-grid">
           {% for a in lane.items %}{% include "crm/_act_card.html" with a=a idx=forloop.counter0 %}{% endfor %}
