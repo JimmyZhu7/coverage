@@ -1049,6 +1049,16 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        `align-self: center` and that is now a statement about one row rather
        than about a three-row stack, which is the whole alignment fix. */
     grid-column: 1; grid-row: 1; align-self: center;
+    /* `align-self: center` above centers the tile on the ROW's line box,
+       which includes the descender space `line-height` reserves below the
+       text — space a firm name almost never uses ("Bank of America" has no
+       descender). That leaves the tile sitting visibly higher than the
+       letters beside it. Measured on the live name: the row's line-box
+       center sits 2.9px above the actual glyph-ink center, and a 3px nudge
+       closes it to 0.1px. `transform` rather than a margin, so it moves the
+       tile alone without touching the grid track heights the rest of the
+       header depends on. */
+    transform: translateY(3px);
     /* 31% lightness measured 4.11:1 against the 90% tile on some hues —
        under the 4.5 the monogram's text needs. 24% clears it on every hue
        in the wheel; the tile stays put, so nothing else shifts. */
