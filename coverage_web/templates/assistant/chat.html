@@ -252,27 +252,45 @@ materials.
 
   /* ---- Main column ---- */
   .as-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s3); min-height: 0; }
-  .as-chat-head { display: flex; align-items: center; gap: var(--s3); flex: none; }
+  {% comment %}
+  The gap under the header. `.pagehead` separates itself from the page by
+  `padding-bottom: var(--s3)` plus `margin-bottom: var(--s5)`: 12px of air
+  above the hairline and 24px below it. This page drops the hairline, so it
+  drops the 12px that belongs to the hairline and keeps the 24px, which is
+  the part that is the rhythm rather than the rule. `.as-main`'s row gap
+  pays the first 12 and this pays the second, because a margin on
+  `.as-pagehead` would push the title off centre against the sidebar toggle
+  beside it instead of putting space under the row.
+
+  It was 12px before, against 37 measured on Today and Calendar: a 42px
+  black display title with one line of air under it, then a message.
+  {% endcomment %}
+  .as-chat-head { display: flex; align-items: center; gap: var(--s3); flex: none;
+    margin-bottom: var(--s3); }
   .as-sidebar-toggle { display: none; flex: none; width: 34px; height: 34px; border-radius: 50%;
     border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
     align-items: center; justify-content: center; cursor: pointer; }
   .as-sidebar-toggle:hover { border-color: var(--line-strong); color: var(--ink); }
   .as-sidebar-toggle svg { width: 16px; height: 16px; }
   {% comment %}
-  `.as-title` now rides on `.pagehead-title`, so the type, the weight and the
-  clamp all come from coverage.css and this rule only says what is different
-  about wearing the shared header inside an app shell: no bottom margin and
-  no hairline, because the chat column below owns its own separation and a
-  rule across the top of a thread would read as the thread's first divider.
+  The title rides on `.pagehead-title` alone now, so the face, the weight,
+  the clamp and the spacing above it all come from coverage.css. These two
+  rules say the only thing that is different about wearing the shared header
+  inside an app shell: no hairline and no accent stroke, because a rule
+  across the top of a thread would read as the thread's first divider.
 
-  `.as-title`'s own font declaration is gone rather than overridden. Two
-  declarations of one title is how a shared header stops being shared: the
-  page would go on rendering 22px Fraunces while every other page moved with
-  the token, and nobody would notice until an audit measured it.
+  There was an `.as-title` beside it, and both of its declarations were the
+  same mistake twice. The font declaration went first: the page went on
+  rendering 22px Fraunces while every other page moved with the token, and
+  nobody noticed until an audit measured it. The margin was the survivor and
+  it was the visible bug -- `.pagehead-title` carries `margin-top: var(--s1)`
+  and `.as-title` zeroed it, so the title's 42px line box sat FLUSH against
+  the line above it, 0px where every other page has 4. Measured on the live
+  page at 1280 and 375, both themes. The class is gone with the rule; a hook
+  no stylesheet reads is the same dead weight as a rule nothing wears.
   {% endcomment %}
   .as-pagehead { margin: 0; padding: 0; border: 0; flex: 1 1 auto; min-width: 0; }
   .as-pagehead::after { display: none; }
-  .as-title { margin: 0; }
 
   {% comment %}
   Visually hidden, not `display: none`: a hidden element is removed from the
@@ -766,25 +784,28 @@ materials.
           </svg>
         </button>
         {% comment %}
-        The shared page header, not a bespoke one. Every other page behind
-        the nav opens with the same three marks — an 18px accent stroke, a
-        mono eyebrow, a Fraunces title — and that repetition is most of what
-        makes six separate pages read as one product. This page opened with
-        a 22px title beside a hamburger and was the only nav destination that
-        did not, measured: first content at y=86 where the shared datum is
-        118.
+        The shared page header, not a bespoke one: a Fraunces title on the
+        `.pagehead-title` token, and nothing else. That repetition is most of
+        what makes six separate pages read as one product.
 
-        `.pagehead-sub` is deliberately not used. The chat needs its vertical
-        room and the sub-line is the part of the header that costs the most
-        of it; the eyebrow carries the same "where am I" job in one line.
-        "Advisor" rather than "Talk", because the eyebrow names the ROLE and
-        the title names the page — the same split as the eyebrow/title pairs
-        on the other five.
+        NO EYEBROW AND NO SUB. Both came off every hero on 2026-08-29, and
+        `_pagehead.html` stopped rendering them at all on the same day, so
+        the five pages that use the include lost theirs mechanically. This
+        page writes its own markup, so it kept an "ADVISOR" eyebrow through
+        that change and then had one re-argued into it by a comment claiming
+        the other five still open with a mono eyebrow. They do not. It was
+        the only eyebrow left behind the nav, and it read as a stray line
+        crammed onto the title. Reported live.
+
+        The two pages that DO still carry an eyebrow are Contact detail and
+        Debrief, and both were kept on purpose: each states a fact printed
+        nowhere else on its page (the contact's role, which past chat is
+        being debriefed). "Advisor" over "Talk to Coverage" states nothing
+        the title does not, which is exactly why it is not one of them.
         {% endcomment %}
         <div class="pagehead as-pagehead">
           <div class="pagehead-text">
-            <p class="pagehead-eyebrow">Advisor</p>
-            <h1 class="pagehead-title as-title">Talk to Coverage</h1>
+            <h1 class="pagehead-title">Talk to Coverage</h1>
           </div>
         </div>
       </header>
