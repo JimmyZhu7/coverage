@@ -1389,6 +1389,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      row is a genuine data conflict, not a soft estimate, so it gets its own
      treatment rather than borrowing "rumored"'s dashed border. */
   .tl-row.conflicting { border-color: var(--conf-low-l); }
+  /* A date already gone (views.py `_firm_date_row`'s `is_past`). Muted, not
+     hidden: the row is the only record of what this firm's last cycle did,
+     and dropping it is how a student concludes a firm has no history. The
+     treatment is weight and colour rather than a border style, because
+     "past" is orthogonal to confirmed/rumored/conflicting — a past row can
+     be any of the three and keeps its own border. */
+  .tl-row.is-past { background: transparent; }
+  .tl-row.is-past .tl-date, .tl-row.is-past .tl-event { color: var(--ink-3); }
   .tl-date { font-weight: var(--w-med); min-width: 8.5rem;
     font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-s); }
   .tl-event { flex: 1; font-size: var(--fs-m); }

@@ -8,13 +8,23 @@ is neither — it says so instead of picking a winner.
 {% if timeline %}
   <ul class="tl">
     {% for row in timeline %}
-      <li class="tl-row {{ row.state }}">
+      <li class="tl-row {{ row.state }}{% if row.is_past %} is-past{% endif %}">
         <span class="tl-date">{{ row.date_text }}</span>
         <span class="tl-event">
           {{ row.event_label }}
           <span class="tl-scope">{{ row.cycle }}{% if row.region %} · {{ row.region }}{% endif %}</span>
         </span>
         <span class="markers">
+          {% comment %}
+          A date that has already gone. The row is kept — a timeline is the
+          only place a student can read what this firm's last cycle did — but
+          it is muted and it says so, rather than sitting in the same type as
+          the dates still ahead. Set by `_firm_date_row`; a row with no date
+          on file is not past, it is unplaced.
+          {% endcomment %}
+          {% if row.is_past %}
+            <span class="pill" title="This date has already passed. Kept for the record.">past</span>
+          {% endif %}
           {% comment %}
           The student's OWN stated target cycle, echoed back. Set by
           `_timeline` only where `User.target_cycles` parses to this row's

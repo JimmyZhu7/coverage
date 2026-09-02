@@ -58,7 +58,11 @@ from django.db import transaction
 
 from directory.models import Firm, FirmDate
 from directory.timeline import parse_cycle
-from directory.seed_parsers import parse_firms_yaml, parse_timeline_yaml
+from directory.seed_parsers import (
+    parse_firms_yaml,
+    parse_timeline_phases,
+    parse_timeline_yaml,
+)
 
 # The seed data used to be read live out of the founder's pre-Coverage project
 # folder, then out of `data/seeds/`. That folder is retired (final archive:
@@ -168,6 +172,25 @@ class Command(BaseCommand):
         if dry:
             self.stdout.write(self.style.WARNING("--dry-run: rolled back, nothing written."))
 
+    def handle_firm_dates_only(self, timeline_files: list[Path]):
+        """Seed the firm dates and nothing else.
+
+        `relabel_firm_dates --apply` needs exactly the firm-date half of this
+        command: it is re-applying re-dated timeline seeds against a database
+        the founder is reviewing row by row, and a firm re-seed alongside it
+        would widen a reviewed change into an unreviewed one. Exposed as a
+        method rather than copied, because `_seed_firm_dates` is where the
+        never-downgrade and append-only-history rules live and a second writer
+        with its own copy of those rules is the defect that method was fixed
+        for.
+        """
+        with transaction.atomic():
+            created, updated, skipped = self._seed_firm_dates(timeline_files, False)
+        self.stdout.write(self.style.SUCCESS(
+            f"firm_dates: {created} created, {updated} updated, "
+            f"{skipped} skipped (unknown firm/key)"))
+        return created, updated, skipped
+
     # ------------------------------------------------------------------ drift
 
     def _warn_if_legacy_drifted(self, firms_path: Path, firm_rows: list[dict]) -> None:
@@ -242,7 +265,21 @@ class Command(BaseCommand):
             if not path.exists():
                 self.stderr.write(self.style.WARNING(f"timeline file not found (skipped): {path}"))
                 continue
-            region, cycle_label, entries = parse_timeline_yaml(path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+            region, cycle_label, entries = parse_timeline_yaml(text)
+            # The `phases:` block used to be dropped without a word. It is the
+            # only place either seed file states a WINDOW — `timeline_hk.yaml`
+            # says the HK applications window runs Jul-Oct 2027, and the seven
+            # HK point estimates in the same file are single days inside it —
+            # and `FirmDate` has one `DateField`, so there is nowhere to put a
+            # start and an end. Reporting what was read is the honest middle:
+            # nothing is invented, and the gap is visible to whoever runs the
+            # seed instead of living in a parser comment.
+            for phase in parse_timeline_phases(text):
+                span = f"{phase.get('start', '?')} to {phase.get('end', '?')}"
+                self.stdout.write(
+                    f"phase (not stored — FirmDate holds one date, not a window): "
+                    f"{region}/{phase.get('id', '?')} {span}")
             for entry in entries:
                 key = str(entry.get("key", "")).strip()
                 parts = key.split("/")
@@ -289,7 +326,7 @@ class Command(BaseCommand):
                     cycle, track = parsed
 
                 conf_label = str(entry.get("confidence", "")).strip()
-                history = [{
+                observation = {
                     "date": entry.get("date", ""),
                     "precision": entry.get("precision", ""),
                     "confidence": conf_label,          # ORIGINAL string label, preserved
@@ -298,27 +335,82 @@ class Command(BaseCommand):
                     "note": entry.get("note", ""),
                     "cycle_label": cycle_label,        # file-level "SA 2028"
                     "seeded_from": path.name,
-                }]
-                defaults = {
-                    "date": _partial_date(entry.get("date")),
-                    "precision": str(entry.get("precision", "")),
-                    "confidence": _CONFIDENCE_BAND.get(conf_label, 0.0),
-                    "source_url": str(entry.get("source", "")),
-                    "found_on": _found_dt(entry.get("found")),
-                    "history": history,
                 }
+                conf = _CONFIDENCE_BAND.get(conf_label, 0.0)
+
+                existing = FirmDate.objects.filter(
+                    firm=firm, cycle=cycle, track=track, region=region,
+                    event_kind=event_kind,
+                ).first()
                 if dry:
-                    exists = FirmDate.objects.filter(
+                    created += 0 if existing else 1
+                    updated += 1 if existing else 0
+                    continue
+
+                if existing is None:
+                    FirmDate.objects.create(
                         firm=firm, cycle=cycle, track=track, region=region,
                         event_kind=event_kind,
-                    ).exists()
-                    created += 0 if exists else 1
-                    updated += 1 if exists else 0
+                        date=_partial_date(entry.get("date")),
+                        precision=str(entry.get("precision", "")),
+                        confidence=conf,
+                        source_url=str(entry.get("source", "")),
+                        found_on=_found_dt(entry.get("found")),
+                        history=[observation],
+                    )
+                    created += 1
                     continue
-                _, was_created = FirmDate.objects.update_or_create(
-                    firm=firm, cycle=cycle, track=track, region=region,
-                    event_kind=event_kind, defaults=defaults,
+
+                # THE SAME TWO RULES `import_firm_dates` MAKES, MADE HERE TOO.
+                # This used to be a plain `update_or_create(defaults=...)`,
+                # which on a re-run rewrote `date`, `precision` and
+                # `confidence` from the seed file and REPLACED `history` with
+                # a single-entry list. Every seed in this repo is
+                # `confidence: reported` (0.6), so a row the weekly radar had
+                # since upgraded to `confirmed_official` off the firm's own
+                # posting was silently demoted to a 2026-07-03 guess the next
+                # time anyone ran `seed_directory` — the exact downgrade
+                # `import_firm_dates` rule 1 exists to make impossible, in the
+                # one writer that did not enforce it. And the history that
+                # would have explained the move was overwritten in the same
+                # save, so nothing was left to notice it by.
+                #
+                # No live row is currently both seed-keyed and radar-upgraded,
+                # so nothing has been lost yet. That is luck, not a design:
+                # `seed_directory` is what a fresh deploy runs, and it keys on
+                # the same five columns the radar writes.
+                #
+                # A re-seed is not a new observation of the world — it is the
+                # same 2026-07-03 note being read again — so an unchanged
+                # re-run appends NOTHING. History grows only when the file
+                # itself says something different from what is stored.
+                same_claim = (
+                    existing.date == _partial_date(entry.get("date"))
+                    and existing.confidence == conf
+                    and existing.precision == str(entry.get("precision", ""))
                 )
-                created += 1 if was_created else 0
-                updated += 0 if was_created else 1
+                if same_claim:
+                    updated += 1
+                    continue
+
+                existing.history = list(existing.history or [])
+                if conf < existing.confidence:
+                    self.stderr.write(self.style.WARNING(
+                        f"{slug}/{event_kind}: seed says {conf_label} ({conf}), "
+                        f"stored is {existing.confidence} — stored date kept, "
+                        f"seed recorded in history."))
+                    existing.history.append(
+                        {**observation, "outcome": "not_applied_lower_confidence"})
+                    existing.save(update_fields=["history"])
+                    updated += 1
+                    continue
+
+                existing.date = _partial_date(entry.get("date"))
+                existing.precision = str(entry.get("precision", ""))
+                existing.confidence = conf
+                existing.source_url = str(entry.get("source", ""))
+                existing.found_on = _found_dt(entry.get("found"))
+                existing.history.append(observation)
+                existing.save()
+                updated += 1
         return created, updated, skipped

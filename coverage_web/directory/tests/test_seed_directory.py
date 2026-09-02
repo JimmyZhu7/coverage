@@ -15,6 +15,7 @@ one that actually catches it: the seeds must be TRACKED, not merely present.
 
 from __future__ import annotations
 
+import datetime as dt
 import subprocess
 from pathlib import Path
 
@@ -23,7 +24,11 @@ from django.core.management import call_command
 
 from directory.management.commands import seed_directory as cmd
 from directory.models import Firm, FirmDate
-from directory.seed_parsers import parse_firms_yaml, parse_timeline_yaml
+from directory.seed_parsers import (
+    parse_firms_yaml,
+    parse_timeline_phases,
+    parse_timeline_yaml,
+)
 
 SEEDS = Path(cmd.__file__).resolve().parents[2] / "seeds"
 SEED_FILES = ("firms.yaml", "timeline_us.yaml", "timeline_hk.yaml")
@@ -197,3 +202,114 @@ def test_an_absent_legacy_copy_says_nothing(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(cmd, "_LEGACY_SEEDS", tmp_path / "does-not-exist")
     call_command("seed_directory", verbosity=0)
     assert "drifted" not in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# A RE-SEED IS NOT AN ERASER
+#
+# `_seed_firm_dates` used to end in a plain
+# `update_or_create(defaults={date, precision, confidence, source_url,
+# found_on, history})`. Every seed in this repo is `confidence: reported`
+# (0.6), so a row the weekly radar had since upgraded to `confirmed_official`
+# off the firm's own posting was silently demoted to a 2026-07-03 guess the
+# next time anyone ran `seed_directory` — and the `history` that would have
+# explained the move was replaced in the same save, so nothing was left to
+# notice it by. `import_firm_dates` has refused both of those since it was
+# written; this is the same table's other writer.
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_a_re_seed_never_downgrades_a_confirmed_row():
+    """The latent shape: a seed-keyed row the radar has since confirmed."""
+    call_command("seed_directory", verbosity=0)
+    row = FirmDate.objects.get(firm__slug="gs", region="hk", event_kind="app_open")
+    row.date = dt.date(2027, 7, 1)
+    row.precision = "day"
+    row.confidence = 1.0
+    row.source_url = "https://higher.gs.com/roles/170773"
+    row.save()
+
+    call_command("seed_directory", verbosity=0)
+
+    row.refresh_from_db()
+    assert row.confidence == 1.0, "the confirmed date must stand"
+    assert str(row.date) == "2027-07-01"
+    assert row.source_url == "https://higher.gs.com/roles/170773"
+
+
+@pytest.mark.django_db
+def test_the_rejected_seed_is_recorded_rather_than_dropped():
+    """P4: mark, never drop. The seed still happened and belongs on the
+    record, marked with why it was not applied — the same `outcome` key
+    `import_firm_dates` writes."""
+    call_command("seed_directory", verbosity=0)
+    row = FirmDate.objects.get(firm__slug="gs", region="hk", event_kind="app_open")
+    before = len(row.history or [])
+    row.confidence = 1.0
+    row.save()
+
+    call_command("seed_directory", verbosity=0)
+
+    row.refresh_from_db()
+    assert len(row.history) == before + 1
+    assert row.history[-1]["outcome"] == "not_applied_lower_confidence"
+
+
+@pytest.mark.django_db
+def test_history_is_appended_not_replaced_when_a_seed_changes_a_row():
+    call_command("seed_directory", verbosity=0)
+    row = FirmDate.objects.get(firm__slug="gs", region="hk", event_kind="app_open")
+    before = list(row.history or [])
+    assert before, "the first seed writes its own observation"
+    row.date = dt.date(2030, 1, 1)
+    row.save()
+
+    call_command("seed_directory", verbosity=0)
+
+    row.refresh_from_db()
+    assert len(row.history) == len(before) + 1
+    assert row.history[:len(before)] == before, "append-only"
+
+
+@pytest.mark.django_db
+def test_an_unchanged_re_seed_writes_no_new_history():
+    """A re-seed is the same 2026-07-03 note being read again, not a new
+    observation of the world. History that grows on every deploy is history
+    nobody can read."""
+    call_command("seed_directory", verbosity=0)
+    lengths = {r.pk: len(r.history or []) for r in FirmDate.objects.all()}
+    call_command("seed_directory", verbosity=0)
+    assert {r.pk: len(r.history or []) for r in FirmDate.objects.all()} == lengths
+
+
+# ---------------------------------------------------------------------------
+# The `phases:` block is read, and its shape is reported rather than flattened
+# ---------------------------------------------------------------------------
+@pytest.mark.django_db
+def test_the_phases_block_is_reported_instead_of_silently_dropped(capsys):
+    """`seed_parsers` called `phases:` "an ignored block". It is the only
+    place either seed file states a WINDOW, and `FirmDate.date` is one
+    `DateField` — so it is read and named, and explicitly not stored."""
+    call_command("seed_directory")
+    out = capsys.readouterr().out
+    assert "phase (not stored" in out
+    assert "apps_open" in out
+
+
+def test_the_phases_parser_reads_the_hong_kong_applications_window():
+    phases = parse_timeline_phases(
+        (SEEDS / "timeline_hk.yaml").read_text(encoding="utf-8"))
+    by_id = {p["id"]: p for p in phases}
+    assert set(by_id) == {"relationship_building", "spring_insights",
+                          "apps_open", "interviews_offers"}
+    assert by_id["apps_open"]["start"] == "2027-07-01"
+    assert by_id["apps_open"]["end"] == "2027-10-31"
+
+
+@pytest.mark.parametrize("name", ("timeline_us.yaml", "timeline_hk.yaml"))
+def test_the_phases_parser_stops_at_the_next_top_level_block(name):
+    """`phases:` is followed by `firm_dates:`, so a parser that ran to the end
+    of the file would return every firm date as a phase."""
+    phases = parse_timeline_phases((SEEDS / name).read_text(encoding="utf-8"))
+    assert phases
+    assert all("key" not in p for p in phases)
+    assert all("id" in p for p in phases)

@@ -916,6 +916,23 @@ _SOURCE_NOTES = {
         "sample data",
         "Placeholder from the demo seed, not a date this firm published.",
     ),
+    # The two 2026-09-01 research passes. These are NOT citations of the firm
+    # — a firm that has not opened its SA 2028 cycle has published nothing to
+    # cite — but they are not "unverified" either, which is where every
+    # unmapped token lands and which would have libelled the best-evidenced
+    # estimates in the table. What they cite is a dated research file with
+    # graded sources: the Hong Kong one rests on seven Grade-A SA 2027
+    # postings, the US one on 21 firms measured across two cycles.
+    "research:hongkong": (
+        "from the prior HK cycle",
+        "Estimated from this market's own SA 2027 dates, read off the firms' "
+        "postings (Grade A). The firm has not published this date yet.",
+    ),
+    "research:us-ib-calendar": (
+        "from measured US lead times",
+        "Estimated from how far ahead these firms posted in the two previous "
+        "cycles (Grade C+, 21 firms). The firm has not published this date yet.",
+    ),
 }
 
 
@@ -989,6 +1006,17 @@ def _firm_date_row(fd, *, today):
         # compare rows to each other — see `_drop_contradicted_openings`.
         "date": d,
         "date_text": date_text,
+        # ALREADY GONE. This page had no date cutoff of any kind: 10 of the
+        # 41 live rows sit in the past, and the founder's own firm pages
+        # rendered Morgan Stanley's 6 Aug insight deadline and BlackRock's
+        # 31 Aug close in exactly the type the still-open rows wear. A
+        # timeline is history as well as forecast, so the row STAYS (P4:
+        # mark, never drop) — it is the only place a student can see what
+        # this firm's last cycle actually did — but it says it is history
+        # rather than reading as something still to act on. A dateless row is
+        # not past; "date to be confirmed" is a future event nobody has
+        # placed yet.
+        "is_past": d is not None and d < today,
         "precision": prec,
         "confidence": confidence_marker(fd.confidence),
         "state": "confirmed" if confirmed else "rumored",
@@ -1005,10 +1033,19 @@ def _firm_date_row(fd, *, today):
 # Oct 30 2026 and opens ten months LATER, while listing a role under that
 # cycle closing in 76 days.
 #
-# The two rows come from two incompatible conventions: the seeds date a
+# The two rows came from two incompatible conventions: the seeds date a
 # HK intake that opens the September before its summer, the human `SA 2028`
-# rows hang off postings that are live now. Nothing on the row can tell a
-# reader which convention it follows, so the page asserts both.
+# rows hang off postings that were live in Aug 2026. Nothing on the row could
+# tell a reader which convention it followed, so the page asserted both.
+#
+# THAT DIAGNOSIS WAS HALF RIGHT AND THE FIX WAS AIMED AT THE WRONG HALF. The
+# 2026-08-02 radar run stamped `sa2028` on six Hong Kong closes that belong to
+# SA 2027 (see `import_firm_dates.infer_cycle`), so on those four pages there
+# was no contradiction to resolve: the close and the opening are dates in
+# DIFFERENT cycles, and suppressing the opening hid the only SA 2028 Hong Kong
+# date on file. The suppression still exists, because a genuine same-cycle
+# same-market contradiction is still worth silencing, but it is keyed off the
+# stored cycle now rather than the printed one — see `_contradiction_scope`.
 #
 # Suppressing the ESTIMATE rather than the dated close is the only direction
 # that loses nothing: an estimate of when a cycle will open is a guess, and a
@@ -1024,19 +1061,50 @@ def _cycle_scope(row) -> tuple[str, str]:
     return (row["cycle"], row["region"])
 
 
+# WHY THIS ONE KEYS OFF THE STORED SLUG AND `_flag_conflicting_closes` DOES
+# NOT. The printed scope was the right key while two spellings of one cycle
+# could print alike; it is the wrong key for deciding that one row makes
+# another IMPOSSIBLE. `cycle_label` renders `sa2027` and `sa2028` differently,
+# but it also renders every row with no cycle on file as the same empty
+# string — and the six Hong Kong closes the 2026-08-02 radar run stamped
+# `sa2028` were SA 2027 all along (see `import_firm_dates.infer_cycle`). So
+# this function suppressed the CORRECT "~ Sep 2027" SA 2028 opening on
+# hsbc, jpm, ms and ubs on the strength of a deadline belonging to the cycle
+# before it. Relabelling those six rows fixes the data; keying off the stored
+# `cycle` and the row's own `region` is what stops the same shape recurring,
+# because a close can now only contradict an opening filed under the SAME
+# cycle slug and the SAME market. A blank cycle contradicts nothing and is
+# contradicted by nothing: "not stated" is not a scope two rows can share.
+def _contradiction_scope(row) -> tuple[str, str] | None:
+    """The (cycle slug, market) a row can be contradicted WITHIN, or None.
+
+    None for a row that states no cycle or no market — an unscoped date is
+    not evidence about a scoped one, and treating it as such is how a US row
+    with no market on it came to speak for Hong Kong.
+    """
+    cycle = str(row.get("cycle_slug") or "").strip()
+    region = str(row.get("region") or "").strip()
+    if not cycle or not region:
+        return None
+    return (cycle, region)
+
+
 def _drop_contradicted_openings(rows: list[dict]) -> list[dict]:
-    """Drop a rumored `app_open` that a dated `app_close` in the same printed
-    scope already places in the past."""
+    """Drop a rumored `app_open` that a dated `app_close` in the same cycle
+    AND the same market already places in the past."""
     closes: dict[tuple[str, str], object] = {}
     for row in rows:
         if row["event_kind"] == "app_close" and row["date"] is not None:
-            scope = _cycle_scope(row)
+            scope = _contradiction_scope(row)
+            if scope is None:
+                continue
             if scope not in closes or row["date"] < closes[scope]:
                 closes[scope] = row["date"]
 
     keep = []
     for row in rows:
-        close = closes.get(_cycle_scope(row))
+        scope = _contradiction_scope(row)
+        close = closes.get(scope) if scope is not None else None
         contradicted = (
             row["event_kind"] == "app_open"
             and row["state"] == "rumored"

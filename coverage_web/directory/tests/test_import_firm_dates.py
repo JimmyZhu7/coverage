@@ -27,13 +27,23 @@ def run(tmp_path):
     """Call the command with `findings` written to a real file.
 
     Simpler than driving stdin, and it exercises the same path the scheduled
-    agent uses (it writes a file, then points --findings at it)."""
+    agent uses (it writes a file, then points --findings at it).
+
+    `--cycle` is supplied here rather than left to the command, because the
+    command no longer has a default to leave it to. It used to default to
+    "SA 2028" and that default mislabelled six real Hong Kong deadlines (see
+    `import_firm_dates.infer_cycle`); it is now an explicit fallback for
+    findings the region+date rule cannot place, which is what every finding
+    in this fixture's callers is. Tests that exercise the rule itself pass
+    `cycle=None` to turn the fallback off.
+    """
     counter = {"n": 0}
 
     def _run(findings, **opts):
         counter["n"] += 1
         path = tmp_path / f"findings-{counter['n']}.json"
         path.write_text(json.dumps(findings), encoding="utf-8")
+        opts.setdefault("cycle", "SA 2028")
         call_command("import_firm_dates", findings=str(path), **opts)
 
     return _run
@@ -255,3 +265,93 @@ def test_an_unknown_confidence_band_is_skipped_not_scored_zero(run, gs):
     run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-15",
           "cycle": "sa2028", "confidence": "confirmedofficial"}])
     assert FirmDate.objects.count() == 0
+
+
+# ---------------------------------------------------------------------------
+# The cycle a deadline belongs to, when the finding does not say
+#
+# `--cycle` used to default to "SA 2028" and a default is not a fact. On the
+# 2026-08-02 radar run it stamped `sa2028` on six Hong Kong closes that are
+# the SA 2027 intake, and the firm page then badged HSBC's 30 Oct 2026 close
+# "your cycle" for a student recruiting for SA 2028. The rule and the research
+# it rests on live in `import_firm_dates.infer_cycle`.
+# ---------------------------------------------------------------------------
+
+def test_a_hong_kong_close_in_the_autumn_is_the_next_summers_cycle(run, gs):
+    """HK runs on the London calendar: apply the autumn before the summer.
+    Grade A (scratchpad/research-hongkong.md §1) — MS HK SA 2027 closed
+    27 Sep 2026, JPM and BofA 30 Sep 2026, Citi and HSBC 30 Oct 2026."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-30",
+          "region": "hk", "confidence": "confirmed_official",
+          "source": "https://gs.example/hk"}], cycle=None)
+    assert FirmDate.objects.get().cycle == "sa2027"
+
+
+def test_a_us_close_in_the_autumn_is_two_summers_out(run, gs):
+    """US BB/EB first post a median 17-18 months before a June start
+    (scratchpad/research-us-ib-calendar.md Rule 2), so an autumn close in
+    2026 belongs to the SA 2028 intake, not SA 2027 — those classes were
+    filled by the spring of 2026."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-10-15",
+          "region": "us", "confidence": "confirmed_official",
+          "source": "https://gs.example/us"}], cycle=None)
+    assert FirmDate.objects.get().cycle == "sa2028"
+
+
+def test_the_default_that_mislabelled_six_hong_kong_rows_is_now_refused(run, gs):
+    """The exact 2026-08-02 shape: a HK close with no cycle of its own and a
+    `--cycle SA 2028` on the command line. The market and the month place it
+    in SA 2027, so a fallback that says otherwise is a contradiction rather
+    than a fallback. Nothing is written and the firm is named."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-10-30",
+          "region": "hk", "confidence": "confirmed_official"}], cycle="SA 2028")
+    assert FirmDate.objects.count() == 0
+
+
+def test_a_cycle_stated_on_the_finding_still_wins(run, gs):
+    """P2: stated beats derived. A firm that genuinely moved its calendar is
+    evidence, and the disagreement is printed rather than swallowed."""
+    run([{"firm": "gs", "event_kind": "app_close", "date": "2026-09-30",
+          "region": "hk", "cycle": "sa2028", "confidence": "confirmed_official"}],
+        cycle=None)
+    assert FirmDate.objects.get().cycle == "sa2028"
+
+
+def test_no_cycle_and_nothing_to_infer_from_is_skipped_not_guessed(run, gs):
+    """P1: silence beats a confident guess. `cycle` is part of this row's
+    unique key, so a guess here does not merely mislabel the row, it files it
+    under the wrong one."""
+    run([{"firm": "gs", "event_kind": "app_open", "date": "2027-03-01",
+          "region": "us", "confidence": "reported"}], cycle=None)
+    assert FirmDate.objects.count() == 0
+
+
+@pytest.mark.parametrize("region,event_kind,day,expected", [
+    # Only closes, only the two markets the research measured, only inside
+    # the month bands it measured them in.
+    ("hk", "app_close", "2026-07-01", "sa2027"),
+    ("hk", "app_close", "2026-10-31", "sa2027"),
+    ("hk", "app_close", "2026-06-30", ""),      # before the HK window
+    ("hk", "app_close", "2026-11-01", ""),      # after it
+    ("us", "app_close", "2026-08-01", "sa2028"),
+    ("us", "app_close", "2026-12-31", "sa2028"),
+    ("us", "app_close", "2027-01-19", ""),      # the mid-January cluster is
+                                                # Rule 4, a different rule
+    ("hk", "app_open", "2026-07-07", ""),       # an opening is a distribution
+    ("sg", "app_close", "2026-09-30", ""),      # a market the rule never measured
+    ("", "app_close", "2026-09-30", ""),        # no market stated
+])
+def test_the_inference_rule_says_nothing_outside_its_evidence(
+        region, event_kind, day, expected):
+    from datetime import date as _date
+
+    from directory.management.commands.import_firm_dates import infer_cycle
+
+    y, m, d = (int(p) for p in day.split("-"))
+    assert infer_cycle(region, event_kind, _date(y, m, d)) == expected
+
+
+def test_the_inference_rule_says_nothing_about_a_dateless_finding():
+    from directory.management.commands.import_firm_dates import infer_cycle
+
+    assert infer_cycle("hk", "app_close", None) == ""

@@ -9,6 +9,7 @@ feature was told to investigate (see `test_a_relist_under_a_preserved_talnet_id_
 
 from __future__ import annotations
 
+import datetime as dt
 from datetime import timedelta
 
 import pytest
@@ -17,6 +18,8 @@ from django.utils import timezone
 
 from coverage_connectors import FetchResult, TalnetBoard
 from coverage_connectors.models import Opportunity as ConnOpp
+
+from crm.utils import local_date
 
 from directory import ingest
 from directory.models import Firm, FirmCycleObservation, Opportunity, OpportunityChange, ScrapeRun
@@ -224,3 +227,72 @@ def test_a_relist_under_a_preserved_talnet_id_is_a_reopen_not_a_double_count(mon
     # One close, one reopen, on ONE posting — never a phantom second close
     # from a "new" row the relist never actually created.
     assert row.closed_count == 1
+
+
+# ---------------------------------------------------------------------------
+# ONE CLOCK
+#
+# This command bucketed both windows on `.date()` of a stored UTC instant
+# while `open_runs.open_run_days` — reading the SAME `first_seen` for the
+# Today rail and the Opportunities feed — bucketed on `crm.utils.local_date`.
+# A posting first seen at 01:00 Hong Kong time landed on the previous day in
+# the observation window on the firm page and on the right day in the rail two
+# clicks away. Both call one function now.
+# ---------------------------------------------------------------------------
+
+# 2026-08-03 01:00 in Hong Kong is 2026-08-02 17:00 UTC. The two clocks
+# disagree about which day this posting was first seen on, which is the point.
+_LATE_UTC = dt.datetime(2026, 8, 2, 17, 0, tzinfo=dt.timezone.utc)
+_ONBOARDING_UTC = dt.datetime(2026, 7, 1, 9, 0, tzinfo=dt.timezone.utc)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("zone,expected", [
+    ("Asia/Hong_Kong", dt.date(2026, 8, 3)),
+    ("UTC", dt.date(2026, 8, 2)),
+])
+def test_the_observation_window_and_the_rail_read_one_clock(zone, expected):
+    """Whichever zone is active, the two surfaces must land on the SAME day.
+    Which day that is depends on the clock, and the clock is named in the
+    command's own output; that the two agree does not."""
+    firm = _firm()
+    _opp(firm, 1, first_seen=_ONBOARDING_UTC)
+    late = _opp(firm, 2, first_seen=_LATE_UTC)
+
+    with timezone.override(zone):
+        call_command("build_cycle_observations", verbosity=0)
+        rail_day = local_date(late.first_seen).date()
+
+    assert _observation(firm, "us").open_window_first == expected
+    assert rail_day == expected
+
+
+@pytest.mark.django_db
+def test_the_command_names_the_clock_it_bucketed_on(capsys):
+    """A calendar day with no zone attached is a fact two readers can
+    disagree about in good faith. `FirmDate` has the same gap and cannot
+    close it without a schema change; this table can, for free."""
+    firm = _firm()
+    _opp(firm, 1, first_seen=_ONBOARDING_UTC)
+    with timezone.override("Asia/Hong_Kong"):
+        call_command("build_cycle_observations")
+    assert "bucketing days on Asia/Hong_Kong" in capsys.readouterr().out
+
+
+@pytest.mark.django_db
+def test_a_close_is_bucketed_on_the_same_clock_as_an_open():
+    """Both windows, not just the open one — they are read side by side on
+    the firm page."""
+    firm = _firm()
+    _opp(firm, 1, first_seen=_ONBOARDING_UTC)
+    opp = _opp(firm, 2, first_seen=_ONBOARDING_UTC + timedelta(days=3),
+               status="closed")
+    _healthy_run(firm, at=_LATE_UTC)
+    _close_event(opp, at=_LATE_UTC)
+
+    with timezone.override("Asia/Hong_Kong"):
+        call_command("build_cycle_observations", verbosity=0)
+
+    row = _observation(firm, "us")
+    assert row.closed_count == 1
+    assert row.close_window_first == dt.date(2026, 8, 3)

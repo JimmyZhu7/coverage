@@ -48,6 +48,7 @@ from .utils import (
     CONFIRMED_CONFIDENCE,
     confirmed_firm_dates,
     firm_date_confidence,
+    firm_date_market as _firm_date_market,
     local_date,
     WARMTH_ORDER,
 )
@@ -2061,6 +2062,14 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
             "open_run": open_runs.get(fd.firm_id),
             "label": _FIRM_DATE_LABELS.get(
                 fd.event_kind, fd.event_kind.replace("_", " ")),
+            # WHICH MARKET THIS DEADLINE IS IN. `FirmDate.region` is part of
+            # the row's key and the cadence engine buckets re-pings by it, but
+            # this rail read the table with no region scoping and printed no
+            # region either — so a Hong Kong close and a US close sat in one
+            # list looking identical. Never blank: a row with no region on
+            # file says "market unstated" rather than passing for global.
+            # See `crm.utils.firm_date_market`.
+            "market": _firm_date_market(fd.region),
             # The raw kind, alongside the human `label` above — a stable key
             # a copy-editing pass on `_FIRM_DATE_LABELS` can't silently
             # change the identity of.

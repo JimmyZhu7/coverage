@@ -2,9 +2,30 @@
 # deploy. `key:` is `<firm-id>/<cycle>/<event_kind>`; the firm-id half must
 # match an `id` in firms.yaml or the entry is skipped as unknown.
 #
-# HK/APAC SA 2028 cycle — tracked separately from the US. APAC recruits later
-# and closer to the internship: apps typically open Aug–Nov of junior year.
-# Seeded 2026-07-03 from historical patterns; all estimates until researched.
+# HK/APAC SA 2028 cycle, tracked separately from the US because the two
+# calendars do not overlap. HK runs on the London pattern: applications open
+# in July and August of the year before the internship and close from late
+# September to the end of October, roughly 6 to 10 months later than the same
+# bank's US process.
+#
+# Re-dated 2026-09-01 from `research-hongkong.md` section 1, which reads the
+# SA 2027 HK cycle off the firms' own postings (Grade A): Morgan Stanley
+# "recruitment began on July 7, 2026" with deadlines 16 Aug and 27 Sep 2026;
+# Barclays "date live: 07/01/2026"; Citi HK posted 26 Aug 2026 and closed
+# 30 Oct 2026; BofA and J.P. Morgan closed 30 Sep 2026; HSBC closed
+# 30 Oct 2026. The seeds were previously "~Sep 2027" for every opening, one to
+# two months late, and carried NO closing date at all: the one date in this
+# market a student can actually miss was the one the product did not estimate.
+#
+# Every row here is `precision: estimated`. An estimate never reaches the
+# calendar, the .ics feed or the deadlines rail (`crm.utils.confirmed_firm_dates`
+# requires a day- or month-level precision), so nothing below can put a
+# countdown on a date no firm has published. It is a forecast and it is
+# labelled as one everywhere it is read.
+#
+# NOTE ON `note:` LINES. `seed_parsers._parse_timeline_entry` reads an
+# unquoted scalar to the end of its line and skips any continuation, so a
+# wrapped note is silently truncated. Every note here is one line.
 cycle: SA 2028
 region: hk
 phases:
@@ -17,68 +38,110 @@ phases:
   name: Spring week / insight programs (APAC)
   start: 2026-10-01
   end: 2027-04-30
-  focus: APAC spring insights and early-ID programs — sophomore-accessible, apps often close by Jan
+  focus: APAC spring insights and early-ID programs, sophomore-accessible, apps often close by Jan
 - id: apps_open
   name: HK SA applications open
-  start: 2027-08-01
-  end: 2027-12-31
-  focus: Main HK SA 2028 window — apply first week open; assessments (SHL/HireVue) follow fast
+  start: 2027-07-01
+  end: 2027-10-31
+  focus: Main HK SA 2028 window. Opens Jul to Aug, closes late Sep to end Oct. Apply first week open; assessments (SHL/HireVue) follow fast
 - id: interviews_offers
   name: Interviews & offers
-  start: 2027-10-01
+  start: 2027-09-01
   end: 2028-02-28
-  focus: First rounds and superdays run Oct–Jan; offers into Feb
+  focus: Assessment centres run Sep to Nov (HSBC states this outright); first rounds and superdays into Jan, offers into Feb
 
 firm_dates:
 - key: gs/sa2028_hk/app_open
-  date: 2027-09
+  date: 2027-07
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: HK market opened Jul to Aug for SA 2027 (MS 7 Jul, Barclays 1 Jul, Citi 26 Aug). GS published no HK open date of its own, so this is the market window rather than a GS statement.
 - key: ms/sa2028_hk/app_open
-  date: 2027-09
+  date: 2027-07
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: MS HK SA 2027 posting states "Recruitment began on July 7, 2026" (Grade A).
 - key: jpm/sa2028_hk/app_open
-  date: 2027-09
+  date: 2027-07
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: JPM published no HK open date; its HK SA 2027 posting fills on a rolling basis to a 30 Sep 2026 deadline, so the market window applies.
 - key: ubs/sa2028_hk/app_open
-  date: 2027-09
+  date: 2027-07
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: Market window. UBS publishes no HK open date.
 - key: hsbc/sa2028_hk/app_open
-  date: 2027-09
+  date: 2027-07
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: Market window. HSBC publishes a close (30 Oct for SA 2027) but no open.
 - key: citi/sa2028_hk/app_open
-  date: 2027-09
+  date: 2027-08
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: Citi HK SA 2027 was posted 26 Aug 2026 (Grade A), the late end of the market window.
 - key: cicc/sa2028_hk/app_open
   date: 2027-10
   precision: estimated
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: CICC HK summer intake also feeds from mainland campus cycle — watch both
+  note: Left on the 2026-07-03 estimate on purpose. The HK research reached no Grade-A CICC posting; Chinese-bank campus recruiting runs on channels this pass could not see, so the market window is not evidence about CICC.
+- key: gs/sa2028_hk/app_close
+  date: 2027-10
+  precision: estimated
+  confidence: rumor
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: GS published no HK deadline for SA 2027 at all. This is the market cluster (late Sep to 30 Oct) rather than a GS date, hence rumor and not reported.
+- key: ms/sa2028_hk/app_close
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: MS HK SA 2027 ran two staged deadlines, 16 Aug and 27 Sep 2026, both 23:55 HKT (Grade A). The later one is the one a student can miss.
+- key: jpm/sa2028_hk/app_close
+  date: 2027-09
+  precision: estimated
+  confidence: reported
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: JPM HK SA 2027 closed 30 Sep 2026 (Grade A). The posting says classes fill on a rolling basis, so the deadline is a backstop and not a start gun.
+- key: ubs/sa2028_hk/app_close
+  date: 2027-10
+  precision: estimated
+  confidence: rumor
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: Market cluster. The one UBS HK date on file (3 Aug 2026) is a rumor and sits two months before every dated HK close the research found.
+- key: hsbc/sa2028_hk/app_close
+  date: 2027-10
+  precision: estimated
+  confidence: reported
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: HSBC HK CIB SA 2027 states "Application close: 30 October 2026" (Grade A), with assessment centres September to November.
+- key: citi/sa2028_hk/app_close
+  date: 2027-10
+  precision: estimated
+  confidence: reported
+  source: 'research:hongkong'
+  found: '2026-09-01'
+  note: Citi HK SA 2027 closed "Friday, October 30, 2026 at 23:59 HKT" (Grade A).
 - key: ms/insight/insight_open
   date: '2026-07-16'
   precision: day

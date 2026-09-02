@@ -89,6 +89,24 @@ def test_the_demo_seed_row_says_it_is_a_placeholder(client):
     assert "sample data" in body
 
 
+@pytest.mark.parametrize("token,phrase", [
+    ("research:hongkong", "from the prior HK cycle"),
+    ("research:us-ib-calendar", "from measured US lead times"),
+])
+def test_a_research_estimate_says_what_it_was_estimated_from(client, token, phrase):
+    """The re-dated seeds cite a dated research pass rather than a firm page,
+    because a firm that has not opened its cycle has published nothing to
+    cite. Unmapped, they would have landed on "unverified" — which is where a
+    token with no provenance behind it goes, and is the wrong word for the
+    best-evidenced estimates in the table."""
+    firm = _firm()
+    _date(firm, source_url=token)
+    body = _page(client, firm)
+    assert token not in body
+    assert 'href="research' not in body
+    assert phrase in body
+
+
 def test_an_unrecognised_non_url_is_marked_unverified(client):
     firm = _firm()
     _date(firm, source_url="internal:analyst-note")
@@ -215,6 +233,38 @@ def test_a_close_in_a_different_market_does_not_suppress_the_estimate(client):
           date=dt.date(2026, 10, 30), precision="", confidence=1.0)
     _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
           date=dt.date(2027, 9, 1))
+    body = _page(client, firm)
+    assert "~ Sep 2027" in body
+
+
+def test_a_close_in_a_different_cycle_does_not_suppress_the_estimate(client):
+    """The REAL hsbc shape, once the six mislabelled Hong Kong closes carry
+    the cycle they belong to. HSBC's 30 Oct 2026 deadline is the SA 2027 Hong
+    Kong intake (Grade A, scratchpad/research-hongkong.md §1); the ~Sep 2027
+    estimate is about SA 2028. Two dates in two cycles cannot contradict each
+    other, and suppressing the second one took the only SA 2028 Hong Kong
+    date Coverage holds off the page."""
+    firm = _firm("hsbc", "HSBC")
+    _date(firm, cycle="sa2027", track="", region="hk", event_kind="app_close",
+          date=dt.date(2026, 10, 30), precision="", confidence=1.0,
+          source_url="https://apply.careers.hsbc.com/emergingtalent/job/1365767957/")
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
+          date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
+    body = _page(client, firm)
+    assert "Oct 30, 2026" in body
+    assert "~ Sep 2027" in body
+
+
+def test_a_close_with_no_cycle_on_file_contradicts_nothing(client):
+    """"Not stated" is not a scope two rows can share. Two of the live rows
+    (gs id 48, jpm id 47) carry no cycle, no market and no source at all; a
+    row that says nothing about which cycle it belongs to is not evidence
+    that another cycle's opening is wrong."""
+    firm = _firm()
+    _date(firm, cycle="", track="", region="", event_kind="app_close",
+          date=dt.date(2026, 9, 22), precision="", confidence=1.0)
+    _date(firm, cycle="sa2028", track="", region="hk", event_kind="app_open",
+          date=dt.date(2027, 9, 1), source_url="seed:historical-pattern")
     body = _page(client, firm)
     assert "~ Sep 2027" in body
 
@@ -366,3 +416,70 @@ def test_cycle_months_counts_a_genuinely_confirmed_close():
 
     out = cycle_months(months=12)
     assert _months_at(out, target.year, target.month) == 1
+
+
+# ---------------------------------------------------------------------------
+# 5. A date that has already gone says so
+#
+# This page had no date cutoff of any kind. 10 of the 41 live rows are in the
+# past — Morgan Stanley's 6 Aug insight deadline, BlackRock's 31 Aug close,
+# Goldman's 15 Aug opening — and every one rendered in exactly the type the
+# dates still ahead wear. The row STAYS, because the timeline is the only
+# record of what a firm's last cycle did, but it reads as history.
+#
+# Asserted on the <li>'s own class list, not on the bare token: the page
+# inlines its own stylesheet, which names `.tl-row.is-past` in a rule, so a
+# substring search for "is-past" is satisfied by the CSS on every page.
+# ---------------------------------------------------------------------------
+PAST_ROW = 'class="tl-row confirmed is-past"'
+LIVE_ROW = 'class="tl-row confirmed"'
+
+
+def test_a_past_date_is_marked_and_muted(client):
+    firm = _firm()
+    _date(firm, event_kind="app_close",
+          date=timezone.localdate() - dt.timedelta(days=2),
+          precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert PAST_ROW in body
+    assert ">past<" in body
+
+
+def test_a_date_still_ahead_is_not_marked_past(client):
+    firm = _firm()
+    _date(firm, event_kind="app_close",
+          date=timezone.localdate() + dt.timedelta(days=2),
+          precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert LIVE_ROW in body
+    assert PAST_ROW not in body
+
+
+def test_todays_date_is_not_past(client):
+    """A deadline is live right up to its own day."""
+    firm = _firm()
+    _date(firm, event_kind="app_close", date=timezone.localdate(),
+          precision="", confidence=1.0)
+    assert PAST_ROW not in _page(client, firm)
+
+
+def test_a_row_with_no_date_on_file_is_not_past_either(client):
+    """"Date to be confirmed" is a future event nobody has placed yet, not a
+    date that has been and gone."""
+    firm = _firm()
+    _date(firm, event_kind="app_close", date=None, precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert "date to be confirmed" in body
+    assert PAST_ROW not in body
+
+
+def test_the_past_row_keeps_its_own_confidence_treatment(client):
+    """"Past" is orthogonal to confirmed/rumored — a past row is still a
+    sourced fact about the firm and keeps saying which it was."""
+    firm = _firm()
+    _date(firm, event_kind="app_close",
+          date=timezone.localdate() - dt.timedelta(days=2),
+          precision="", confidence=1.0)
+    body = _page(client, firm)
+    assert PAST_ROW in body
+    assert "confirmed" in body

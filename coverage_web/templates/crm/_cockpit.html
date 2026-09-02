@@ -1117,6 +1117,16 @@ copy exactly once, and this is the once.
               <span class="activity-dot{% if d.urgent %} is-urgent{% endif %}"></span>
               <span class="activity-text">
                 <a href="{% url 'directory:firm_detail' d.firm.slug %}">{{ d.firm.name|smart_title }}</a>
+                {% comment %}
+                The market, between the firm and the event. A FirmDate is
+                scoped to one — `FirmDate.region` is part of its key — and
+                this rail used to print the firm and the event alone, so a
+                Hong Kong deadline and a US deadline read identically. Never
+                blank: `crm.utils.firm_date_market` returns "market unstated"
+                for a row that never said, rather than letting it pass for a
+                date that applies everywhere.
+                {% endcomment %}
+                <span class="activity-kind">{{ d.market }}</span>
                 <span class="activity-kind">{{ d.label }}</span>
                 {% comment %}
                 HOW LONG THIS FIRM'S PROGRAMME HAS BEEN OPEN, under the
