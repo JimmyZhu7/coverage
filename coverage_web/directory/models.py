@@ -323,6 +323,13 @@ class OpportunityChange(models.Model):
     STAGE_SCRAPE = "scrape"
     STAGE_SCRAPE_CLOSE = "scrape.close"
     STAGE_REVERIFY = "reverify"
+    # A one-off repair run by a human against rows an earlier bug damaged
+    # (`manage.py repair_blanked_regions`). Named apart from the pipeline
+    # stages because it is not one: no provider said anything on the day it
+    # runs, and a consumer reading these as fresh observations would report a
+    # firm as having moved a role it never touched. The `note` carries which
+    # evidence the repair was drawn from.
+    STAGE_REPAIR = "repair"
 
     # Half a year. The longest question anything asks of this table is "did
     # this move during my recruiting cycle", and a cycle runs from the
