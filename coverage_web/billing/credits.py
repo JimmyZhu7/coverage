@@ -427,10 +427,78 @@ def spend(user, cost: int, kind: str, **props) -> None:
     the metered work actually happened (a chat turn's round 0 succeeded, a
     rescan's residue stage actually classified something), never before and
     never speculatively. A non-positive `cost` is a no-op — nothing metered
-    ran, so nothing gets written."""
+    ran, so nothing gets written.
+
+    Written inside a transaction holding this user's row lock — the same
+    single-row `select_for_update` `ensure_monthly_grant` takes, and for the
+    same reason. Every read-then-write path in this module (the grant, the
+    upgrade top-up, `_spend_clamped` below) serializes on that one lock, so
+    two debits landing for the same user in the same instant can never each
+    compute a balance the other is about to change. It costs one extra
+    round-trip on a path that already writes; the alternative is a ledger
+    whose arithmetic depends on cron timing.
+    """
     if cost <= 0:
         return
-    CreditLedger.all_objects.create(user=user, delta=-int(cost), kind=kind, props=props or {})
+    with transaction.atomic():
+        get_user_model().objects.select_for_update().get(pk=user.pk)
+        CreditLedger.all_objects.create(user=user, delta=-int(cost), kind=kind, props=props or {})
+
+
+def _spend_clamped(user, cost: int, kind: str, **props) -> int:
+    """`spend()` for the two surfaces that PRE-CLAMPED their work against
+    `affordable_residue_threads` / `affordable_autopilot_rows` before doing
+    it. Re-runs that clamp inside the row lock and charges at most what the
+    ledger can actually pay for at debit time. Returns the credits charged.
+
+    THE RACE THIS CLOSES. Both clamps are pure reads with no lock, and
+    render.yaml fires `coverage-gmail-backfill` and `coverage-autopilot` on
+    the same tick. A student with 5 credits, one pending rescan and one
+    queued autopilot run had both jobs clamp their work against the same 5,
+    do it, and then both debit 5 — ending at -5, well past the "overdraw by
+    at most one action's cost" edge `can_spend` documents, and past the
+    daily burst guard that exists to bound exactly this.
+
+    WHY THE OVERSPEND IS WRITTEN OFF RATHER THAN BILLED. The second job did
+    real work that cost real API money, so charging for it is arguably
+    correct. It is not what this module does anywhere else: the clamp is a
+    promise made to the caller BEFORE the work started, and when two clamps
+    raced, the second caller was told it could afford work it could not.
+    Honouring the promise and eating the difference matches `can_spend`'s
+    own "being a little generous costs less than the support conversation"
+    posture, and it keeps the invariant that actually matters — a balance
+    only ever goes as negative as one deliberate overdraw. `props` records
+    `requested_credits` on any clamped row, so the write-off is a query, not
+    a silent hole.
+
+    The chat and brief debits deliberately do NOT come through here: their
+    gate is `can_spend`, which is documented to let a Pro student on their
+    last credit overdraw by the full message cost. Clamping them would
+    quietly undo that.
+    """
+    if cost <= 0:
+        return 0
+    # Before the lock, and one `.exists()` in the overwhelmingly common case
+    # where the caller's own pre-clamp already wrote it. It matters for the
+    # minutes-wide window where a pass clamps on the last day of a month and
+    # debits on the first of the next: without it the balance read below
+    # would see a month with no grant row yet and clamp the debit to zero.
+    ensure_monthly_grant(user)
+    with transaction.atomic():
+        get_user_model().objects.select_for_update().get(pk=user.pk)
+        plan = plan_config(user)
+        available_balance = max(0, _raw_balance(user))
+        daily_left = max(0, plan["daily_burst"] - daily_spent(user))
+        charge = max(0, min(int(cost), available_balance, daily_left))
+        if charge <= 0:
+            return 0
+        row_props = dict(props or {})
+        if charge != cost:
+            row_props["requested_credits"] = int(cost)
+        CreditLedger.all_objects.create(
+            user=user, delta=-charge, kind=kind, props=row_props
+        )
+    return charge
 
 
 def refund(user, cost: int, **props) -> None:
@@ -583,12 +651,16 @@ def spend_autopilot(user, rows_decided: int) -> None:
     `CREDIT_AUTOPILOT_ROWS_PER_CREDIT` rows the model ACTUALLY decided,
     ceil-rounded, `rows` in `props` for the audit trail. Zero rows (dry
     run, nothing pending, AI unconfigured) writes nothing — the same
-    no-empty-debit rule `spend_rescan` holds."""
+    no-empty-debit rule `spend_rescan` holds.
+
+    Goes through `_spend_clamped`, not `spend`: this pass clamped its work
+    against `affordable_autopilot_rows` before starting, and that clamp
+    races the rescan's — see `_spend_clamped`'s docstring."""
     if rows_decided <= 0:
         return
     per_credit = autopilot_rows_per_credit()
     cost = -(-rows_decided // per_credit)  # ceil division, no float math
-    spend(user, cost, CreditLedger.KIND_SPEND_AUTOPILOT, rows=rows_decided)
+    _spend_clamped(user, cost, CreditLedger.KIND_SPEND_AUTOPILOT, rows=rows_decided)
 
 
 def spend_rescan(user, threads_classified: int) -> None:
@@ -597,9 +669,14 @@ def spend_rescan(user, threads_classified: int) -> None:
     up, with `threads` recorded in `props` for the audit trail (§1: "charged
     in one ledger row at the end of the pass"). A no-op at zero — a rescan
     whose residue stage never ran (no credits affordable, AI not
-    configured, or no residue at all) must not write an empty debit row."""
+    configured, or no residue at all) must not write an empty debit row.
+
+    Goes through `_spend_clamped`, not `spend`, for the reason
+    `spend_autopilot` above gives: this pass clamped its work against
+    `affordable_residue_threads` before starting, and that clamp races the
+    autopilot worker's."""
     if threads_classified <= 0:
         return
     per_credit = rescan_threads_per_credit()
     cost = -(-threads_classified // per_credit)  # ceil division, no float math
-    spend(user, cost, CreditLedger.KIND_SPEND_RESCAN, threads=threads_classified)
+    _spend_clamped(user, cost, CreditLedger.KIND_SPEND_RESCAN, threads=threads_classified)

@@ -17,6 +17,13 @@ urlpatterns = [
     path("import/link-firm/", views.import_link_firm, name="import_link_firm"),
     path("import/template/", views.import_template, name="import_template"),
     path("settings/", views.settings_view, name="settings"),
+    # "Got it" on the trial-ended banner in the Credits card. POST-only, on
+    # its own route rather than a settings query string — see the view.
+    path(
+        "settings/trial-notice/dismiss/",
+        views.dismiss_trial_notice,
+        name="dismiss_trial_notice",
+    ),
     # University autocomplete (datalist options) for the School field.
     path("universities/", views.university_search, name="university_search"),
     path("export/", views.export, name="export"),

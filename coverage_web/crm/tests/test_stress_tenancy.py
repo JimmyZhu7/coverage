@@ -458,13 +458,31 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
     # anyway (added alongside this ratchet bump), matching every other call
     # site's style rather than leaning on the contact FK alone.
     #
+    # Raised to 99 on 2026-09-02 for the billing/deploy fix pass. Two
+    # net-new call sites, both read against the diff:
+    #
+    #   1. `accounts/trials.py::reset_free_rescan_throttle` —
+    #      `GmailConnection.all_objects.filter(user=user)`, an explicit
+    #      `user=` predicate on a user the caller already selected
+    #      (`pro_trial_expire`'s own expired-trials queryset). It cannot use
+    #      `.objects.for_user` because the manager's read path is a request-
+    #      time contract and this runs in a cron with no request; every other
+    #      cron in this repo that touches GmailConnection does the same.
+    #   2. `billing/credits.py::_spend_clamped` —
+    #      `CreditLedger.all_objects.create(user=user, ...)`. This module IS
+    #      the trusted writer of the ledger and says so in its own docstring;
+    #      the new function is a second write on the same path `spend()`
+    #      already took, not a new kind of access.
+    #
+    # Neither is an unscoped cross-tenant read.
+    #
     # A RATCHET, not a limit. The headroom is small on purpose: this is meant
     # to fire on the next batch of unscoped calls so somebody looks at them,
     # which is the whole justification for `all_objects` being greppable.
     # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 97, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 97 reviewed "
-        "on 2026-09-01. Each new call site needs an explicit `user=` predicate "
+    assert len(lines) <= 99, (
+        f"{len(lines)} unscoped `all_objects` lines, up from the 99 reviewed "
+        "on 2026-09-02. Each new call site needs an explicit `user=` predicate "
         "or a written cross-tenant justification — read the diff, then raise "
         "this number deliberately."
     )

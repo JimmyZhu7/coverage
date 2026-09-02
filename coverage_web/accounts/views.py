@@ -613,7 +613,30 @@ def _credits_context(user) -> dict:
         # Plan" for a permanent account exactly as it did before trials
         # existed.
         "trial_days_left": pro_trials.trial_days_left(user),
+        # The other end of that: "your trial ended on D Month", once, until
+        # dismissed. `None` for everyone else — an account still on a trial,
+        # one that never had one, an admin-granted Pro, or a student who has
+        # already read and closed it. See accounts/trials.py::
+        # trial_ended_notice for the four conditions and why the dismissal
+        # is stored on the account rather than in the browser.
+        "trial_ended": pro_trials.trial_ended_notice(user),
     }
+
+
+@login_required
+@require_POST
+def dismiss_trial_notice(request):
+    """"Got it" on the trial-ended banner (templates/accounts/settings.html's
+    Credits card). Its own tiny POST rather than a query string on the
+    settings GET, so acknowledging a notice is never something a link, a
+    prefetch or a crawler can do on the student's behalf.
+
+    Always redirects back to the Credits card, whether or not anything
+    changed — a double-submit from two open tabs is a no-op with an
+    identical response, not an error page.
+    """
+    pro_trials.dismiss_trial_ended_notice(request.user)
+    return redirect(reverse("accounts:settings") + "#credits")
 
 
 @login_required
