@@ -368,40 +368,99 @@ def test_an_unknown_step_falls_back_instead_of_erroring(client, user, world):
 # ---------------------------------------------------------------------------
 # Cost
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("step,budget", [
-    # Two of every budget below are the session + user lookups every
-    # authenticated request pays; the rest is this panel's own work. The
-    # ceiling exists so a future edit cannot quietly reintroduce the feed
-    # pipeline (or an N+1 over the picked firms) on a control that re-runs
-    # every time a chip is toggled.
-    # profile's budget is 6, not 5: the track narrowing became a Python pass
-    # on 2026-09-01, when the Track facet moved from the EMPLOYER's verticals
-    # to the ROLE's stated function and `firm__tracks__overlap` stopped being
-    # the feed's rule. `_matching` now reads titles through
-    # `directory.views._row_tracks` and re-filters on the surviving pks, which
-    # costs ONE extra flat query. Same shape as work_auth's exception below —
-    # a second query, not an N+1, and not the feed pipeline — so the ceiling
-    # still guards what this test exists to guard. The alternative was keeping
-    # the fast filter and letting the panel promise a count the feed would not
-    # honour, which is the one thing this panel must never do.
-    ("profile", 6),
-    # work_auth's budget is 4, not 3: `firm_policy_map()` (see
-    # directory/sponsorship.py) adds one small, bounded scan of firms
-    # carrying policy data (58 on live data) so the panel can answer with
-    # the SAME firm-fallback rule the feed filter and `_eligibility` use —
-    # a second query, not an N+1, so still one flat cost regardless of how
-    # many roles are in scope.
-    ("work_auth", 4),
-    ("firms", 3),
-    ("import", 4),
+_STEPS = ["profile", "work_auth", "firms", "import"]
+
+
+def _pick(user, firms):
+    for firm in firms:
+        UserFirm.all_objects.create(user=user, firm=firm, tier=2, status="target")
+
+
+def _panel_query_count(client, step):
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    with CaptureQueriesContext(connection) as captured:
+        _get(client, step, live="1", regions="us", tracks="ib")
+    return len(captured)
+
+
+@pytest.mark.parametrize("step", _STEPS)
+def test_the_panel_costs_the_same_whatever_the_directory_holds(
+    client, user, world, step
+):
+    """THE budget, and it is comparative rather than absolute.
+
+    These four ceilings used to be 6, 4, 4 and 4 against measured costs of 6,
+    4, 4 and 4 — three of them at literally zero headroom. A guard with no
+    headroom is not a performance guard; it is a tripwire that fires on the
+    next scoped helper query somebody adds for a correct reason, and the fix
+    for a tripwire is always to raise the number, which is how a budget stops
+    changing decisions (`audit-perf-tests.md §5`, Part 2 defect 3).
+
+    What the panel must actually never do is grow its query count with the
+    directory: reintroduce the feed pipeline, or open an N+1 over the picked
+    firms or the matching roles, on a control that re-runs every time a chip
+    is toggled. That is an axis, not a number, so this asserts the axis, in
+    the style of `directory/tests/test_role_people.py::
+    test_one_query_covers_every_firm_asked_about`. A new flat query passes; a
+    per-row query cannot.
+    """
+    client.force_login(user)
+
+    _pick(user, [world["gs"], world["jpm"], world["bain"]])
+    small = _panel_query_count(client, step)
+
+    # Nine more firms, each with three more open campus roles: 4x the firms
+    # the panel reads and 7x the roles it counts.
+    extra = []
+    for n in range(9):
+        firm = Firm.objects.create(
+            slug=f"scale{n}", name=f"Scale {n}", regions=["us"], tracks=["ib"])
+        extra.append(firm)
+        for r in range(3):
+            Opportunity.objects.create(
+                firm=firm, title=f"SA Scale {n}-{r}", bucket="internship",
+                status="open", region="us", sponsorship="unknown",
+                url=f"https://x.test/scale{n}/{r}")
+    _pick(user, extra)
+
+    large = _panel_query_count(client, step)
+
+    assert large == small, (
+        f"the {step} panel cost {small} queries over 3 firms and {large} over "
+        f"12: it is doing per-firm or per-role work. Whatever query was added "
+        f"has to be hoisted out of the loop, not budgeted for."
+    )
+
+
+@pytest.mark.parametrize("step,ceiling", [
+    # The coarse backstop under the comparative test above, and the reason it
+    # is coarse: the numbers measured on 2026-09-02 are 6, 4, 4 and 4, and
+    # each of these ceilings sits two above its measurement. Two, not zero, is
+    # the whole point — a scoped helper query added for a correct reason
+    # should not fail a performance test, and an N+1 is caught by the test
+    # above regardless of what this number says.
+    #
+    # Two of every count are the session + user lookups every authenticated
+    # request pays. profile is 6 rather than 5 because the track narrowing
+    # became a Python pass on 2026-09-01 (the Track facet moved from the
+    # EMPLOYER's verticals to the ROLE's stated function, so `_matching` reads
+    # titles through `directory.views._row_tracks` and re-filters on the
+    # surviving pks, one extra flat query). work_auth is 4 rather than 3
+    # because `firm_policy_map()` (directory/sponsorship.py) adds one bounded
+    # scan of the firms carrying policy data, so the panel answers with the
+    # SAME firm-fallback rule the feed filter and `_eligibility` use.
+    ("profile", 8),
+    ("work_auth", 6),
+    ("firms", 5),
+    ("import", 6),
 ])
 def test_the_panel_stays_cheap(client, user, world, django_assert_max_num_queries,
-                               step, budget):
-    UserFirm.all_objects.create(user=user, firm=world["gs"], tier=2, status="target")
-    UserFirm.all_objects.create(user=user, firm=world["jpm"], tier=2, status="target")
-    UserFirm.all_objects.create(user=user, firm=world["bain"], tier=2, status="target")
+                               step, ceiling):
+    _pick(user, [world["gs"], world["jpm"], world["bain"]])
     client.force_login(user)
-    with django_assert_max_num_queries(budget):
+    with django_assert_max_num_queries(ceiling):
         _get(client, step, live="1", regions="us", tracks="ib")
 
 
