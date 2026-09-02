@@ -458,12 +458,22 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
     # anyway (added alongside this ratchet bump), matching every other call
     # site's style rather than leaning on the contact FK alone.
     #
+    # Raised to 98 on 2026-09-01 (second raise that day): the Reschedule
+    # handler in crm/today.py now moves the live chat CalendarEvent instead
+    # of logging a dateless touch, and when no live event exists it CREATES
+    # one through `all_objects` -- the same create-only exception every other
+    # writer in that module makes, because the tenant manager raises on an
+    # unscoped queryset and a create is not a query. The row carries
+    # `user=user` explicitly, and the contact it hangs off was already pulled
+    # through `Contact.objects.for_user(user)`. Not a cross-tenant read or
+    # write.
+    #
     # A RATCHET, not a limit. The headroom is small on purpose: this is meant
     # to fire on the next batch of unscoped calls so somebody looks at them,
     # which is the whole justification for `all_objects` being greppable.
     # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 97, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 97 reviewed "
+    assert len(lines) <= 98, (
+        f"{len(lines)} unscoped `all_objects` lines, up from the 98 reviewed "
         "on 2026-09-01. Each new call site needs an explicit `user=` predicate "
         "or a written cross-tenant justification — read the diff, then raise "
         "this number deliberately."
