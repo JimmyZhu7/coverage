@@ -1445,7 +1445,28 @@ _NON_TRACK_FUNCTION = re.compile(
     # protects it.
     r"|\bwealth management\b|\bprivate wealth\b|\bwealth advisor(?:y)?\b"
     r"|\bfinancial advisor\b|\badvisor trainee\b|\bclient associate\b"
-    r"|\bprivate client\b",
+    r"|\bprivate client\b"
+    # The same function under the word the clause above misses, and the
+    # corporate-finance planning desk that shares it. `\bfinancial advisor\b`
+    # caught the retail brokerage's front line and left "Financial Planner"
+    # and KeyBank's "Key Investment Services Internship (Certified Financial
+    # Planner Track)" answering SILENT, so both inherited their bank's ib/st
+    # coverage — which is how three of those internships, in Bellingham WA,
+    # Chagrin Falls OH and Vandalia OH, reached the founder's fourteen-role
+    # bulk-save offer on 2026-09-02 for a student recruiting IB and S&T in
+    # Hong Kong and New York. "Financial Planning & Analysis" is the other
+    # half: the company's own budgeting function, filed here for the same
+    # reason `\bcontrollers\b` and `\bcorporate treasury\b` are.
+    #
+    # Measured across the whole 27,357-row board: 47 titles change answer, 46
+    # of them silent -> "none" (10 KeyBank internships, 4 bare "Financial
+    # Planner", 22 FP&A rows, the rest retail planning titles), and exactly
+    # ONE loses a stated track — "Practice Consultant, Financial Planning",
+    # an experienced-hire row that consults FOR financial planners, which is
+    # the same "co-occurring non-track word, decline rather than guess" call
+    # this file already makes for "Trading Operations Analyst". No open
+    # campus row that states ib, st, am or pe is touched.
+    r"|\bfinancial plan(?:ner|ning)\b",
     re.I)
 
 

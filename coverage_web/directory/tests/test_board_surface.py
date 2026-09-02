@@ -101,34 +101,62 @@ def dupes(db):
 
 
 def test_the_board_count_and_the_strip_total_reconcile(client, dupes):
-    """`board_count - hidden_dupes - hidden_fit == total`, exactly.
+    """`board_count - hidden_fit == total`, exactly — and with the fit
+    filter off, the two are simply the same number.
 
-    This is the identity the footnote spends a line stating, so it has to be
-    an identity and not an approximation: a line that accounts for 127 of a
-    gap of 130 is worse than no line, because it converts "these two numbers
-    disagree" into "these two numbers disagree AND the page's explanation is
-    wrong".
+    REWRITTEN 2026-09-02, and the premise it used to pin is retired rather
+    than weakened. The old identity was `board_count - hidden_dupes -
+    hidden_fit == total`, because the segmented control counted board ROWS
+    while the strip counted the rows a student is shown, and the page paid
+    for that gap with a footnote explaining 137 folded listings. The segment
+    counts fold before they count now (`views._folded_count`), so
+    `hidden_dupes` is no longer a term: the fold happens on both sides of the
+    equation or on neither. That is a strictly stronger promise — three
+    numbers reduced to two, and the two agree wherever the student has not
+    switched a personal filter on.
 
-    Measured on the founder's live board when this shipped: board 2,723,
-    folded 127, fit 0, strip 2,596.
+    Measured on the founder's live board when this shipped: segment 2,958,
+    strip 2,958, 137 rows folded and nothing left to say about them.
     """
     ctx = client.get(reverse("opportunities")).context
-    assert ctx["board_count"] - ctx["hidden_dupes"] - ctx["hidden_fit"] == ctx["total"]
-    # And the gap is real in this fixture, so the identity is not holding
-    # vacuously by both sides being zero.
+    assert ctx["board_count"] - ctx["hidden_fit"] == ctx["total"]
+    # And the fixture really does fold something, so this is not holding
+    # vacuously on a board with no duplicate on it.
     assert ctx["hidden_dupes"] == 1
-    assert ctx["board_count"] == 3
-    assert ctx["total"] == 2
+    assert ctx["board_count"] == ctx["total"] == 2
 
 
-def test_the_footnote_accounts_for_the_whole_gap(client, dupes):
-    """The rendered line names the board count and every subtrahend."""
+def test_the_segment_pill_states_the_number_the_strip_states(client, dupes):
+    """The two figures a student can see at once, read off the rendered page.
+
+    The original defect was never about context keys: it was "All Campus
+    (2723)" sitting eight pixels above "2596 Open Roles". This asserts the
+    fix where the defect was — in the HTML.
+    """
     body = client.get(reverse("opportunities")).content.decode()
-    foot = re.search(r'<p class="scope-line scope-foot">(.*?)</p>', body, re.S)
-    assert foot, "a board whose counts differ must render the reconciling line"
-    text = re.sub(r"<[^>]+>", " ", foot.group(1))
-    text = " ".join(text.split())
-    assert text == "3 on the board · 1 folded as repeat listing"
+    pill = re.search(r'id="cnt-role-campus"[^>]*>(\d+)<', body)
+    strip = re.search(r'<b class="dash-num" style="--i:0">(\d+)</b>', body)
+    assert pill and strip
+    assert pill.group(1) == strip.group(1) == "2"
+
+
+def test_the_fold_is_silent_because_there_is_nothing_left_to_say(client, dupes):
+    """No footnote on a board whose only cut is the duplicate fold.
+
+    This is the 2026-08-28 decision restored, not a regression of the
+    2026-09-01 one. `opportunities.html` records it: repeat listings fold
+    silently, no toggle, no count, no route back, because a firm re-filing
+    one job as several requisitions is noise on every reading of this page
+    and never a role anyone was trying to reach. The footnote had reopened
+    that purely to account for a gap in the counts; with the counts agreeing,
+    printing "1 folded as repeat listing" would be telling a student about a
+    difference the page no longer has.
+    """
+    body = client.get(reverse("opportunities")).content.decode()
+    # The class ATTRIBUTE, not the bare word: the rule that styles this line
+    # ships in the page's own <style> block on every render, footnote or not.
+    assert 'class="scope-line scope-foot"' not in body
+    assert "folded as repeat listing" not in body
 
 
 def test_no_footnote_when_the_two_counts_agree(client):
@@ -139,26 +167,85 @@ def test_no_footnote_when_the_two_counts_agree(client):
     Opportunity.objects.create(firm=f, url="https://x/1", title="Summer Analyst",
                                bucket="internship", status="open", region="us")
     body = client.get(reverse("opportunities")).content.decode()
-    # The class ATTRIBUTE, not the bare word: the rule that styles this line
-    # ships in the page's own <style> block on every render, footnote or not.
     assert 'class="scope-line scope-foot"' not in body
     ctx = client.get(reverse("opportunities")).context
     assert ctx["board_count"] == ctx["total"] == 1
 
 
-def test_the_footnote_is_silent_rather_than_partial(client, dupes):
-    """Turning the fold off removes both the gap and the line.
+def test_turning_the_fold_off_moves_both_counts_together(client, dupes):
+    """`?dupes=1` unfolds the board, and the segment count unfolds with it.
 
-    `?dupes=1` is the unadvertised URL fallback (the "Show repeat listings"
-    checkbox was cut on 2026-08-28). With it on, `hidden_dupes` is 0 and the
-    two counts agree, so there is nothing left to explain — which is also why
-    the footnote does not link it: the line offering the way in would not be
-    there to offer the way back.
+    The escape hatch is the one place a folded count could quietly become a
+    lie in the other direction: the render stops folding, and a pill still
+    quoting the folded number would put the same two-totals defect back on
+    the page wearing the URL fallback as a disguise. Both sides move.
+
+    It stays unadvertised (the "Show repeat listings" checkbox was cut on
+    2026-08-28), so nothing on the page links it.
     """
+    ctx = client.get(reverse("opportunities"), {"dupes": "1"}).context
+    assert ctx["hidden_dupes"] == 0
+    assert ctx["board_count"] == ctx["total"] == 3
     body = client.get(reverse("opportunities"), {"dupes": "1"}).content.decode()
     assert 'class="scope-line scope-foot"' not in body
     assert "dupes=1" not in body, (
         "the fold's URL fallback stays unadvertised; see _results.html")
+
+
+def test_the_segment_count_does_not_depend_on_who_is_asking(dupes):
+    """The fold's tie-break may not move a shared count, and it cannot.
+
+    `fold_duplicates` reads `sticky_ids` only in `_survivor_rank`, which
+    decides WHICH copy of a cluster the student sees. The number of survivors
+    is the same either way — and that is the whole licence for the segmented
+    control to fold before it counts while staying a figure about the board
+    rather than about one reader. If this ever stops holding, the pill and
+    the strip stop being one number and the footnote has to come back.
+    """
+    from directory.dupes import fold_duplicates
+
+    rows = list(Opportunity.objects.filter(status="open"))
+    plain, folded_plain = fold_duplicates(rows)
+    for sticky in ([], [rows[0].id], [r.id for r in rows]):
+        kept, folded = fold_duplicates(rows, sticky_ids=sticky)
+        assert (len(kept), folded) == (len(plain), folded_plain)
+
+
+def test_every_segment_states_what_clicking_it_shows(client, dupes):
+    """Each pill's count is that segment's own rendered total, not the
+    board's row count — checked by clicking through every one of them.
+
+    The pills are cross-filtered facets, so each is folded over its OWN
+    scope: `Everything` over the whole board, `All Campus` over the three
+    campus buckets together, a single bucket over itself. Summing folded
+    buckets to get the wider scopes would be exact only while no duplicate
+    cluster straddles a bucket boundary, which is data rather than an
+    invariant.
+    """
+    segments = {s["value"]: s["count"]
+                for s in client.get(reverse("opportunities")).context["role_segments"]}
+    assert segments  # the control is drawn at all
+    for value, count in segments.items():
+        params = {"role": value} if value else {}
+        assert client.get(reverse("opportunities"), params).context["total"] == count, (
+            f"segment {value!r} promises {count} roles")
+
+
+def test_the_out_of_band_refresh_ships_the_folded_counts(client, dupes):
+    """The counts that survive an htmx swap are the folded ones too.
+
+    The filter bar sits outside `#cov-results`, so its numbers are re-sent as
+    out-of-band spans (`_filter_counts.html`). That fragment reads
+    `role_segments`, the same list the initial render draws from, which is
+    what stops the bar drifting back to unfolded numbers after the first
+    keystroke — the exact failure mode that fragment exists to prevent.
+    """
+    body = client.get(reverse("opportunities"),
+                      HTTP_HX_REQUEST="true").content.decode()
+    oob = re.search(r'<span id="cnt-role-campus" hx-swap-oob="innerHTML">(\d+)</span>',
+                    body)
+    assert oob, "the campus segment's count must ship in the out-of-band swap"
+    assert oob.group(1) == "2"
 
 
 # ---------------------------------------------------------------------------

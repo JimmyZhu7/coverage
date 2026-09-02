@@ -25,7 +25,7 @@ import html as html_lib
 import re
 from datetime import date
 
-from collections import Counter
+from collections import Counter, defaultdict, namedtuple
 from functools import lru_cache
 
 from django.contrib.auth.decorators import login_required
@@ -78,8 +78,9 @@ from directory.open_runs import (
     open_run_days,
 )
 from directory.recommend import (
-    MIN_SCORE, Candidate, Profile, parse_target_cycle, recommend, role_function,
-    role_function_cached, role_matches_regions, score_candidate,
+    MIN_SCORE, Candidate, Profile, level_mismatch, parse_target_cycle, recommend,
+    role_function, role_function_cached, role_level, role_matches_regions,
+    score_candidate,
 )
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
 from directory.timeline import (
@@ -1969,6 +1970,25 @@ SEGMENT_LABELS = {
 # The four segments that are always drawn, in display order.
 SEGMENT_VALUES = ("", *TARGET_BUCKETS)
 
+#: The columns `directory.dupes.fold_duplicates` reads, so the segmented
+#: control can fold the board before it counts it (see `_folded_count` in
+#: `opportunities`) without materialising ~16,000 model instances to do it.
+#:
+#: All nine, including the two only `_survivor_rank` touches. A count does not
+#: depend on WHICH copy of a cluster survives, so `first_seen` and `id` could
+#: be left out and let `getattr`'s defaults stand in — and then the day
+#: someone drops those defaults, this path breaks on a board nobody is
+#: looking at. Two integers a row is the cheaper mistake.
+_FACET_FOLD_FIELDS = ("id", "firm_id", "bucket", "title", "location",
+                      "deadline", "cohort", "sponsorship", "first_seen")
+
+#: One board row reduced to those columns. A `namedtuple` rather than a dict
+#: because `fold_duplicates` reads its rows with `getattr` — it is written
+#: against the model and must go on being — and rather than the model itself
+#: because instantiating 16,655 `Opportunity` objects to ask how many of them
+#: are repeats costs more than the fold does.
+_FacetRow = namedtuple("_FacetRow", _FACET_FOLD_FIELDS)
+
 # Target-first ordering for firm pages: insight/internship/entry_level ahead
 # of experienced rows, campus buckets in TARGET_BUCKETS order.
 _BUCKET_ORDER = Case(
@@ -3456,27 +3476,80 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         _apply_filters(open_qs, selected, skip=("year",)), year
     )
 
-    bucket_counts = Counter(
-        (b or OTHER)
-        for b in _apply_filters(open_qs, selected, skip=("role",)).values_list(
-            "bucket", flat=True
-        )
-    )
-    role_facet = [
-        {
-            "value": value,
-            "label": label,
-            "count": (
-                sum(bucket_counts.values())
-                if value == "all"
-                else sum(bucket_counts.get(b, 0) for b in TARGET_BUCKETS)
-                if value == ""
-                else bucket_counts.get(value, 0)
-            ),
-        }
-        for value, label in ROLE_CHOICES
+    # ---- Segment counts, FOLDED, which is what makes them the same number
+    # the page then renders. Until 2026-09-02 this was a `Counter` over
+    # `values_list("bucket")` — one row of the board, one unit of the count —
+    # while the strip below counts the rows a student actually sees, i.e.
+    # AFTER `fold_duplicates` collapses repeat requisitions. So the segmented
+    # control said "All Campus (3095)" and the strip eight pixels under it
+    # said "2958 Open Roles", and the page had to spend a footnote explaining
+    # 137. The footnote is gone because the difference is: each segment now
+    # answers "click me and this is how many roles you get".
+    #
+    # PER SCOPE, NEVER A SUM OF BUCKETS. Each segment folds the rows that
+    # segment's own page would fold — `all` over everything, `All Campus`
+    # over the three campus buckets together, a single bucket over itself —
+    # because that is the only construction that is exact for every segment
+    # rather than exact for the ones whose clusters happen not to straddle a
+    # bucket boundary. (None straddles one on the live board today: measured
+    # 2026-09-02, folding the three campus buckets together and summing three
+    # separate folds both give 2958. That is data, not an invariant, and a
+    # count is a promise.)
+    #
+    # STICKY IDS ARE NOT PASSED, and their absence is not an approximation.
+    # `fold_duplicates` reads them only in `_survivor_rank`, which chooses
+    # WHICH copy of a cluster survives; the number of survivors, and the
+    # number folded away, are identical either way — pinned by
+    # test_board_surface.py::test_the_segment_count_does_not_depend_on_who_is_asking.
+    # That is the whole reason this count can be folded at all while staying
+    # a shared, per-board figure rather than a personal one.
+    #
+    # THE COST, measured end to end on the live 16,655-row open board
+    # 2026-09-02, median of five warm renders: the default campus page went
+    # 364 ms to 424 ms, and `?role=all` went 1100 ms to 1061 ms — faster,
+    # because the memo table this made worth adding to `dupes.normalize_label`
+    # also pays for the fold that page was already doing. Same number of
+    # queries; the old `Counter` over `values_list("bucket")` becomes this one
+    # with eight more columns on it. Only the segments that are DRAWN are
+    # folded: `other` is a deep-link opt-in and its 13,547 rows are folded
+    # only on `?role=other`.
+    #
+    # `?dupes=1` switches the fold off for the whole render (see the fold
+    # itself, far below). The counts follow it: a student who asked to see
+    # repeat listings is asking the segments to count them, and a pill that
+    # went on quoting the folded number while the board beside it showed the
+    # unfolded one would be the same defect this whole block removes, wearing
+    # the escape hatch as a disguise.
+    dupes_shown = request.GET.get("dupes", "").strip() == "1"
+    scoped = _apply_filters(open_qs, selected, skip=("role",))
+    fold_rows = [
+        _FacetRow(*t) for t in scoped.order_by().values_list(*_FACET_FOLD_FIELDS)
     ]
-    role_count = {r["value"]: r["count"] for r in role_facet}
+    rows_by_bucket: dict[str, list] = defaultdict(list)
+    for r in fold_rows:
+        rows_by_bucket[r.bucket or OTHER].append(r)
+
+    def _folded_count(value):
+        """How many roles `?role=<value>` would put on the board."""
+        if value == "all":
+            subset = fold_rows
+        elif value == "":
+            subset = [r for r in fold_rows if r.bucket in TARGET_BUCKETS]
+        else:
+            # `_apply_role_filter` files a blank bucket under `other`, and so
+            # does `rows_by_bucket` above, so this covers both.
+            subset = rows_by_bucket.get(value, [])
+        return len(subset) if dupes_shown else len(fold_duplicates(subset)[0])
+
+    # `role_facet` (the full `ROLE_CHOICES` list with labels) is gone with the
+    # Counter: no template ever read it, it existed only to build this dict,
+    # and building all six entries would mean folding the `other` bucket on
+    # every request to answer a question only a deep link asks.
+    role_count = {v: _folded_count(v) for v in (*SEGMENT_VALUES, "all")}
+    # `role == OTHER`, the same condition `role_optin_segment` below draws its
+    # pill on, so the count exists exactly when something reads it.
+    if role == OTHER:
+        role_count[role] = _folded_count(role)
 
     # ---- The segmented control (row 1). Scope is not a filter: "which campus
     # role?" is a facet, but "campus vs everything" is a MODE, and a <select>
@@ -3511,26 +3584,30 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         for v in FEED_SEGMENT_VALUES
     ]
 
-    # THE NUMBER THE CHECKED SEGMENT SHOWS, named so the page can reconcile it
-    # with the stat strip's `total` further down instead of leaving a student
-    # to notice that two counts eight pixels apart disagree by 127.
+    # THE NUMBER THE CHECKED SEGMENT SHOWS, named so the page can hold it
+    # against the stat strip's `total` further down. It used to be there so
+    # the strip could FOOTNOTE the difference; there is no difference left to
+    # footnote, and that is the point.
     #
-    # They count different things and both are right. This one is THE BOARD:
-    # every open row that clears the shared filters, computed in SQL over
-    # `open_qs` like every other facet, identical for every visitor.
-    # `total` is THIS RENDER: the same rows after `fold_duplicates` collapses
-    # repeat requisitions and after "Eligible only" hides blocked ones — two
-    # cuts that depend on WHO IS ASKING (the fold's tie-break prefers a copy
-    # this student already tracked) and therefore must never reach a shared
-    # count. See the `dupes_shown` block for that rule stated at the fold.
-    #
-    # So the two cannot be made to agree without breaking the facets, and the
-    # gap is stated instead: `board_count - hidden_dupes - hidden_fit == total`
-    # is an exact identity, pinned by
+    # `board_count == total` exactly, whenever "Eligible only" is off — both
+    # are the same rows after the same fold. The one cut that can still
+    # separate them is the fit hide, which is genuinely personal ("your
+    # stated year", "your visa") and so cannot reach a shared segment count.
+    # `board_count - hidden_fit == total` is therefore the identity now,
+    # pinned by
     # test_board_surface.py::test_the_board_count_and_the_strip_total_reconcile,
-    # and `_results.html` prints whichever of the two subtrahends is non-zero.
-    # Measured on the founder's live board when this shipped: 2723 on the
-    # board, 127 folded, 0 hidden by fit, 2596 in the strip.
+    # and `_results.html` states the subtrahend only when it is non-zero —
+    # next to a checkbox the student ticked, which is also the way back.
+    #
+    # `hidden_dupes` is no longer part of the identity and the page no longer
+    # names it. That restores the 2026-08-28 decision recorded in
+    # `opportunities.html`: repeat listings fold silently, because a firm
+    # re-filing one job as several requisitions is noise on every reading of
+    # this page and never a role a student was trying to reach. It stays in
+    # the context for the tests that pin the fold, not for the template.
+    #
+    # Measured on the founder's live board when this shipped: segment 2958,
+    # strip 2958, 137 rows folded and nothing to say about them.
     board_count = role_count.get(effective_role, 0)
 
     # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard,
@@ -3603,21 +3680,21 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     rows = list(qs.order_by("firm__name", F("deadline").asc(nulls_last=True), "title"))
 
     # ---- Duplicate folding (?dupes=1 to switch it off), on the MATERIALISED
-    # rows for the same reason the fit filter is: it depends on who is asking
-    # (a copy the student already tracked wins the tie), so it must never
-    # reach the shared facet counts. The counts describe the BOARD; this
-    # describes one student's render of it.
+    # rows. WHICH copy survives depends on who is asking (a copy the student
+    # already tracked wins the tie), so the survivor never reaches a shared
+    # count — but HOW MANY survive does not, which is what lets the segmented
+    # control above fold before it counts and quote the same number this
+    # produces. See `_folded_count`.
     #
     # Some firms genuinely file one job as several requisitions — SIG posts
     # every 2027 internship under two iCIMS job numbers, Deutsche Bank runs
     # apprentice intakes as parallel reqs — and those reqs close on their own
     # schedules, so the rows must all stay in the database and stay
     # close-tracked. Only the render is collapsed. See directory.dupes.
-    # `dupes_shown` names the toggle's own state: the "Show repeat listings"
-    # checkbox in the filter bar (opportunities.html) is this control now,
-    # not a lone escape-hatch link — the count that used to live in the
-    # header's subset sentence rides that checkbox's label instead.
-    dupes_shown = request.GET.get("dupes", "").strip() == "1"
+    # `dupes_shown` is parsed WAY up at the top of this view, before the facet
+    # counts, because those counts have to answer the same question this does:
+    # a student who asked to see repeat listings is asking the segments to
+    # count them too.
     rows, hidden_dupes = ([r for r in rows], 0) if dupes_shown else fold_duplicates(
         rows, sticky_ids=sticky_ids
     )
@@ -4587,7 +4664,7 @@ def _offer_fits(rec_profile, o) -> bool:
     was asking, in bulk and above the fold, for a commitment the column three
     inches below it would not have made.
 
-    Three tests, each one the scorer's own and none of them a second
+    Four tests, each one the scorer's own and none of them a second
     definition of anything (P5):
 
     TRACK, the three cases `_track_fit` ranks with, read through
@@ -4627,27 +4704,63 @@ def _offer_fits(rec_profile, o) -> bool:
     removes nothing on the founder's board today and is not expected to: a
     row only reaches this function with a `year_ok` verdict, which means the
     posting STATED his class, which is `W_CLASS_STATED` (30) before any other
-    axis speaks — already past `MIN_SCORE` (25). The three tests measured in
-    order on 2026-09-02 ran 56 → 38 → 8 → 8, the lowest survivor scoring 56.
+    axis speaks — already past `MIN_SCORE` (25). The four tests measured in
+    order on the founder's board, 2026-09-02 after the rung test landed, ran
+    72 → 41 → 11 → 9 → 9, the lowest survivor scoring 56.
     It stays because it is the ranker's own number: while this reads it, the
     offer cannot drift below the column it sits above, whatever the weights
     become. `test_a_role_under_the_recommenders_bar_does_not_fit` pins it
     here rather than through the feed, for exactly that reason.
 
-    What this deliberately does NOT do is re-run `recommend()`. Ranking the
-    whole board to answer a question about one row is the wrong shape (see
-    `_drawer_pick_why`, which declines it for the same reason), and the
-    remaining exclusions in that function — the rung of the ladder, a passed
-    deadline — are not part of the decision recorded here. Two of the eight
-    roles this gate keeps for the founder are PhD-level; the rung filter
-    would drop them, and that is a call for the next measurement, not a
-    fourth test invented inside a bulk-save offer.
+    THE RUNG, `level_mismatch` over `role_level` — the rung the posting's own
+    title names against the rung this student is on. Added 2026-09-02, and it
+    is not a fourth test invented here: it is the one `recommend()` itself
+    applies to a row whose posting has STATED the student's class, copied
+    across whole rather than re-derived (P5).
+
+    That branch is the only one of `recommend()`'s level exclusions that can
+    ever fire on this path, which is why it is the only one here. `recommend`
+    reads the softer, INFERRED signals — the programme bucket against the
+    student's stated cycles, and the derived intake year — ONLY when
+    `_stated_grad_window` is None, and every row that reaches this function
+    carries a `year_ok` verdict, which is `_eligibility` reading the posting's
+    own stated class or its extracted graduation window. Measured on the
+    founder's board 2026-09-02: 78 of his folded campus rows verdict
+    `year_ok`, and `_stated_grad_window` is non-None on 78 of 78. So writing
+    the bucket and derived-year checks in here would be writing two tests
+    that can never run, which is worse than leaving them out and saying so.
+
+    The measurement that forced it. This gate used to hand a class-2029
+    undergraduate two Wells Fargo PhD internships — "2027 Quantitative
+    Analytics Summer Internship Applied Computational Intelligence (ACI PhD)"
+    and its Capital Markets sibling — in a fourteen-role bulk save. Both
+    state his graduation window, both sit in a market he named, both score
+    72 and 78, and neither is a job he can take: the title says PhD and he is
+    a sophomore. The old note here called that a boundary and left it for the
+    next measurement; this is that measurement. Board-wide it removes three
+    rows of the 78 (the third, an Optiver Shanghai PhD engineering
+    internship, the region test already had), and it can only ever remove a
+    row whose own title names a rung — `level_mismatch` is False the moment
+    either side is silent, so a student who has stated no level and a title
+    that names none are both filtered on nothing, exactly as before.
+
+    What this still does NOT do is re-run `recommend()`. Ranking the whole
+    board to answer a question about one row is the wrong shape (see
+    `_drawer_pick_why`, which declines it for the same reason), and the one
+    exclusion left in that function — a deadline already passed — is not part
+    of the decision recorded here. It is deliberately left: a listing the
+    firm still publishes is a listing a student may still want tracked, and
+    on the founder's board 2026-09-02 no offered row had a passed deadline,
+    so adding the test would be adding an unmeasured gate to a surface whose
+    whole complaint was gates nobody had measured.
     """
     fn = role_function_cached(o.title)
     if rec_profile.tracks and (fn == "none" or (fn and fn not in rec_profile.tracks)):
         return False
     region = o.region or ""
     if region != "global" and not role_matches_regions(region, rec_profile.regions):
+        return False
+    if level_mismatch(rec_profile.level, role_level(o.title)):
         return False
     return score_candidate(rec_profile, Candidate.from_opportunity(o))[0] >= MIN_SCORE
 
@@ -4712,7 +4825,7 @@ def _bulk_save_offer(user, rows, profile, *, rec_profile=None):
     which is the defect this docstring is otherwise about.
 
     It is a conservative rule and that is the right direction of error. It
-    folds 7 of the founder's 9 KeyBank rows and leaves two standing, because
+    folded 7 of the founder's 9 KeyBank rows and left two standing, because
     their titles name the metro while their `location` names the suburb
     ("- Cleveland, OH" at Chagrin Falls, "- Dayton, OH" at Vandalia) and
     nothing in the row corroborates that those are the same place. A false
@@ -4720,6 +4833,16 @@ def _bulk_save_offer(user, rows, profile, *, rec_profile=None):
     rule). Widening the family rule means changing the feed's grouping too,
     with its own measurement, and is deliberately not done inside a bulk-save
     fix.
+
+    Later the same night those KeyBank rows left the offer entirely, by the
+    front door rather than this one: "Certified Financial Planner Track" is
+    retail financial planning, `recommend._NON_TRACK_FUNCTION` had a hole
+    where the word "planner" should have been, and the track test now
+    declines all ten. So the fold currently removes nothing from the
+    founder's offer — `places` is `{}` on his board. The rule stays measured
+    on the evidence above and stays in the path: the next firm to file one
+    programme under nine city-suffixed requisitions will be a firm he is
+    actually recruiting for.
 
     AFTER THE GATES, NOT BEFORE, and the order is load-bearing. Fold first and
     a family's survivor could be a row that fails the region or track test
