@@ -11,17 +11,66 @@ knows nothing about the board moving under a student's feet. This is the
 code, no model, that turns rows the scraper already wrote into a typed
 "what changed" snapshot.
 
-EXACTLY THREE EVENT TYPES, on purpose — decay and calendar events are
+EXACTLY TWO EVENT TYPES, on purpose — decay and calendar events are
 already surfaced elsewhere on Today (the cadence queue and the Schedule
 rail respectively), and this module is not the place to re-derive either:
 
   - `deadline_moved`  — a role the student TRACKS had its stated deadline
     change.
-  - `role_closed`     — a role the student TRACKS was confirmed closed by
-    the scraper.
   - `new_role_at_known_firm` — a fresh posting appeared at a firm the
     student already has a foothold at (a contact there, or a tiered
     target).
+
+Both are things the student can DO something about today: re-plan a window
+that moved, or apply to a posting that opened. That is the test an event
+kind has to pass to earn a slot in a three-card strip on the page a student
+opens every morning. "Changed" and "worth telling them" are not the same
+predicate, and this module used to conflate them.
+
+WHY THERE IS NO `role_closed` KIND (removed 2026-09-02)
+-------------------------------------------------------
+A third kind used to report that a role the student tracks had been
+confirmed closed by the scraper, and it LED the flat list below on the
+argument that a close is terminal news. It is written down here rather
+than silently filtered because P4 forbids invisible filters, and because
+the next person to look at `OpportunityChange` will ask why the close rows
+are not read back.
+
+Four things killed it, in the order they matter:
+
+1. THERE IS NOTHING TO DO ABOUT IT. Every other thing on Today names an
+   act: message this person, apply to this posting, hit this deadline. A
+   posting that already shut names none. It is an obituary, and it was
+   printing above the openings.
+2. THE FOUNDER SAID SO, about the only instance his account has produced.
+   Screenshotted 2026-09-02: "Bank of America closed Bank of America
+   Campus Insight Forum: The Power to Lead - Fall 2026" beside "Bank of
+   America opened Global Capital Markets Summer Analyst - 2027 - Hong
+   Kong". His words: "why is it telling me the programs I applied for has
+   closed, I don't care". Note APPLIED — his `UserOpportunity` row on that
+   forum is `applied_status="submitted"`, which is what retires the
+   obvious rescue ("keep the kind, but only where they applied"). The one
+   population it would have preserved is the one population that
+   complained. Measured, not assumed.
+3. THE FACT IS ALREADY MARKED, on the surface that owns tracked roles and
+   with better copy. `directory.views._posting_closed_note` marks every
+   tracked closed row on the pipeline permanently, and splits the sentence
+   on exactly the axis this kind could not: "Your application still
+   stands" for a submitted row, "It's no longer accepting applications"
+   for a saved one. Nothing is dropped; P4's mark lives there. Repeating
+   it as a headline card is P5's "one definition per fact" broken in the
+   direction of noise, and the advisor keeps its own copy too
+   (`assistant.tools.get_my_pipeline` carries `posting_closed` per row).
+4. IT SCALES WRONG. Board-wide over the seven days to 2026-09-02: 3870 of
+   27356 postings flipped to closed (14.1%) against 178 deadline moves
+   (0.65%) — closes outrun moves 22 to 1. Ranked first and capped at
+   `MAX_PER_TYPE`, closes fill all three rendered slots on their own for
+   any student tracking more than ~20 roles. The founder's eight tracked
+   rows are the only reason the damage stopped at one card.
+
+If a close ever needs to reach Today again, it belongs beside the role on
+the pipeline or in the digest, not as a headline in a strip whose whole
+job is to name what to do next.
 
 THE TENANT RULE, same as `assistant/tools.py`
 ------------------------------------------------
@@ -120,7 +169,6 @@ MAX_TOTAL_EVENTS = 10
 
 _EMPTY: dict = {
     "deadline_moved": [],
-    "role_closed": [],
     "new_role_at_known_firm": [],
     "events": [],
 }
@@ -168,13 +216,18 @@ def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[di
     opportunity — a role that moved twice in the window is reported once,
     old-to-newest, not as two disagreeing cards.
 
-    A posting that is CLOSED right now is skipped, the same live-truth test
-    `_role_closed_events` already applies. A moved deadline is a promise
+    A posting that is CLOSED right now is skipped
+    (`directory.deadlines.is_posting_closed`). A moved deadline is a promise
     about a window still open; on a dead posting it is a stale row the
     scraper has already overtaken. Reported directly, pointing at two cards
     for one Bank of America forum: one saying it closed and would not take
     applications, the other saying its deadline had moved to a date nine
-    days out. Both were true rows; together they were nonsense."""
+    days out. Both were true rows; together they were nonsense.
+
+    This guard is now the ONLY place the module reads a posting's live
+    closed-ness, since the `role_closed` kind is gone (module docstring).
+    It does not report the close; it declines to report a window on a role
+    that no longer has one."""
     if not tracked_ids:
         return []
     rows = (
@@ -208,42 +261,6 @@ def _deadline_moved_events(tracked_ids: list[int], since, limit: int) -> list[di
             # advisor's tool payload nor the brief's prompt line has a
             # dotted underline to carry it — see `_deadline_source`.
             "deadline_source": _deadline_source(opp),
-            "observed_at": row.observed_at,
-        })
-        if len(events) >= limit:
-            break
-    return events
-
-
-def _role_closed_events(tracked_ids: list[int], since, limit: int) -> list[dict]:
-    """`OpportunityChange` rows recording a tracked role's status flipping
-    to closed, filtered to postings that are STILL closed right now
-    (`directory.deadlines.is_posting_closed`) — a role that closed and
-    reopened again inside the same window is not news the student needs to
-    act on, it is noise the scraper already resolved on its own."""
-    if not tracked_ids:
-        return []
-    rows = (
-        OpportunityChange.objects
-        .filter(field="status", new_value="closed", opportunity_id__in=tracked_ids, observed_at__gte=since)
-        .select_related("opportunity", "opportunity__firm")
-        .order_by("-observed_at")
-    )
-    seen: set[int] = set()
-    events: list[dict] = []
-    for row in rows:
-        if row.opportunity_id in seen:
-            continue
-        opp = row.opportunity
-        if not is_posting_closed(opp):
-            continue
-        seen.add(row.opportunity_id)
-        events.append({
-            "kind": "role_closed",
-            "opportunity_id": opp.id,
-            "title": opp.title,
-            "firm": opp.firm.name,
-            "url": opp.url,
             "observed_at": row.observed_at,
         })
         if len(events) >= limit:
@@ -478,23 +495,38 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
 
 def build_situation(user) -> dict:
     """This student's "what changed" snapshot: up to `MAX_PER_TYPE` events
-    of each of the three kinds, plus a flat `events` list (all three kinds
-    merged, capped at `MAX_TOTAL_EVENTS`, most-urgent-first) for anything
-    that just wants a short list to render or summarize.
+    of each of the two kinds, plus a flat `events` list (both kinds merged,
+    capped at `MAX_TOTAL_EVENTS`, most-urgent-first) for anything that just
+    wants a short list to render or summarize.
 
-    Ordering of the flat list is a judgement call, stated once here: a role
-    that CLOSED wastes ongoing effort if the student doesn't hear about it
-    (stop applying/prepping), a MOVED deadline risks a missed window if they
-    don't hear about it in time, and a NEW role is upside they didn't have
-    before — real, but the least time-pressured of the three. So
-    `role_closed` leads, then `deadline_moved`, then `new_role_at_known_firm`,
-    each internally most-recent-first.
+    Ordering of the flat list is a judgement call, stated once here. Both
+    surviving kinds are actionable, so urgency alone decides between them: a
+    MOVED deadline is a window closing on a role the student already tracks
+    and already wants, so missing it costs them something they had; a NEW
+    role is upside they did not have before — real, and the less
+    time-pressured of the two. So `deadline_moved` leads, then
+    `new_role_at_known_firm`, each internally most-recent-first.
+
+    Until 2026-09-02 a third kind, `role_closed`, led this list on the
+    argument that a close is terminal news. The module docstring records why
+    it is gone; the short version is that terminal is not the same as
+    actionable, and it was pushing the openings down the page.
 
     That same order is also the PRECEDENCE for the flat list's one-card-per-
-    role rule: a role appearing in more than one kind is reported once, by
-    the most urgent kind that claims it. The per-kind lists are left whole —
-    a caller asking for `role_closed` wants every close, not the ones that
-    survived a merge — so only `events` is deduplicated.
+    role rule: a role appearing in both kinds is reported once, by the more
+    urgent kind that claims it. The per-kind lists are left whole — a caller
+    asking for `deadline_moved` wants every move, not the ones that survived
+    a merge — so only `events` is deduplicated.
+
+    ONE CARD PER FIRM WAS CONSIDERED AND REJECTED. The founder's screenshot
+    read as noise partly because both its cards named Bank of America, and
+    folding by firm would have collapsed them. But the doubling was a close
+    beside an opening, and with the close gone the remaining pair at one
+    firm is a moved window plus a fresh posting: two different roles, two
+    different acts, both worth doing. Folding those would suppress the
+    actionable half to fix a problem the removal already fixed.
+    `_new_role_events` still keeps one row per firm within its own kind
+    (three CICC reqs are one piece of news), and that stays.
 
     Never raises — see the module docstring. Any failure returns the same
     empty shape a student with nothing to report gets, so a bug here can
@@ -509,25 +541,24 @@ def build_situation(user) -> dict:
             .values_list("opportunity_id", flat=True)
         )
 
-        role_closed = _role_closed_events(tracked_ids, since, MAX_PER_TYPE)
         deadline_moved = _deadline_moved_events(tracked_ids, since, MAX_PER_TYPE)
         new_roles = _new_role_events(user, since, MAX_PER_TYPE)
 
         # ONE CARD PER ROLE. Each helper above dedupes inside its own kind
-        # and none of them could see the others, so a single role could
-        # surface twice with two different sentences — which is exactly what
-        # shipped: a Bank of America forum reported as closed AND as having
-        # moved its deadline to a date in the future, side by side.
+        # and neither can see the other, so a single role could surface twice
+        # with two different sentences — which is exactly what shipped once: a
+        # Bank of America forum reported as closed AND as having moved its
+        # deadline to a date in the future, side by side.
         #
-        # The precedence is the list order, already argued below: a role
-        # that closed is terminal news and outranks a window that moved,
-        # which outranks a role that merely appeared. Fixing only the
-        # closed/moved pair at its source (see `_deadline_moved_events`)
-        # would leave the same trap set for the next event kind added here,
-        # so the guarantee lives at the merge where it can be stated once.
+        # The precedence is the list order, argued in the docstring above: a
+        # window that moved outranks a role that merely appeared. Fixing only
+        # one pair at its source (see `_deadline_moved_events`) would leave
+        # the same trap set for the next event kind added here, so the
+        # guarantee lives at the merge where it can be stated once — and it
+        # stays even now that the pair that prompted it is down to two kinds.
         events: list[dict] = []
         claimed: set[int] = set()
-        for event in role_closed + deadline_moved + new_roles:
+        for event in deadline_moved + new_roles:
             opportunity_id = event.get("opportunity_id")
             if opportunity_id in claimed:
                 continue
@@ -538,7 +569,6 @@ def build_situation(user) -> dict:
 
         return {
             "deadline_moved": deadline_moved,
-            "role_closed": role_closed,
             "new_role_at_known_firm": new_roles,
             "events": events,
         }

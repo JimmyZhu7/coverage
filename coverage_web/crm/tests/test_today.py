@@ -1798,6 +1798,48 @@ def test_a_moved_deadline_on_a_tracked_role_renders_a_card(client):
     assert "moved" in body and "deadline" in body
 
 
+def test_the_strip_refuses_to_report_a_closed_role_even_one_he_applied_to(client):
+    """What the strip now declines to say, pinned at the rendered page.
+
+    The founder screenshotted two cards on 2026-09-02, both naming Bank of
+    America, the first of them "Bank of America closed Bank of America
+    Campus Insight Forum: The Power to Lead - Fall 2026" — a role his own
+    `applied_status` said he had submitted to. His words: "why is it
+    telling me the programs I applied for has closed, I don't care."
+
+    A close names no act, so it earns no slot on a three-card strip. The
+    fact is not lost: `directory.views._posting_closed_note` marks the same
+    row on the pipeline, with copy that knows whether he applied. Fixture
+    uses `submitted` deliberately — the stage that would have survived the
+    obvious "keep it where they applied" rescue is the one that produced
+    the complaint. See `assistant.situation`'s module docstring.
+    """
+    from analytics.models import UserOpportunity
+    from directory.models import Opportunity, OpportunityChange
+
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="bank-of-america", name="Bank of America")
+    opp = Opportunity.objects.create(
+        firm=firm, title="Campus Insight Forum: The Power to Lead - Fall 2026",
+        bucket="internship", status="closed",
+        url="https://bofa.example/jobs/forum",
+    )
+    UserOpportunity(user=user, opportunity=opp, applied_status="submitted").save()
+    OpportunityChange.objects.create(
+        opportunity=opp, field="status", old_value="open", new_value="closed",
+        stage="reverify", observed_at=timezone.now(),
+    )
+
+    body = _login_and_get(client, user)
+
+    assert 'class="situation-strip"' not in body, (
+        "a confirmed close drew a card. The only news this strip carries is "
+        "news the student can act on today."
+    )
+    assert "Campus Insight Forum" not in body
+    assert "closed <b>" not in body
+
+
 def test_no_situation_cards_when_nothing_changed(client):
     user = _user(weekly_touch_goal=14)
     body = _login_and_get(client, user)

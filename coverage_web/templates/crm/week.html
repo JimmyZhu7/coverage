@@ -254,14 +254,20 @@
     card for.
     {% endcomment %}
     {% comment %}
-    Standardized 2026-08-31, one shape for all three kinds: FIRM leads
+    Standardized 2026-08-31, one shape for every kind: FIRM leads
     every sentence (matches the Opportunities feed's own decisiveness
     ordering — the anchor fact comes first), one verb, the title bolded,
-    an optional trailing clause, nothing else. Before this, the three
-    kinds read as three different sentences — subject-first here,
-    firm-first there, one with a colon nobody else used — so a reader had
-    to re-parse the shape on every card instead of scanning three the
-    same way.
+    an optional trailing clause, nothing else. Before this, the kinds read
+    as different sentences — subject-first here, firm-first there, one with
+    a colon nobody else used — so a reader had to re-parse the shape on
+    every card instead of scanning them the same way.
+
+    A third branch, `role_closed`, printed "<firm> closed <role>." here
+    until 2026-09-02. It is gone because the event kind is gone, not
+    because the markup changed: see `assistant.situation`'s module
+    docstring for the four measurements that removed it. Every kind this
+    strip can now render names something the student can do today, which
+    is the only reason a card earns one of three slots on this page.
 
     "Talk about it" is gone: with one destination left, an arrow at the
     edge says the whole card leads somewhere, and the card itself is the
@@ -290,8 +296,6 @@
               {{ e.firm|smart_title }} moved <b>{{ e.title|smart_title }}</b>'s deadline
               {% if e.old_date %}from {{ e.old_date|date:"M j" }} {% elif e.old_value %}from {{ e.old_value }} {% endif %}to
               {% if e.new_date %}{{ e.new_date|date:"M j" }}{% else %}{{ e.new_value|default:"no date" }}{% endif %}.
-            {% elif e.kind == "role_closed" %}
-              {{ e.firm|smart_title }} closed <b>{{ e.title|smart_title }}</b>.
             {% elif e.kind == "new_role_at_known_firm" %}
               {{ e.firm|smart_title }} opened <b>{{ e.title|smart_title }}</b>{% if e.location %} · {{ e.location|smart_location }}{% endif %}.
             {% endif %}
