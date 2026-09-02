@@ -80,6 +80,7 @@ from datetime import timedelta
 
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
 from directory.classify import TARGET_BUCKETS
 from directory.cycle_trust import SUSPECT, TRUSTED, classify_closes
@@ -92,6 +93,30 @@ from directory.models import Firm, FirmCycleObservation, Opportunity, Opportunit
 # surfaces each carrying their own copy of a rule they have to agree on.
 from directory.open_runs import onboarding_cutoffs as _onboarding_cutoff
 
+# WHICH CLOCK A DAY IS COUNTED ON. This command used to bucket both windows on
+# `.date()` of a stored UTC instant while `open_runs.open_run_days` — reading
+# the SAME `Opportunity.first_seen` for the Today rail and the Opportunities
+# feed — bucketed on `crm.utils.local_date`. A posting first seen at 01:00 Hong
+# Kong time therefore landed on the previous day in the observation window on a
+# firm page and on the right day in the rail two clicks away, from one column,
+# on one screen.
+#
+# They agree now because they call one function. The clock it reads is the
+# ACTIVE Django timezone, which for a management command with nothing
+# activated is `settings.TIME_ZONE` — the deployment's own clock, the same one
+# `open_runs.onboarding_cutoffs`' `TruncDate` already truncates on, so the
+# cutoff and the dates it is compared against are finally measured the same
+# way. The command prints the zone it used, because a date with no clock named
+# is a date two readers can disagree about in good faith.
+#
+# THE ALTERNATIVE, AND WHY NOT YET. The better answer for a table keyed on
+# (firm, region) is the MARKET's clock: a Hong Kong posting's "opened Aug 3"
+# should mean 3 August in Hong Kong. That is a bigger change than it looks —
+# `onboarding_cutoffs` is shared with two live per-user surfaces and would have
+# to move too, and the region-to-zone map would be a new vocabulary. One clock,
+# named, is the honest step; two clocks silently disagreeing was the defect.
+from crm.utils import local_date
+
 
 class Command(BaseCommand):
     help = "Rebuild FirmCycleObservation from OpportunityChange + ScrapeRun (idempotent)."
@@ -101,6 +126,11 @@ class Command(BaseCommand):
                             help="Compute and report, write nothing.")
 
     def handle(self, *args, **opts):
+        # Name the clock. Every window below is a calendar DAY, and a day is
+        # only a fact once you say whose. See the note above the `local_date`
+        # import.
+        self.stdout.write(
+            f"bucketing days on {timezone.get_current_timezone_name()}")
         campus = Opportunity.objects.filter(bucket__in=TARGET_BUCKETS)
         cutoff_by_firm = _onboarding_cutoff()
 
@@ -109,7 +139,7 @@ class Command(BaseCommand):
         opens_by_group: dict[tuple[int, str], list] = collections.defaultdict(list)
         for opp in campus.only("id", "firm_id", "region", "first_seen"):
             cutoff = cutoff_by_firm.get(opp.firm_id)
-            seen_date = opp.first_seen.date()
+            seen_date = local_date(opp.first_seen).date()
             if cutoff is not None and seen_date <= cutoff:
                 continue  # onboarding backlog, not an observed open
             opens_by_group[(opp.firm_id, opp.region)].append(seen_date)
@@ -139,7 +169,8 @@ class Command(BaseCommand):
             if key is None:
                 continue
             if v.verdict == TRUSTED:
-                closes_by_group[key].append(observed_at_by_change[v.change_id].date())
+                closes_by_group[key].append(
+                    local_date(observed_at_by_change[v.change_id]).date())
             elif v.verdict == SUSPECT:
                 suspect_count_by_group[key] += 1
 

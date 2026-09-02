@@ -271,3 +271,52 @@ def test_the_card_makes_no_forecast(client):
     for forecast in ("typically", "usually", "on average", "stays open",
                      "expected", "estimate", "likely to close", "about "):
         assert forecast not in card, forecast
+
+
+# ---------------------------------------------------------------------------
+# Rule 5 — the rail says WHICH MARKET.
+#
+# `_next_deadlines` reads `confirmed_firm_dates()` with no region scoping and
+# printed no region either, so a Hong Kong close and a US close sat in one
+# list looking identical. `FirmDate.region` is part of the row's unique key
+# and `coverage_domain.cadence._closing_soon` buckets re-pings by it — the
+# market is not decoration on this table, it is half the identity of the row.
+# ---------------------------------------------------------------------------
+
+def test_the_rail_names_the_market_each_deadline_belongs_to():
+    user = _user()
+    hk = _firm("hsbc", "HSBC")
+    us = _firm("gs", "Goldman Sachs")
+    FirmDate.objects.create(firm=hk, cycle="sa2027", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate() + dt.timedelta(days=10),
+                            confidence=1.0, precision="day")
+    FirmDate.objects.create(firm=us, cycle="sa2028", region="us",
+                            event_kind="app_close",
+                            date=timezone.localdate() + dt.timedelta(days=20),
+                            confidence=1.0, precision="day")
+    rows = _next_deadlines(user, timezone.localdate())
+    assert [r["market"] for r in rows] == ["HK", "US"]
+
+
+def test_a_deadline_with_no_market_on_file_says_unstated_not_nothing():
+    """Two live rows (gs id 48, jpm id 47) have no region. Printing nothing
+    lets a row nobody scoped pass for one that applies everywhere; the gs row
+    was the second item on the founder's own rail."""
+    user = _user()
+    firm = _firm()
+    FirmDate.objects.create(firm=firm, cycle="", region="",
+                            event_kind="app_close",
+                            date=timezone.localdate() + dt.timedelta(days=10),
+                            confidence=1.0, precision="day")
+    assert _next_deadlines(user, timezone.localdate())[0]["market"] == "market unstated"
+
+
+def test_the_market_reaches_the_rendered_card(client):
+    user = _user()
+    firm = _firm("hsbc", "HSBC")
+    FirmDate.objects.create(firm=firm, cycle="sa2027", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate() + dt.timedelta(days=10),
+                            confidence=1.0, precision="day")
+    assert "HK" in _card(_today_page(client, user))

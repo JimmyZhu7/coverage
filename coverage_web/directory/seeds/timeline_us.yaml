@@ -2,9 +2,26 @@
 # deploy. `key:` is `<firm-id>/<cycle>/<event_kind>`; the firm-id half must
 # match an `id` in firms.yaml or the entry is skipped as unknown.
 #
-# US SA 2028 cycle. Seeded 2026-07-03 from historical cycle patterns —
-# every seed is precision: estimated / confidence: reported until a research
-# run confirms it. Only confirmed_official dates generate tasks.
+# US SA 2028 cycle. Seeded 2026-07-03 from historical cycle patterns; every
+# seed is precision: estimated / confidence: reported until a research run
+# confirms it. Only confirmed_official dates generate tasks.
+#
+# The eleven bulge-bracket and large-cap openings were re-dated 2026-09-01
+# from `research-us-ib-calendar.md` Rule 2, the strongest rule in that file:
+# across 21 named BB/EB firms tracked through two full cycles, first posting
+# came a median 17 to 18 months before the internship start, IQR 17-18, and
+# the spread is TIGHTENING rather than racing earlier (Rule 3). The 2026-07-03
+# seeds put those firms in Feb, Mar and Apr 2027, which is 15 to 13 months
+# out: one to four months late, on the wrong side of the day a student would
+# have had to act. Each note below carries that firm's own measured lead time.
+#
+# The elite-boutique rows (Evercore, Moelis, Centerview, PJT, Lazard) are left
+# where they were. Dec 2026 and Jan 2027 is 18 and 17 months out, which is
+# what Rule 2 measures for them, so there is nothing to correct.
+#
+# NOTE ON `note:` LINES. `seed_parsers._parse_timeline_entry` reads an
+# unquoted scalar to the end of its line and skips any continuation, so a
+# wrapped note is silently truncated. Every note here is one line.
 cycle: SA 2028
 region: us
 phases:
@@ -12,8 +29,7 @@ phases:
   name: Sophomore positioning
   start: 2026-06-01
   end: 2026-12-31
-  focus: Build the networking base; 2+ advocates per Tier 1 firm; apply to sophomore/insight 
-    programs as they open
+  focus: Build the networking base; 2+ advocates per Tier 1 firm; apply to sophomore/insight programs as they open
 - id: insight_programs
   name: Insight & early-ID programs
   start: 2026-09-01
@@ -21,14 +37,14 @@ phases:
   focus: Sophomore insight programs run and early-ID lists form; convert chats to advocates
 - id: apps_open
   name: Applications open (EBs first)
-  start: 2026-12-01
+  start: 2026-11-01
   end: 2027-06-30
-  focus: Apply day-one with referrals lined up; elite boutiques open earliest, BBs follow
+  focus: Apply day-one with referrals lined up. Rule 2 puts the BB/EB wave 17-19 months out, so Nov 2026 to Jan 2027 is the main window
 - id: interviews_offers
   name: Interviews & offers (rolling)
   start: 2027-03-01
   end: 2027-09-30
-  focus: HireVues, superdays, rolling offers — pipeline shifts from outreach to conversion
+  focus: HireVues, superdays, rolling offers; pipeline shifts from outreach to conversion
 
 firm_dates:
 - key: blackstone/sa2028_pe/app_open
@@ -37,21 +53,21 @@ firm_dates:
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: Historically the earliest mover of any firm — has opened ~18 months ahead in recent cycles
+  note: Historically the earliest mover of any firm, has opened ~18 months ahead in recent cycles. Rule 2 measures IB desks only and says nothing about PE, so this row is left alone.
 - key: evercore/sa2028_ib/app_open
   date: '2026-12'
   precision: estimated
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: EBs opened Dec–Feb in recent cycles; Evercore among the earliest
+  note: EBs opened Dec to Feb in recent cycles; Evercore among the earliest. Rule 2 measures Evercore at 17 months in both cycles, which is Jan 2027, so this seed is one month early and inside the measurement's own granularity.
 - key: moelis/sa2028_ib/app_open
   date: 2026-12
   precision: estimated
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: Historically an early opener among EBs
+  note: Historically an early opener among EBs. Rule 2 measures Moelis at 18 months, which is Dec 2026. Unchanged.
 - key: centerview/sa2028_ib/app_open
   date: 2027-01
   precision: estimated
@@ -65,103 +81,103 @@ firm_dates:
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: ''
+  note: Rule 2 measures PJT at 17 months in the S2027 cycle, which is Jan 2027. Unchanged.
 - key: lazard/sa2028_ib/app_open
   date: 2027-01
   precision: estimated
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: ''
+  note: Rule 2 measures Lazard at 18 months, which is Dec 2026. Left at Jan; one month inside the measurement's granularity and the seed is the more conservative of the two.
 - key: pwp/sa2028_ib/app_open
-  date: 2027-02
+  date: 2026-11
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Perella Weinberg first posted 19 months before the internship start in the S2027 cycle (research-us-ib-calendar.md Rule 2, n=21, IQR 17-18 months). 19 months before June 2028 is Nov 2026.
 - key: guggenheim/sa2028_ib/app_open
-  date: 2027-02
+  date: 2027-01
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Guggenheim first posted 17 months before the internship start in both measured cycles (research-us-ib-calendar.md Rule 2). 17 months before June 2028 is Jan 2027.
 - key: jefferies/sa2028_ib/app_open
-  date: 2027-02
+  date: 2026-12
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Jefferies first posted 18 months before the internship start in the S2027 cycle (research-us-ib-calendar.md Rule 2). 18 months before June 2028 is Dec 2026.
 - key: jpm/sa2028_ib/app_open
-  date: 2027-02
+  date: 2026-12
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: BBs typically open Jan–Apr; JPM tends earlier among BBs
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: J.P. Morgan first posted 18 months before the internship start in the S2027 cycle, and its first SA 2027 application went live in December 2025 (research-us-ib-calendar.md Rule 2). 18 months before June 2028 is Dec 2026.
 - key: gs/sa2028_ib/app_open
-  date: 2027-03
+  date: 2027-01
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Goldman Sachs first posted 17 months before the internship start in both measured cycles, and posted its SA 2027 roles in January 2026 (research-us-ib-calendar.md Rule 2). 17 months before June 2028 is Jan 2027.
 - key: ms/sa2028_ib/app_open
-  date: 2027-03
+  date: 2027-01
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Morgan Stanley's own SA 2027 US posting opened 2026-01-01 and ran 46 days to 2026-02-15 (Grade A), which is 17 months out (research-us-ib-calendar.md Rules 2 and 4). 17 months before June 2028 is Jan 2027.
 - key: bofa/sa2028_ib/app_open
-  date: 2027-03
+  date: 2027-01
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Bank of America first posted 17 months before the internship start in the S2027 cycle (research-us-ib-calendar.md Rule 2). 17 months before June 2028 is Jan 2027.
 - key: citi/sa2028_ib/app_open
-  date: 2027-03
+  date: 2026-12
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Citi first posted 18 months before the internship start in the S2027 cycle, and its US 2027 roles opened Dec 2025 to Jan 2026 (research-us-ib-calendar.md Rule 2). 18 months before June 2028 is Dec 2026.
 - key: hl/sa2028_ib/app_open
-  date: 2027-03
+  date: 2026-11
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Houlihan Lokey first posted 19 months before the internship start in both measured cycles, the earliest of the 21 firms tracked (research-us-ib-calendar.md Rule 2). 19 months before June 2028 is Nov 2026.
 - key: rothschild/sa2028_ib/app_open
-  date: 2027-03
+  date: 2026-11
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Rothschild first posted 19 months before the internship start in both measured cycles (research-us-ib-calendar.md Rule 2). 19 months before June 2028 is Nov 2026.
 - key: barclays/sa2028_ib/app_open
-  date: 2027-04
+  date: 2026-12
   precision: estimated
   confidence: reported
-  source: 'seed:historical-pattern'
-  found: '2026-07-03'
-  note: ''
+  source: 'research:us-ib-calendar'
+  found: '2026-09-01'
+  note: Barclays first posted 18 months before the internship start in the S2027 cycle (research-us-ib-calendar.md Rule 2). 18 months before June 2028 is Dec 2026. This was the latest seed in the file at Apr 2027, four months out of position.
 - key: kkr/sa2028_pe/app_open
   date: 2027-01
   precision: estimated
   confidence: reported
   source: 'seed:historical-pattern'
   found: '2026-07-03'
-  note: Analyst program recruits early, close behind Blackstone
+  note: Analyst program recruits early, close behind Blackstone. Rule 2 measures IB desks only, so this row is left alone.
 - key: gs/sa2028_ib/insight_open
   date: 2026-09
   precision: month
   confidence: confirmed_official
-  source: 
+  source:
     https://www.goldmansachs.com/careers/students/programs-and-internships/americas/emerging-leaders-series
   found: '2026-07-03'
   note: "Goldman Sachs Emerging Leaders Series (sophomore program, Americas) for students graduating December

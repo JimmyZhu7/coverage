@@ -21,8 +21,12 @@ A JSON array. Each entry:
       "event_kind": "app_close",        # app_open | app_close |
                                         #   insight_open | insight_deadline
       "date": "2026-09-15",             # ISO; "" for a known-unknown
-      "cycle": "SA 2028",               # optional, defaults to --cycle;
-                                        #   "sa2028" / "sa2028_ib" also read
+      "cycle": "SA 2028",               # optional; "sa2028" / "sa2028_ib"
+                                        #   also read. When absent, the
+                                        #   region+date rule in `infer_cycle`
+                                        #   decides, and --cycle is only a
+                                        #   fallback for what that rule cannot
+                                        #   place. There is no bare default.
       "track": "ib",                    # optional desk: ib | st | pe | am |
                                         #   consulting | corp-strat
       "region": "hk",                   # optional ("" = unscoped)
@@ -99,6 +103,71 @@ EVENT_KINDS = ("app_open", "app_close", "insight_open", "insight_deadline")
 PRECISIONS = ("", "day", "month", "estimated")
 
 
+# ---------------------------------------------------------------------------
+# WHICH CYCLE A DEADLINE BELONGS TO, WHEN THE FINDING DOES NOT SAY
+# ---------------------------------------------------------------------------
+# `--cycle` used to default to "SA 2028", and a default is not a fact. On the
+# 2026-08-02 radar run six Hong Kong deadlines came in with no `cycle` of their
+# own and were stamped `sa2028` by that default: Morgan Stanley 27 Sep 2026,
+# J.P. Morgan 30 Sep, HSBC 30 Oct, UBS 3 Aug, BlackRock 31 Aug, Bain 31 Aug.
+# Every one of them is the SA 2027 Hong Kong intake. The damage was not
+# cosmetic: the firm page badged HSBC's Oct 2026 close "your cycle" for a
+# student recruiting for SA 2028, `firm_lookup` handed the advisor
+# `cycle: sa2028`, and `_drop_contradicted_openings` in directory/views.py
+# suppressed the CORRECT SA 2028 Hong Kong estimate on four firm pages because
+# a close "in the same cycle" appeared to contradict it.
+#
+# So the market and the month decide, and they can, because the two markets
+# this product covers run on calendars that do not overlap:
+#
+#   HONG KONG. An application that CLOSES in Jul-Oct of year Y belongs to
+#   SA Y+1. Grade A, `scratchpad/research-hongkong.md` §1: Morgan Stanley's HK
+#   SA 2027 "recruitment began on July 7, 2026" with staged deadlines of
+#   16 Aug and 27 Sep 2026; Bank of America and J.P. Morgan HK SA 2027 close
+#   30 Sep 2026; Citi and HSBC HK SA 2027 close 30 Oct 2026. HK recruits on
+#   the London pattern — apply the autumn before the summer — not the US one.
+#
+#   UNITED STATES. An application that CLOSES in Aug-Dec of year Y belongs to
+#   SA Y+2. `scratchpad/research-us-ib-calendar.md` Rule 2 (n=21 firms across
+#   two cycles, Grade C+ aggregate): BB/EB postings first appear a median 17-18
+#   months before a June start, so the Aug-Dec window of Y is the early-ID and
+#   diversity wave of the intake that runs in the summer of Y+2, not Y+1 —
+#   the SA Y+1 US classes were already filled by the spring of Y.
+#
+# NOTHING ELSE IS INFERRED. Only `app_close`, and only for `hk` and `us`, and
+# only inside those month bands. An opening is deliberately excluded: the
+# research dates HK openings (Jul 2026 at MS, 1 Jul at Barclays) but a
+# first-posting month is a distribution, not a rule, and Rule 3 of the US
+# research says the spread is still moving. Outside the rule this function
+# returns "" and the caller falls back to `--cycle` or refuses — it never
+# guesses (P1: silence beats a confident guess).
+_INFERRED_CLOSE_KINDS = ("app_close",)
+
+#: market -> (months the rule covers, how many years ahead the intake runs).
+_CLOSE_CYCLE_RULE = {
+    "hk": (range(7, 11), 1),    # Jul-Oct of Y -> SA Y+1
+    "us": (range(8, 13), 2),    # Aug-Dec of Y -> SA Y+2
+}
+
+
+def infer_cycle(region: str, event_kind: str, on: date | None) -> str:
+    """The cycle slug a closing date in a known market must belong to, or "".
+
+    "" is not a cycle and not a failure: it means the rule above has nothing
+    to say about this row, and the caller must get its cycle from the finding
+    or from an explicit `--cycle`.
+    """
+    if on is None or event_kind not in _INFERRED_CLOSE_KINDS:
+        return ""
+    rule = _CLOSE_CYCLE_RULE.get(str(region or "").strip().lower())
+    if rule is None:
+        return ""
+    months, ahead = rule
+    if on.month not in months:
+        return ""
+    return f"sa{on.year + ahead}"
+
+
 class BadDate(ValueError):
     """A `date` that was supplied but could not be read."""
 
@@ -134,8 +203,15 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--findings", required=True,
                             help="Path to a JSON array, or '-' for stdin.")
-        parser.add_argument("--cycle", default="SA 2028",
-                            help="Cycle label for entries that omit one.")
+        # NO DEFAULT. A default here is a claim the operator never made, and
+        # this one made six wrong claims (see `infer_cycle` above). Now it is
+        # a FALLBACK for the rows the region+date rule cannot speak to, and an
+        # entry that gets neither is skipped with the firm named rather than
+        # written under a guess.
+        parser.add_argument("--cycle", default=None,
+                            help="Cycle label for entries that omit one AND that "
+                                 "the region+date rule cannot place. Never "
+                                 "overrides that rule.")
         parser.add_argument("--dry-run", action="store_true",
                             help="Report every decision, write nothing.")
         parser.add_argument("--force", action="store_true",
@@ -182,6 +258,20 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
 
+            # The market and the date are read BEFORE the cycle, because on a
+            # finding that does not state a cycle they are what decides it.
+            # See `infer_cycle`.
+            region = str(entry.get("region", "")).strip().lower()
+            try:
+                new_date = _parse_date(entry.get("date"))
+            except BadDate as exc:
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: unreadable date {exc!s:.40} "
+                    f"(expected YYYY-MM-DD, or \"\" for a known-unknown). "
+                    f"Any stored date is left alone."))
+                skipped += 1
+                continue
+
             # `cycle` used to be written through verbatim — the ONLY key on
             # the row that was never checked, while `event_kind` above was
             # matched against a closed tuple and `confidence` against a closed
@@ -192,7 +282,42 @@ class Command(BaseCommand):
             # canonical pair; None means the value does not name a cycle, and
             # is skipped with the firm named rather than stored — the same
             # posture `_parse_date` takes toward an unreadable date.
-            raw_cycle = str(entry.get("cycle") or opts["cycle"]).strip()
+            #
+            # THREE SOURCES, IN THIS ORDER. A cycle stated on the finding wins
+            # (P2: stated beats derived); failing that, the region+date rule;
+            # failing that, `--cycle`. What is NOT allowed is the combination
+            # that produced the six mislabelled Hong Kong rows: a finding with
+            # no cycle of its own, a market and a month that place it exactly,
+            # and a `--cycle` on the command line that says otherwise. That is
+            # not a fallback, it is a contradiction, and it is refused.
+            stated_cycle = str(entry.get("cycle") or "").strip()
+            fallback_cycle = str(opts["cycle"] or "").strip()
+            inferred = infer_cycle(region, event_kind, new_date)
+            if stated_cycle:
+                raw_cycle = stated_cycle
+            elif inferred:
+                raw_cycle = inferred
+                fallback_parsed = parse_cycle(fallback_cycle) if fallback_cycle else None
+                if fallback_parsed is not None and fallback_parsed[0] != inferred:
+                    self.stderr.write(self.style.WARNING(
+                        f"skip {slug}/{event_kind}: --cycle {fallback_cycle!r} "
+                        f"contradicts the {region} calendar, which places a close "
+                        f"on {new_date} in {inferred}. State the cycle on the "
+                        f"finding if the rule is wrong. "
+                        f"Any stored date is left alone."))
+                    skipped += 1
+                    continue
+            elif fallback_cycle:
+                raw_cycle = fallback_cycle
+            else:
+                self.stderr.write(self.style.WARNING(
+                    f"skip {slug}/{event_kind}: no cycle on the finding, none "
+                    f"the region+date rule can infer, and no --cycle given. "
+                    f"A cycle is a key on this row, not a decoration. "
+                    f"Any stored date is left alone."))
+                skipped += 1
+                continue
+
             parsed = parse_cycle(raw_cycle)
             if parsed is None:
                 self.stderr.write(self.style.WARNING(
@@ -203,6 +328,15 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
             cycle, cycle_track = parsed
+            # A finding that names its own cycle is evidence and is written as
+            # stated, but a disagreement with the calendar rule is said out
+            # loud rather than swallowed — it is either a firm doing something
+            # new or a finding that needs a second look.
+            if stated_cycle and inferred and cycle != inferred:
+                self.stdout.write(self.style.WARNING(
+                    f"{tag}NOTE {slug}/{event_kind}: finding says {cycle}, the "
+                    f"{region} calendar says {inferred} for a close on "
+                    f"{new_date}. Writing what the finding says."))
             # An explicit `track` on the finding beats one inferred from a
             # cycle suffix, and disagreeing with the suffix is an error rather
             # than a preference — a finding that says both things must not
@@ -232,7 +366,6 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
 
-            region = str(entry.get("region", "")).strip().lower()
             conf_label = str(entry.get("confidence", "")).strip()
             if conf_label not in CONFIDENCE_BAND:
                 # Silently scoring 0.0 for a typo'd band is a downgrade wearing
@@ -247,15 +380,6 @@ class Command(BaseCommand):
                 skipped += 1
                 continue
             conf = CONFIDENCE_BAND[conf_label]
-            try:
-                new_date = _parse_date(entry.get("date"))
-            except BadDate as exc:
-                self.stderr.write(self.style.WARNING(
-                    f"skip {slug}/{event_kind}: unreadable date {exc!s:.40} "
-                    f"(expected YYYY-MM-DD, or \"\" for a known-unknown). "
-                    f"Any stored date is left alone."))
-                skipped += 1
-                continue
 
             observation = {
                 "date": str(entry.get("date", "")),

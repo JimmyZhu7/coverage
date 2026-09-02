@@ -13,8 +13,10 @@ Shapes handled:
    Values are scalars or one-level flow sequences (`[a, b]`). Full-line `#`
    comments and blank lines are skipped.
 
-2. `kb/timeline_{us,hk}.yaml` — top-level `region:`/`cycle:` scalars, an
-   ignored `phases:` block, then a `firm_dates:` block sequence of block
+2. `kb/timeline_{us,hk}.yaml` — top-level `region:`/`cycle:` scalars, a
+   `phases:` block (read by `parse_timeline_phases`; it holds the cycle-level
+   WINDOWS, which is the shape this schema has nowhere to store — see that
+   function), then a `firm_dates:` block sequence of block
    mappings whose keys can be plain scalars, single/double-quoted scalars,
    multi-line double-quoted scalars (the `note:` field), or an empty inline
    value continued on the next indented line (the wrapped `source:` URL).
@@ -148,14 +150,64 @@ def _parse_timeline_entry(lines: list[str]) -> dict:
     return out
 
 
+def _block_entries(lines: list[str], header: str) -> list[list[str]]:
+    """The `- ` entries under a top-level `header:` block, as line groups.
+
+    Stops at the next top-level key, so it can be used for a block that is
+    NOT the last one in the file (`phases:` sits above `firm_dates:`).
+    """
+    try:
+        start = next(i for i, ln in enumerate(lines)
+                     if re.match(rf"^{header}:\s*$", ln))
+    except StopIteration:
+        return []
+
+    entries: list[list[str]] = []
+    cur: list[str] | None = None
+    for ln in lines[start + 1:]:
+        if re.match(r"^[A-Za-z_]+:", ln):       # next top-level block
+            break
+        if re.match(r"^-\s", ln):
+            if cur is not None:
+                entries.append(cur)
+            cur = [ln]
+        elif cur is not None:
+            cur.append(ln)
+    if cur is not None:
+        entries.append(cur)
+    return entries
+
+
+def parse_timeline_phases(text: str) -> list[dict]:
+    """The `phases:` block of a `timeline_*.yaml`, as entry dicts.
+
+    WHY THIS EXISTS RATHER THAN THE BLOCK STAYING IGNORED. `parse_timeline_yaml`
+    below dropped `phases:` on the floor, and the module docstring called it
+    "an ignored block". What it actually holds is the closest thing either
+    seed file has to the truth: `timeline_hk.yaml`'s `apps_open` phase is a
+    WINDOW, and the seven HK point estimates the same file carries are all a
+    single day inside it. A window is the honest shape for "this is when the
+    market moves"; a point estimate is a window pretending to be a date.
+
+    It is parsed and returned; it is NOT stored. `FirmDate.date` is one
+    `DateField` and there is nowhere in this schema to put a start and an end,
+    so `seed_directory` reports what it read and stops there rather than
+    flattening a window into a day it would then have to render as a fact.
+    The alternative — a `FirmPhase` table — is a schema decision, not a bug
+    fix.
+    """
+    return [_parse_timeline_entry(e) for e in _block_entries(text.splitlines(), "phases")]
+
+
 def parse_timeline_yaml(text: str) -> tuple[str, str, list[dict]]:
     """Return `(region, cycle_label, firm_dates)` from a `timeline_*.yaml`.
 
     `region`/`cycle_label` are the file-level scalars. `firm_dates` is the list
     of entry dicts (each with key, date, precision, confidence, source, found,
-    note). The `phases:` block is intentionally ignored — phases are cycle-level
-    and have no firm to attach to. `firm_dates:` is the last top-level block in
-    both files, so everything after it belongs to it.
+    note). The `phases:` block is not returned here — it is cycle-level and has
+    no firm to attach to — but it is no longer discarded either: see
+    `parse_timeline_phases`. `firm_dates:` is the last top-level block in both
+    files, so everything after it belongs to it.
     """
     lines = text.splitlines()
     region = cycle_label = ""

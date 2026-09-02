@@ -53,6 +53,7 @@ from .utils import (
     FIRM_DATE_LABELS,
     _clock,
     confirmed_firm_dates as _confirmed_firm_dates,
+    firm_date_market,
 )
 
 # Monday-first weeks: every market this product covers starts its week on a
@@ -175,11 +176,13 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
     for fd in (_confirmed_firm_dates().filter(date__gte=first, date__lte=last)
                .select_related("firm")):
         label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
+        # The market, always. See `crm.utils.firm_date_market` — this grid
+        # printed "HSBC · Applications close" on a Hong Kong deadline.
         buckets.setdefault(fd.date, []).append({
             "id": None,
             "kind": _firm_date_kind(fd.event_kind),
             "source": "directory",
-            "title": f"{fd.firm.name} · {label}",
+            "title": f"{fd.firm.name} · {firm_date_market(fd.region)} · {label}",
             "description": "",
             "location": "",
             "all_day": True,
@@ -716,6 +719,9 @@ def _ics_body(user) -> HttpResponse:
     # deadline that falls exactly on the far edge.
     first_day = timezone.localdate(window_start)
     last_day = timezone.localdate(window_end)
+    # Read on the same clock as the window edges — `calendar_ics` has already
+    # activated the user's own zone around this call.
+    today = timezone.localdate(now)
 
     lines = [
         "BEGIN:VCALENDAR",
@@ -767,14 +773,24 @@ def _ics_body(user) -> HttpResponse:
                .filter(date__gte=first_day, date__lte=last_day)
                .select_related("firm")):
         label = FIRM_DATE_LABELS.get(fd.event_kind, fd.event_kind.replace("_", " "))
-        summary = f"{fd.firm.name} · {label}"
+        # The market rides in the SUMMARY, because the SUMMARY is all a phone
+        # shows. See `crm.utils.firm_date_market`.
+        summary = f"{fd.firm.name} · {firm_date_market(fd.region)} · {label}"
         lines += ["BEGIN:VEVENT",
                   f"UID:coverage-fd-{fd.id}@coverage.app",
                   f"DTSTAMP:{stamp}",
                   f"SUMMARY:{esc(summary)}",
                   f"DTSTART;VALUE=DATE:{fd.date:%Y%m%d}"]
-        # Only the dates you can MISS get an alarm.
-        if "close" in fd.event_kind or "deadline" in fd.event_kind:
+        # Only the dates you can MISS get an alarm, and only while you can
+        # still miss them. The window below reaches 30 days into the PAST so
+        # that a deadline already gone stays visible in the week it belongs
+        # to — but a VALARM is a phone waking someone up to act, and there is
+        # nothing left to act on. Five of the founder's eight firm-date
+        # VEVENTs on 2026-09-01 were past, and every closed one carried two
+        # alarms; a subscription refresh re-fires them. Same reasoning as the
+        # closed tracked postings below: keep the entry, drop the alarm.
+        if (("close" in fd.event_kind or "deadline" in fd.event_kind)
+                and fd.date >= today):
             lines += alarms(summary)
         lines.append("END:VEVENT")
 

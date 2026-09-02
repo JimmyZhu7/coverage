@@ -1048,9 +1048,9 @@ def test_the_opening_no_longer_wears_the_deadline_colour(client, logged_in):
     _firm_date("app_open")
     body = _month(client).content.decode()
     assert re.search(r'class="cal-ev cal-ev-opening[^"]*"[^>]*'
-                     r'title="Goldman Sachs · Applications open"', body)
+                     r'title="Goldman Sachs · US · Applications open"', body)
     assert not re.search(r'class="cal-ev cal-ev-deadline[^"]*"[^>]*'
-                         r'title="Goldman Sachs · Applications open"', body)
+                         r'title="Goldman Sachs · US · Applications open"', body)
 
 
 def test_the_page_head_lists_what_the_page_now_counts(client, logged_in):
@@ -1085,7 +1085,7 @@ def test_an_opening_still_reaches_the_subscribed_feed_without_an_alarm(client, l
     body = client.get(
         reverse("crm:calendar_ics", args=[logged_in.calendar_token])
     ).content.decode()
-    assert "SUMMARY:Goldman Sachs · Applications open" in body
+    assert "SUMMARY:Goldman Sachs · US · Applications open" in body
     assert "BEGIN:VALARM" not in body
 
 
@@ -1361,3 +1361,107 @@ def test_a_cancelled_invite_adds_no_chat_and_logs_no_scheduled_touch(user):
     assert timezone.localtime(ev.starts_at) == when, (
         "retired, not erased — the date it was booked for is a real fact"
     )
+
+
+# ---------------------------------------------------------------------------
+# WHICH MARKET, AND WHETHER THE DATE HAS ALREADY GONE
+#
+# A `FirmDate` is scoped to a market — `region` is part of its unique key and
+# `coverage_domain.cadence._closing_soon` buckets by it — and these two
+# surfaces printed the firm and the event alone. Measured on the founder's own
+# account 2026-09-01: his September grid read "Goldman Sachs · Applications
+# close" on a row with no region, no source and no cycle on file, and his
+# October read "HSBC · Applications close" on a Hong Kong deadline he is not
+# recruiting into. Five of his eight firm-date VEVENTs were already in the
+# past, and every closed one still carried two alarms.
+# ---------------------------------------------------------------------------
+
+def test_the_grid_names_the_market_a_deadline_belongs_to(client, logged_in):
+    firm = Firm.objects.create(slug="hsbc", name="HSBC")
+    when = _pinned_day(15)
+    FirmDate.objects.create(firm=firm, cycle="sa2027", region="hk",
+                            event_kind="app_close", date=when, confidence=1.0)
+    body = _grid(client, when).content.decode()
+    assert "HSBC · HK · Applications close" in body
+
+
+def test_a_row_with_no_market_on_file_says_so_rather_than_reading_global(
+        client, logged_in):
+    """Two live rows (gs id 48, jpm id 47) carry no region at all. A blank
+    does not mean "everywhere", it means nobody recorded where — and printing
+    nothing lets it pass for a date that applies to every market."""
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    when = _pinned_day(15)
+    FirmDate.objects.create(firm=firm, cycle="", region="",
+                            event_kind="app_close", date=when, confidence=1.0)
+    body = _grid(client, when).content.decode()
+    assert "Goldman Sachs · market unstated · Applications close" in body
+
+
+def test_the_subscribed_feed_names_the_market_too(client, logged_in):
+    """The SUMMARY is all a phone shows."""
+    firm = Firm.objects.create(slug="hsbc", name="HSBC")
+    FirmDate.objects.create(firm=firm, cycle="sa2027", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=20),
+                            confidence=1.0)
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "SUMMARY:HSBC · HK · Applications close" in body
+
+
+def test_the_feed_names_an_unstated_market_as_unstated(client, logged_in):
+    firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
+    FirmDate.objects.create(firm=firm, cycle="", region="",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=20),
+                            confidence=1.0)
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "SUMMARY:Goldman Sachs · market unstated · Applications close" in body
+
+
+def test_a_deadline_already_gone_keeps_its_place_and_loses_its_alarms(
+        client, logged_in):
+    """The feed reaches 30 days back on purpose, so a deadline stays in the
+    week it belongs to. But a VALARM is a phone waking someone up to act, and
+    there is nothing left to act on — the same reasoning the closed tracked
+    postings already follow."""
+    firm = Firm.objects.create(slug="blackrock", name="BlackRock")
+    FirmDate.objects.create(firm=firm, cycle="sa2027", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate() - timedelta(days=2),
+                            confidence=1.0)
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "SUMMARY:BlackRock · HK · Applications close" in body, "still on the feed"
+    assert "BEGIN:VALARM" not in body, "but nothing left to be reminded about"
+
+
+def test_a_deadline_still_ahead_keeps_both_alarms(client, logged_in):
+    """The guard against over-correcting: the alarm is the point of the feed
+    for every date a student can still miss."""
+    firm = Firm.objects.create(slug="hsbc", name="HSBC")
+    FirmDate.objects.create(firm=firm, cycle="sa2027", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate() + timedelta(days=30),
+                            confidence=1.0)
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert body.count("BEGIN:VALARM") == 2
+
+
+def test_a_deadline_closing_today_still_alarms(client, logged_in):
+    """Today is not past. A deadline is missable right up to its own day."""
+    firm = Firm.objects.create(slug="hsbc", name="HSBC")
+    FirmDate.objects.create(firm=firm, cycle="sa2027", region="hk",
+                            event_kind="app_close",
+                            date=timezone.localdate(), confidence=1.0)
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert body.count("BEGIN:VALARM") == 2

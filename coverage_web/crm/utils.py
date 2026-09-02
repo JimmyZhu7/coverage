@@ -314,6 +314,56 @@ FIRM_DATE_LABELS = {
 
 
 # ---------------------------------------------------------------------------
+# WHICH MARKET A FIRM DATE IS ABOUT. ONE DEFINITION, THREE CALL SITES.
+# ---------------------------------------------------------------------------
+# A `FirmDate` is scoped to a market: `FirmDate.region` is part of its unique
+# key and `coverage_domain.cadence._closing_soon` buckets by it. Three
+# surfaces that print these rows dropped the market on the floor and printed
+# only the firm and the event — the calendar grid
+# (`crm.calendar_views._period_context`), the subscribed .ics feed, and
+# Today's deadlines rail. Measured on the founder's own account 2026-09-01:
+# his September calendar read "Goldman Sachs · Applications close" on a row
+# whose region, source and cycle are all blank, and his October read "HSBC ·
+# Applications close" on a HONG KONG deadline. For a student recruiting in
+# one market and reading a date from the other, an unmarked row is not a
+# small omission — it is the page telling them the wrong deadline.
+#
+# A BLANK REGION SAYS SO OUT LOUD (P4: mark, never drop). Two live rows carry
+# no region at all, and the tempting reading of a blank — "this applies
+# everywhere" — is exactly backwards: it means nobody recorded where the date
+# applies. Printing nothing lets the row pass for global. So it prints
+# "market unstated", which is what it is.
+#
+# SHORT CODES, NOT `REGION_LABELS`' FULL NAMES. These land in a calendar
+# cell, an .ics SUMMARY line and a one-line rail row, all of which truncate;
+# "HK" survives where "Hong Kong" is what gets cut. The full names stay where
+# there is room for them (the Region filter, Settings).
+FIRM_DATE_MARKET_UNSTATED = "market unstated"
+
+_FIRM_DATE_MARKETS = {
+    "hk": "HK", "us": "US", "sg": "SG", "eu": "EU", "cn": "CN", "jp": "JP",
+    # These two are stated facts about placelessness, not missing data, and
+    # must not read as either a country code or as "unstated". See
+    # `directory.classify.REGION_LABELS`.
+    "other": "other market",
+    "global": "global",
+}
+
+
+def firm_date_market(region) -> str:
+    """The market token a firm date prints, never "".
+
+    An unrecognised code is passed through uppercased rather than swallowed:
+    a market Coverage has not mapped yet is still a market the row states,
+    and the honest failure is an odd-looking token, not a silent global.
+    """
+    code = str(region or "").strip().lower()
+    if not code:
+        return FIRM_DATE_MARKET_UNSTATED
+    return _FIRM_DATE_MARKETS.get(code, code.upper())
+
+
+# ---------------------------------------------------------------------------
 # What "confirmed" means for a firm date. ONE definition, five call sites.
 # ---------------------------------------------------------------------------
 # `directory.views._firm_date_row` — the firm timeline, the page that shows
