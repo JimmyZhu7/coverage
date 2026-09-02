@@ -1504,6 +1504,73 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
 .se-dialog .se-input { width: 100%; }
 .se-dialog-actions { display: flex; justify-content: flex-end; gap: var(--s2);
   margin-top: var(--s3); }
+
+/* Affiliations, and the readout under it (accounts/_profile_form.html,
+   2026-09-02). The control is still a plain textarea; everything below is
+   what the page says ABOUT what is in it, which is the part that was
+   missing. See that partial's comment for why: the field's only consumer
+   looks for each line verbatim inside a contact's own text, so the one
+   thing a student needs to know is whether their line reads as a name.
+
+   The amber trio, not --danger. `.pill.stale` and `.drawer-caution` already
+   own this exact meaning in this product — "we can't vouch for this", an
+   advisory that never blocks — and a long tie is precisely that: it saves,
+   it just probably will not match. Red would claim the student made an
+   error, which the form does not believe (accounts/forms.py's
+   clean_affiliations refuses to enforce the word ceiling for the same
+   reason).
+
+   A SHORT LINE GETS A GREY DOT, NOT A GREEN ONE. Green would be the product
+   claiming the line will match, and it cannot know that: "PE deal-sourcing
+   internship" is three words and still appears in nobody's notes. Word count
+   can only ever catch one failure, so the readout marks that one and says
+   nothing about the rest (P1, silence beats a confident guess). The dot is
+   the row's bullet; the sentence is the whole message, which also keeps the
+   meaning off colour alone. */
+.aff-field { margin: 0 0 var(--s3); }
+.aff-lines { list-style: none; margin: var(--s2) 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--s1); }
+.aff-line { display: flex; align-items: flex-start; gap: var(--s2);
+  font-size: var(--fs-s); color: var(--ink-2); }
+/* Centred against the first line's cap height, not its box, or the dot rides
+   high next to a row that wrapped onto two lines. */
+.aff-line-mark { flex: none; width: 6px; height: 6px; margin-top: 7px;
+  border-radius: 50%; background: var(--ink-3); }
+.aff-line.is-long .aff-line-mark { background: var(--stale-t); }
+.aff-line-body { min-width: 0; }
+.aff-line-text { display: block; overflow-wrap: anywhere; }
+.aff-line.is-long .aff-line-text { color: var(--ink); }
+.aff-line-note { display: block; color: var(--stale-t); font-size: var(--fs-xs); }
+.aff-empty { margin: var(--s2) 0 0; color: var(--ink-3); font-size: var(--fs-s); }
+
+/* The one-time note about ties already saved in the wrong shape. Sits at the
+   very top of the Profile card, so it is on screen without scrolling, and
+   its own button is the way down to the field. Wraps to a stack under about
+   34rem — at 375px the sentence and two buttons cannot share a row without
+   the buttons shrinking below their own label. */
+.aff-notice { display: flex; flex-wrap: wrap; align-items: center;
+  justify-content: space-between; gap: var(--s3);
+  margin: 0 0 var(--s4); padding: var(--s3) var(--s4);
+  border-color: var(--stale-l); background: var(--stale-s); }
+/* `display: flex` above outranks the UA sheet's `[hidden] { display: none }`,
+   so the attribute the script toggles would do nothing without this — the
+   note rendered `hidden` would paint anyway and Dismiss would appear dead.
+   Every other `hidden` on this page is on a block element, which is why the
+   rule has not been needed before. */
+.aff-notice[hidden] { display: none; }
+.aff-notice-text { flex: 1 1 22ch; min-width: 0; margin: 0;
+  font-size: var(--fs-s); color: var(--stale-t); }
+.aff-notice-actions { flex: none; display: flex; gap: var(--s2); }
+/* A strip, not a dialog: the default 10px/20px button is sized for the
+   bottom of a form, and two of them at that size turn an advisory into the
+   loudest thing on the page. */
+.aff-notice .btn { padding: 7px 14px; font-size: var(--fs-s); }
+/* Dismiss is the quieter of the two on purpose. It carries the banner's own
+   ink rather than the page's, so it reads as part of the note it closes. */
+.aff-notice-x { background: transparent; border-color: transparent;
+  color: var(--stale-t); }
+.aff-notice-x:hover { background: var(--surface); border-color: var(--stale-l);
+  color: var(--stale-t); }
 form p label { margin-top: var(--s3); }
 /* `.firm-list label` was a second selector here. The onboarding firm picker
    it styled is a tile grid now (`.ob-firm`, in accounts/_welcome_head.html),

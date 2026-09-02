@@ -39,7 +39,8 @@ from django.db.migrations.executor import MigrationExecutor
 from django.urls import reverse
 
 from accounts.forms import (
-    AFFILIATION_LIMIT, AFFILIATION_MAX_CHARS, LANGUAGE_CHOICES, ProfileForm,
+    AFFILIATION_LIMIT, AFFILIATION_LONG_NOTE, AFFILIATION_MAX_CHARS,
+    AFFILIATION_WORD_SOFT_MAX, LANGUAGE_CHOICES, ProfileForm,
 )
 from accounts.models import STUDY_LEVEL_CHOICES
 from directory.facts import _LANGS
@@ -214,6 +215,173 @@ def test_blank_affiliations_stay_blank(user):
 
 
 # ---------------------------------------------------------------------------
+# Affiliations: the shape readout (2026-09-02)
+#
+# The field's whole product effect is one substring search:
+# `crm.relevance.specific_tie` asks whether a tie appears verbatim, case
+# blind, inside a contact's own `school`/`angle`/`notes`, and a hit
+# multiplies that contact's `ev` by 1.6. A description never appears in
+# somebody else's text; a name constantly does. The box used to say nothing
+# about that, so five résumé fragments on the founder's own row matched
+# nothing at all across 306 contacts and he had no way to find out.
+#
+# What these pin is that the page now SAYS so, and that saying so never turns
+# into doing something about it: no refusal, no truncation, no rewrite.
+# ---------------------------------------------------------------------------
+
+def test_the_readout_marks_a_long_tie_and_stays_quiet_about_a_short_one(user):
+    """Word count can only catch one failure — a line too long to be a
+    substring of anyone's text — so it reports that one and says nothing
+    about the rest. A short tie gets a row and no verdict, deliberately:
+    "PE deal-sourcing internship" is three words and still matches nobody,
+    and a product that green-ticked it would be guessing out loud (P1)."""
+    long_tie = "London M&A boutique internship (live deal exposure)"
+    form = ProfileForm(_post(affiliations=f"USC\n{long_tie}"))
+    rows = form.shape_report()
+
+    assert [r["text"] for r in rows] == ["USC", long_tie]
+    assert rows[0]["words"] == 1 and rows[0]["long"] is False
+    assert rows[0]["note"] == ""
+    assert rows[1]["words"] > AFFILIATION_WORD_SOFT_MAX
+    assert rows[1]["long"] is True
+    assert rows[1]["note"] == AFFILIATION_LONG_NOTE
+
+
+def test_the_readout_reports_the_line_exactly_as_typed(user):
+    """It quotes, it does not edit. The only thing it normalises is the run
+    of whitespace the box itself would have collapsed on save."""
+    form = ProfileForm(_post(affiliations="  Grew   up in Hong Kong  "))
+    assert [r["text"] for r in form.shape_report()] == ["Grew up in Hong Kong"]
+
+
+def test_a_long_tie_still_saves_exactly_as_typed(user):
+    """THE LOAD-BEARING ONE. The readout is an opinion about shape; the row
+    is the student's own answer. A tie over the word ceiling validates,
+    saves, and comes back byte for byte — never shortened, never reordered,
+    never dropped (P2, the student's data outranks the product's rule)."""
+    typed = "Chinese securities firm internship (China market fluency)"
+    form = ProfileForm(_post(affiliations=typed))
+    assert form.is_valid(), form.errors
+    assert form.cleaned_data["affiliations"] == [typed]
+    form.apply_to(user)
+    user.refresh_from_db()
+    assert user.affiliations == [typed]
+
+
+def test_the_placeholder_teaches_names_not_resume_lines(user):
+    """It used to read "London M&A boutique, summer intern", which taught by
+    example the exact shape that cannot match. Every placeholder line is now
+    a proper noun inside the word ceiling."""
+    lines = ProfileForm().fields["affiliations"].widget.attrs["placeholder"].splitlines()
+    assert lines, "the box still shows examples"
+    for line in lines:
+        assert len(line.split()) <= AFFILIATION_WORD_SOFT_MAX, line
+    assert "USC" in lines
+
+
+def test_the_readout_is_painted_by_the_server_not_the_script(client, user):
+    """Progressive enhancement, and the reason the form owns the judgement:
+    a student with JS off still gets told, at the field, which of their lines
+    will not match. The script at the bottom of the partial only takes over
+    once the text starts moving."""
+    user.affiliations = ["USC", "Bilingual English/Mandarin, HK desk fit"]
+    user.save(update_fields=["affiliations"])
+    client.force_login(user)
+    body = client.get(reverse("accounts:settings")).content.decode()
+
+    # `<li class=` and not a bare class name: the enhancer at the bottom of
+    # the partial builds the same classes in JS, so a looser needle would
+    # pass on the script alone and prove nothing about the server render.
+    assert body.count('<li class="aff-line') == 2
+    assert '<li class="aff-line is-long"' in body
+    # `escape`, because the sentence carries an apostrophe and Django is
+    # doing its job.
+    from django.utils.html import escape
+    assert f'class="aff-line-note">5 words. {escape(AFFILIATION_LONG_NOTE)}<' in body
+    # The short one is listed, and nothing is claimed about it.
+    assert '<li class="aff-line"' in body
+    assert 'class="aff-line-text">USC<' in body
+
+
+def test_the_saved_shape_note_speaks_only_for_stored_long_ties(client, user):
+    """The one-time note is about what is STORED, which is the case the
+    redesign of the box cannot reach: a student who answered months ago and
+    has no reason to scroll back down to it. Short ties, or none, and the
+    page says nothing."""
+    client.force_login(user)
+    url = reverse("accounts:settings")
+    # The markup's own needle. `data-aff-notice` on its own also appears in
+    # the enhancer's selectors at the bottom of the partial.
+    needle = 'data-aff-notice-key="aff-shape:'
+
+    assert needle not in client.get(url).content.decode()
+
+    user.affiliations = ["USC", "Bain & Company"]
+    user.save(update_fields=["affiliations"])
+    assert needle not in client.get(url).content.decode()
+
+    user.affiliations = ["USC", "Consulting club e-board alumni network"]
+    user.save(update_fields=["affiliations"])
+    body = client.get(url).content.decode()
+    assert needle in body
+    assert 'href="#id_affiliations"' in body          # points at the field
+    assert "One of your saved ties reads as a sentence." in body
+    # It points. It does not act: the note carries no edited version of the
+    # line, and nothing outside the box quotes it back.
+    note = body.split(needle)[1].split("</div>")[0]
+    assert "Consulting club" not in note
+
+
+def test_the_note_key_tracks_the_exact_set_of_long_ties(user):
+    """Dismissal is per-advice, not per-field. Trimming one long tie and
+    leaving another changes the key, so the note comes back for what is
+    left; waving off the same set twice does not."""
+    long_a = "Consulting club e-board alumni network"
+    long_b = "Chinese securities firm internship (China market fluency)"
+
+    both = ProfileForm(initial={"affiliations": f"{long_a}\n{long_b}"})
+    one = ProfileForm(initial={"affiliations": f"USC\n{long_a}"})
+    same = ProfileForm(initial={"affiliations": f"{long_a}\n{long_b}\nUSC"})
+
+    assert both.saved_long_ties() == [long_a, long_b]
+    assert one.saved_long_ties() == [long_a]
+    assert both.saved_shape_token() != one.saved_shape_token()
+    # A short tie added or removed is not new advice.
+    assert both.saved_shape_token() == same.saved_shape_token()
+    assert ProfileForm(initial={"affiliations": "USC"}).saved_shape_token() == ""
+
+
+def test_the_note_is_silent_while_the_student_is_mid_edit(client, user):
+    """A bound form is a validation-error re-render: the person is looking at
+    the box right now, with their own text in it, and being told about the
+    row they are in the middle of replacing is noise. `saved_long_ties` reads
+    `self.initial`, which `accounts.views._bound_profile_form` deliberately
+    seeds with only `target_cycles` and `languages`."""
+    user.affiliations = ["Consulting club e-board alumni network"]
+    user.save(update_fields=["affiliations"])
+    client.force_login(user)
+    body = client.post(reverse("accounts:settings"), _post(
+        section="profile",
+        affiliations="Consulting club e-board alumni network",
+        school_emails="me@gmail.com",          # refused: forces the re-render
+    ), HTTP_HX_REQUEST="true").content.decode()
+
+    assert '<li class="aff-line' in body, "the readout still describes the box"
+    assert 'data-aff-notice-key="aff-shape:' not in body
+
+
+def test_the_onboarding_step_carries_no_shape_note(client, user):
+    """Step 1 does not render the field (it rides through as a hidden input),
+    so a note whose only action is a link to that field would point at
+    nothing. See the `compact` branch of the partial."""
+    user.affiliations = ["Consulting club e-board alumni network"]
+    user.save(update_fields=["affiliations"])
+    client.force_login(user)
+    body = client.get(reverse("accounts:onboarding") + "?step=profile").content.decode()
+    assert 'data-aff-notice-key="aff-shape:' not in body
+
+
+# ---------------------------------------------------------------------------
 # Both pages: Settings and onboarding step 1 render and save them
 # ---------------------------------------------------------------------------
 
@@ -221,12 +389,19 @@ def _assert_controls_and_ledes(body: str):
     """Rewritten 2026-09-02: the Study Level hint was cut. Every option in
     the select already names the level ("Undergraduate", "Master's",
     "PhD"), so "some programmes are MBA- or PhD-only" restated what the
-    control itself already said, one line under it."""
+    control itself already said, one line under it.
+
+    Rewritten again the same day for Affiliations. The old lede — "Specific
+    ties get replies: a club, a prior employer, a hometown." — named the
+    CATEGORIES and left the shape to the reader, which is how five résumé
+    fragments ended up in the box. The new one names the shape, because the
+    shape is the whole thing that decides whether the field does anything.
+    The assertion moves with the copy; it was never pinning a behaviour."""
     assert 'name="languages"' in body
     assert 'id="id_study_level"' in body
     assert 'id="id_affiliations"' in body
     assert "Languages you can work in" in body
-    assert "Specific ties get replies: a club, a prior employer, a hometown." in body
+    assert "Names, not sentences. A club, a firm, a school, a hometown." in body
 
 
 def test_the_settings_page_renders_the_three_controls_with_their_ledes(client, user):
@@ -276,15 +451,32 @@ def test_the_onboarding_profile_step_asks_only_what_the_feed_reads(client, user)
 
 
 def test_the_ledes_carry_no_em_dash():
-    """Repo copy style: minimal, punchy, no em dashes in what a student reads."""
+    """Repo copy style: minimal, punchy, no em dashes in what a student reads.
+
+    Widened 2026-09-02. The Affiliations redesign added three more strings a
+    student reads that are not `field-hint` lines — the shape note, the empty
+    state, and the saved-shape banner — and the file's own `{% comment %}`
+    blocks are full of em dashes, so the check cannot simply scan the file.
+    It scans the copy-bearing lines by their classes instead, plus the one
+    sentence that lives in Python because two renderers share it.
+    """
     from pathlib import Path
 
     from django.conf import settings
 
     partial = Path(settings.BASE_DIR) / "templates" / "accounts" / "_profile_form.html"
-    hints = [line for line in partial.read_text().splitlines() if "field-hint" in line]
+    lines = partial.read_text().splitlines()
+    hints = [line for line in lines if "field-hint" in line]
     assert len(hints) >= 4, "the avatar hint plus the three new ledes"
-    assert not any("—" in line for line in hints)
+
+    student_copy = hints + [
+        line for line in lines
+        if "aff-empty" in line or "aff-notice-text" in line
+        or "saved ties read as sentences" in line
+    ]
+    assert len(student_copy) > len(hints), "the affiliations copy is in scope"
+    assert not any("—" in line for line in student_copy)
+    assert "—" not in AFFILIATION_LONG_NOTE
 
 
 def test_the_settings_profile_save_round_trips_all_three(client, user):
