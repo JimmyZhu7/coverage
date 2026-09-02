@@ -269,6 +269,7 @@ name = "coverage-connectors"
 version = "0.1.0"
 source = { editable = "coverage_connectors" }
 dependencies = [
+    { name = "certifi" },
     { name = "playwright" },
     { name = "tenacity" },
 ]
@@ -280,6 +281,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "certifi", specifier = ">=2025.1.31" },
     { name = "playwright", specifier = ">=1.61.0" },
     { name = "tenacity", specifier = ">=9.1.4" },
 ]
