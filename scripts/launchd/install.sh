@@ -85,7 +85,22 @@ PY
   # with an opaque "Input/output error", and the useful message is this one.
   plutil -lint "$target" > /dev/null
 
-  launchctl bootstrap "$DOMAIN" "$target"
+  # `bootout` returns before launchd has finished tearing the job down, so a
+  # bootstrap fired immediately after can land on a label that is still going
+  # away and fail with "Operation already in progress" (errno 37) or "Service
+  # is disabled"/"already loaded" (errno 5). That is a race, not a real error,
+  # and it is the difference between idempotent in principle and idempotent
+  # when you actually re-run the script. Retry briefly, then let the last
+  # attempt's own failure through.
+  for attempt in 1 2 3 4 5; do
+    if launchctl bootstrap "$DOMAIN" "$target" 2>/dev/null; then
+      break
+    fi
+    if [ "$attempt" = "5" ]; then
+      launchctl bootstrap "$DOMAIN" "$target"
+    fi
+    sleep 1
+  done
   echo "loaded   $label"
 done
 

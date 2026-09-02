@@ -90,10 +90,12 @@ the stored cursor with `last_notification_at` still null since the day the
 mailbox was linked. Nothing was broken; a process simply did not exist. That is
 what this directory is for.
 
-The three plists that are crons deliberately reuse production's own numbers
+`gmailbackfill` and `autopilot` deliberately reuse production's own number
 (`*/5`), so local latency is the latency a deployed student sees. `refresh` is
-the exception at once a day against Render's every six hours: it is the only
-job with a cost outside this machine, since it hits every firm's careers site.
+the one job that does not, at once a day against Render's every six hours: it
+is the only one with a cost outside this machine, since it hits every firm's
+careers site, and a laptop that is shut for most of the six-hour marks would
+fire them all in a burst on wake anyway.
 
 Three of `render.yaml`'s services have **no** local stand-in and are not
 missing by accident: `coverage-push-alerts`, `coverage-weekly-digest` and
