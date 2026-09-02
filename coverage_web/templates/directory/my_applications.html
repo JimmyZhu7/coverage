@@ -276,6 +276,73 @@
      that string impossible to assert the absence of. */
   .apps-shut-mark { display: block; margin-top: var(--s1); font-size: var(--fs-xs);
     color: var(--ink-2); }
+
+  /* ---- The reversal list, as a ledger row -------------------------------
+     Thirteen bordered boxes, each holding one short line of text with its
+     control stacked on a second line underneath, each running the full width
+     of the page while its content sat in the left third. The row was a box
+     when it wanted to be a line, and it was the last list on the product
+     still shaped that way.
+
+     WHY IT LOOKED LIKE THAT. These rows had flex rules — content left, action
+     right — and they lived in directory/_styles.html, which this page does
+     NOT include. That file is the feed's page-scoped stylesheet; My
+     Applications carries its own, the one you are reading. So the rules never
+     reached the markup, every part fell back to block layout, and the button
+     dropped to its own line. Same class of bug as the posting drawer's, which
+     is recorded in that file: a component's CSS defined in one page's inline
+     styles is a component every other page silently loses. The rules are here
+     now, beside the only markup that uses them.
+
+     `.frow`'s form, not `.apps-card`'s: hairline between rows, flat ground,
+     content left, the one action right. The firm page's own note on `.frow`
+     makes this argument about twenty-six rows about one firm; this is
+     thirteen rows about one decision, and the cure is the same one — the box
+     gives way and the rule between rows does the separating.
+     ---------------------------------------------------------------------- */
+  .apps-hidden { display: flex; flex-direction: column; margin-top: var(--s3); }
+  .apps-hidden-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--s1) var(--s4); align-items: center;
+    border-top: 1px solid var(--line); padding: var(--s2) 2px;
+    font-size: var(--fs-s); transition: background-color var(--t-fast); }
+  .apps-hidden-row:first-child { border-top: 0; }
+  .apps-hidden-row:hover { background: var(--paper); }
+  .apps-hidden-row form { margin: 0; }
+  /* Firm, role and place are one fact — which posting this is — so they are
+     one line. It WRAPS rather than ellipsising, the same call `.rolerow`'s
+     meta line made once truncation started eating the part that mattered;
+     the only cut is the location's own stated cap below. */
+  .apps-hidden-id { display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 2px var(--s2); min-width: 0; }
+  .apps-hidden-title { color: var(--ink); }
+  /* 205px, the number `.rr-loc` carries in directory/_styles.html: it holds
+     about 95% of locations whole and bites only on the multi-city dumps. */
+  .apps-hidden-row .apps-loc { flex: none; max-width: 205px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  /* Accent, not danger. This button restores a row; `.apps-remove` above
+     deletes one, and it is red on hover because it should be. Undoing a
+     judgement is not a warning — the same reasoning `.apps-undo` and the
+     feed's own undo control already follow. */
+  .apps-putback { flex: none; background: transparent; border-color: transparent;
+    color: var(--ink-3); padding: 4px 10px; font-size: var(--fs-xs);
+    cursor: pointer; transition: color var(--t-med), border-color var(--t-med),
+      background-color var(--t-med); }
+  .apps-putback:hover { color: var(--accent-ink); border-color: var(--accent-line);
+    background: var(--accent-soft); }
+  /* Narrow keeps the two columns, and that is a measured call rather than the
+     obvious one. `.frow` drops its side column under the content at this
+     width, so the first pass did too — and it was the worse layout by a wide
+     margin. Measured at 375px over these thirteen rows at the same gutter:
+     stacking cost the list 1580.6px against 1194.2px, and the tallest row
+     149.0px against 121.8px. A stacked action adds a whole 44px touch row to
+     EVERY row, which is more than the one extra wrapped line the narrower
+     content column costs the few long titles. The gutter shrinks instead,
+     which is the only part of the row the content column can win space back
+     from, and takes the list to 1114.2px with a 101.0px tallest row. */
+  @media (max-width: 640px) {
+    .apps-hidden-row { gap: var(--s1) var(--s2); }
+    .apps-putback { padding: 4px 6px; }
+  }
 </style>
 {% endblock %}
 
@@ -316,16 +383,37 @@
       <p class="lede">Hidden from the feed. Put any of them back.</p>
       <div class="apps-hidden">
         {% for uo in hidden %}
-          <div class="apps-hidden-row panel panel--flat">
+          <div class="apps-hidden-row">
             <span class="apps-hidden-id">
-              <b>{{ uo.opportunity.firm.name|smart_title }}</b>
-              <span>{{ uo.opportunity.title }}</span>
+              <span class="apps-firm">{{ uo.opportunity.firm.name|smart_title }}</span>
+              <span class="apps-hidden-title">{{ uo.opportunity.title }}</span>
+              {% comment %}
+              THE PLACE, because on this list it is often the whole difference
+              between two rows. Four of the founder's thirteen were two pairs
+              sharing a firm and a title, and reading as the same posting
+              listed twice. They are not: each pair is two live requisitions
+              in two different cities, which is why `fold_duplicates` folds
+              none of them (its `_cluster_by_location` treats a stated city as
+              a hard divider) and why this list must not fold them either — a
+              dismissed row is reachable from nowhere else, so a folded copy
+              would be a decision with no way back.
+
+              Printed only when the posting states one, and never inferred or
+              filled in from the firm's market: three of the thirteen (SIG's
+              whole iCIMS board) state nothing and print nothing. Capped like
+              the feed's own `.rr-loc` for the multi-city dumps, with the full
+              string on the hover the cap makes necessary.
+              {% endcomment %}
+              {% if uo.opportunity.location %}
+                <span class="apps-loc" title="{{ uo.opportunity.location|smart_location }}"
+                  >{{ uo.opportunity.location|smart_location }}</span>
+              {% endif %}
             </span>
             <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}">
               {% csrf_token %}
               <input type="hidden" name="next" value="{% url 'my_applications' %}#hidden">
               <input type="hidden" name="status" value="undismiss">
-              <button type="submit" class="btn apps-remove">Put back</button>
+              <button type="submit" class="btn apps-putback">Put back</button>
             </form>
           </div>
         {% endfor %}

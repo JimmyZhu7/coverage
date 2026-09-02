@@ -1847,16 +1847,13 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rcd-undo:hover { border-color: var(--accent); background: var(--accent-soft); }
   .rcd-undo:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-  /* The reversal list on My Applications. */
-  .apps-hidden { display: flex; flex-direction: column; gap: 2px; }
-  /* `panel panel--flat`. The corner was a hand-set 8px, four short of the
-     panel radius every other bordered row on this page uses; it is the
-     panel's now. */
-  .apps-hidden-row { display: flex; align-items: center; justify-content: space-between;
-    gap: var(--s3); padding: var(--s2) var(--s3); font-size: var(--fs-s); }
-  .apps-hidden-id { display: flex; flex-direction: column; min-width: 0; }
-  .apps-hidden-id span { color: var(--ink-3); font-size: var(--fs-xs);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The reversal list on My Applications used to be styled from here, and
+     that was the bug: this file is the FEED's page-scoped stylesheet, and My
+     Applications does not include it, so none of these rules ever reached the
+     markup they were written for. Every part fell back to block layout. The
+     rules now live in that page's own style block, next to the only markup
+     that uses them — the same move the posting drawer made a few sections
+     down, for the same reason. */
 
   /* ======================================================================
      THE POSTING DRAWER — the description, read here.
