@@ -631,9 +631,16 @@ def region_from_title_segments(title: str | None) -> str:
     return found.pop() if len(found) == 1 else ""
 
 
-# Insight events. "insight" alone is NOT enough — "Market Insights Analyst"
-# is a real data job — so it must be qualified by an event/programme word or
+# Insight events. "insight" alone is NOT enough — "Market Insights Analyst",
+# "Insight & Design Lead" and "AI/Insight Senior Associate" are all real jobs
+# on the live boards — so it must be qualified by an event/programme word or
 # an early/spring prefix.
+#
+# Everything in this list is an ATTEND-THIS, never an apply-to-this, which is
+# why it is allowed to run ahead of the internship rule and the seniority
+# veto: an information session ABOUT a summer analyst programme is an event,
+# not the internship, and "Career Insights: Meet our recruiters" must not lose
+# to the word "recruiters".
 _INSIGHT = _rx(
     # US early-ID programmes name the same event with different nouns than the
     # UK ones this list was built from. "BofA Campus Insight Forum" fell all
@@ -641,33 +648,65 @@ _INSIGHT = _rx(
     # was filed as an entry-level JOB - the bucket a graduating senior applies
     # to - for an event aimed at first- and second-years. Every noun here is
     # still qualified by "insight", so this widens the event vocabulary
-    # without loosening the guard the comment above describes.
-    r"insights?\s+(?:day|week|programme|program|event|evening|series|session"
-    r"|forum|summit|conference)",
-    r"\bearly\s+id(?:entification)?\b",
+    # without loosening the guard the comment above describes. The possessive
+    # ("Insight's Day") and "workshop|symposium" came from a second pass over
+    # the live titles.
+    r"insights?(?:\u2019s|'s)?\s+(?:day|week|programme|program|event|evening"
+    r"|series|session|forum|summit|conference|workshop|symposium)",
     # "Career Insights: Meet the Business - Banking (NAM Session)" is Citi's
     # name for exactly the attend-this-don't-apply-to-it event the comment
-    # above describes, and the board already ingests a dozen of them - the
-    # colon and the parenthetical just keep "insights" from sitting adjacent
-    # to "session", so the qualified-noun rule above never fired and every one
-    # was filed as `other`, which is not in TARGET_BUCKETS. They were fetched
-    # and then dropped. Both phrases below are event names on their face.
+    # above describes (17 live rows). The colon is what kept these out of the
+    # qualifier list above, and the colon is also what keeps "Career Insights
+    # Manager", a job, out of this bucket - so it stays anchored.
     r"\bcareer\s+insights?\s*:",
-    r"\bmeet\s+the\s+(?:business|team|firm)\b",
-    r"\binsight\s+into\b",                      # "Insight into Operations Opportunities"
+    # "Insight into Operations Opportunities"; Citi files the same shape as
+    # "Citi Singapore - Insight to Services".
+    r"\binsights?\s+(?:in)?to\b",
     r"(?:early|spring|first[\s-]?year|1st[\s-]?year)\s+insights?\b",
     r"\bspring\s*week\b",
     r"\bpre[\s-]?internship\b",
-    r"\bdiscovery\s+(?:day|programme|program)\b",
+    r"\bdiscovery\s+(?:day|programme|program|event|series|session|summit|forum)\b",
     r"\bopen\s+day\b",
     r"\btaster\b",
-    r"\bshadow(?:ing)?\s+(?:day|programme|program)\b",
+    r"\bshadow(?:ing)?\s+(?:day|programme|program|event|session)\b",
+    r"\bjob\s+shadow\w*\b",
+    # US early-identification vocabulary. "Early ID" is the term of art for a
+    # first/second-year pipeline programme and appears in no other kind of
+    # posting; an externship is a shadowing stint by another name.
+    r"\bearly\s+id(?:entification)?\b",
+    r"\bexternship\b",
+    r"\bcase\s+competition\b",
+    r"\bmentorship\s+(?:programme|program)\b",
+    # Optiver runs its student insight days as "Career Kickstarter - Trading
+    # 2026" (7 live rows). Spelled out rather than a bare "kickstart" so
+    # PwC's "Career Start in Audit" — a graduate JOB — cannot match.
+    r"\bcareer\s+kick[\s-]?start(?:er)?\b",
     # Campus recruiting events are insight-type by nature: a "Virtual Event"
     # or "Q&A" listing on a campus events board is an attend-this, not an
     # apply-to-this.
     r"\b(?:virtual|in[\s-]?person)\s+event\b",
-    r"\brecruitment\s+event\b",
+    r"\brecruit(?:ment|ing)\s+event\b",
     r"\bq\s*&\s*a\b",
+    # Named event formats. Each is a word that never titles a job: there is no
+    # "Seminar Analyst" or "Coffee Chat Manager". "Networking" and
+    # "presentation" ARE job words ("Windows Networking Engineer",
+    # "Presentation Designer"), so both are qualified by what follows or
+    # precedes them.
+    r"\bseminars?\b",
+    r"\bwebinars?\b",
+    r"\bopen\s+house\b",
+    r"\bfireside\s+chat\b",
+    r"\bcoffee\s+chats?\b",
+    r"\binfo(?:rmation)?\s+session\b",
+    r"\bnetworking\s+(?:event|evening|session|night|dinner|lunch(?:eon)?"
+    r"|breakfast|reception|drinks|social)\b",
+    r"\b(?:recruitment|recruiting|career|welcome|dinner)\s+(?:dinner"
+    r"|lunch(?:eon)?|breakfast|reception|drinks|social)\b",
+    r"\b(?:firmwide|corporate|company|campus|career|university)\s+presentation\b",
+    r"\b(?:summer|autumn|spring|winter|career|networking|open|student)\s+evening\b",
+    # "Meet the Business", "Meet our Analysts", "Meet our recruiters" — an
+    # imperative verb where a job title would carry a noun.
+    r"\bmeet\s+(?:our|the)\b",
 )
 
 # Explicit internship signals. \b keeps "intern" off "Internal"/"International".
@@ -676,6 +715,10 @@ _INTERNSHIP = _rx(
     r"\bsummer\s+analyst\b",
     r"\bsummer\s+associate\b",
     r"\bwinter\s+analyst\b",
+    # Virtu's "Women's Winternship" — a winter internship spelled as one
+    # word, which \bintern\b cannot see. Without this the affinity rule
+    # below would call it an event.
+    r"\bwinternship\b",
     r"\boff[\s-]?cycle\b",
     r"\bco[\s-]?op\b",
     r"\bindustrial\s+placement\b",
@@ -757,11 +800,65 @@ _ENTRY = _rx(
     "管培生", "管理培训生",         # management trainee
 )
 
+# US early-identification programmes, whose vocabulary overlaps with real job
+# titles and so is checked AFTER the seniority veto and the entry-level rule
+# rather than with the unambiguous event words in `_INSIGHT`. That ordering is
+# the precision guard, and it is doing real work on the live boards:
+#
+#   "Point72 Academy 2026 Investment Analyst Program for Experienced
+#    Professionals"        -> `other`       (seniority veto, rule 3)
+#   "US Graduate Leadership Program - Commercial Banking"
+#                          -> `entry_level` (rule 4 — a hiring programme)
+#   "Advanced Polytechnic Graduate Pathway Program"
+#                          -> `entry_level` (rule 4)
+#
+# Words deliberately NOT in this list, each because the live boards carry a
+# counter-example that would become a false positive: "academy" ("AI
+# Instructor, Point72 Academy"), "leadership program" (Vanguard's Technology
+# Leadership Program is a hire), "pathway" (Vanguard's "Sales Pathway, Senior
+# Associate"), "edge" (CIBC's "Premium Edge" relationship managers),
+# "conference" ("Conference Services Event Planner"), "competition"
+# (Brattle's competition-economics analysts), bare "fellowship" (DBS's
+# "Return to Work Fellowship", SIG's "Faculty Fellow") and bare "series"
+# (Raymond James' "Series 7 & 63 required").
+_EARLY_ID = _rx(
+    # "Discover Nomura", "Discover our Institutional Securities Group",
+    # "Explore Nomura - SEO Programme". \b is what keeps this off the 6 live
+    # "eDiscovery" rows, and "discovery" stays qualified in `_INSIGHT` so
+    # "Service Now Discovery Infra Administrator" cannot match. The lookahead
+    # is for Discover Financial Services, a real firm.
+    r"\bdiscover(?!\s+(?:financial|bank|card))\b",
+    r"\bexplore\b",
+    r"\blaunch\s+your\s+career\b",
+    r"\b(?:future|emerging|rising|tomorrow(?:\u2019s|'s)?|next[\s-]?gen(?:eration)?)"
+    r"\s+leaders?\b",
+    r"\bfellowship\s+(?:programme|program)\b",
+    r"\b(?:insider|speaker|spotlight|possibilit\w+|leaders?|career|campus"
+    r"|student|virtual|event|discovery|insight)\s+series\b",
+    # An event noun needs a campus/affinity qualifier, but not an adjacent one
+    # — "Inclusion by Insight Virtual 2 Day Summit" puts three words between
+    # them. "Inclusion" earns a place here as a qualifier while staying out of
+    # `_AFFINITY`, where it would have caught Oliver Wyman's three live
+    # "Inclusion & Culture Generalist" jobs.
+    r"\b(?:career|insight|leaders?|campus|student|women(?:\u2019s|'s)?|diversity"
+    r"|inclusion|networking|early)\b(?:\s+\w+){0,3}\s+(?:forum|summit|symposium)\b",
+    r"\bworkshop\b",
+    r"\bimmersion\b",
+    # Trading/case competitions are recruiting events wearing a game's name.
+    # Qualified because "Competition" alone is an antitrust practice area.
+    r"\b(?:quant\w*|trading|investment|case|stock)(?:\s+\w+){0,2}\s+challenge\b",
+)
+
 # Eligibility/affinity events with no internship attached ("Women in Banking
 # Programme — London 2026"). Checked last among the positive rules: a
 # "Sophomore Summer Analyst" is an internship, not an event.
 _AFFINITY = _rx(
-    r"\bwomen\s+in\b",
+    # Broadened from "women in": the live boards run the same programme as
+    # "Women Who Lead", "Women Networking", "Women\u2019s Immersion Programme"
+    # and "Connecting & Resourcing Empowered Women". Across 26k live titles
+    # every \bwomen\b row is an affinity event or an internship already caught
+    # by rule 2 — there is no "Women\u2019s <job>" on these boards.
+    r"\bwomen(?:\u2019s|'s)?\b",
     r"\bsophomore\b",
     r"\bfreshman\b",
     r"\bfirst[\s-]generation\b",
@@ -784,11 +881,20 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
     2. explicit internships
     3. experienced/HR veto       -> other
     4. full-time campus signals  -> entry_level
-    5. affinity events           -> insight
-    6. campus-board fallback: a neutral Analyst/Associate/Student title on a
+    5. US early-ID programmes    -> insight
+    6. affinity events           -> insight
+    7. campus-board fallback: a neutral Analyst/Associate/Student title on a
        board that is itself campus-scoped is an entry-level hire
        ("Investment Banking Analyst" on a ...students board).
-    7. everything else           -> other
+    8. everything else           -> other
+
+    Steps 1 and 5 are both insight vocabularies, split by how ambiguous the
+    words are. Step 1 holds words that never title a job, so it may outrank
+    the internship rule and the seniority veto. Step 5 holds words that also
+    appear in real hires ("Discover", "Workshop", "Future Leaders"), so it
+    sits behind both vetoes AND behind the entry-level rule — which is what
+    keeps "US Graduate Leadership Program" an entry-level hire rather than an
+    event. Moving step 5 earlier would break that; see `_EARLY_ID`.
     """
     t = title or ""
     if _INSIGHT.search(t):
@@ -799,6 +905,8 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
         return OTHER
     if _ENTRY.search(t):
         return ENTRY_LEVEL
+    if _EARLY_ID.search(t):
+        return INSIGHT
     if _AFFINITY.search(t):
         return INSIGHT
     if campus_hint and _NEUTRAL_JUNIOR.search(t):
