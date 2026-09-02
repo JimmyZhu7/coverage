@@ -106,3 +106,43 @@ registration alive, and the local set polls.
 
 Everything here is only on your Mac — no one else can see it until you deploy
 (see `docs/deploy.md`).
+
+## Running the suite on a different day
+
+A test that quietly encodes today's date passes today and fails on a date
+nobody picked. An audit on 2026-09-01 counted 256 date literals across 40 test
+files and found none that was already broken, but the check was one person
+reading them, and three tests had hardcoded today's date in a single night.
+
+Two commands run the suite as if the calendar said something else:
+
+```
+COVERAGE_FAKE_TODAY=2026-12-24 pytest coverage_web/crm coverage_web/core
+COVERAGE_FAKE_TODAY=saturday   pytest coverage_web/crm coverage_web/core
+```
+
+Those two dates are the two the product behaves differently on: Dec 24 is
+inside `outreach_blackout`'s Dec 20 to Jan 2 window, and Saturday is the other
+half of the same rule. `saturday` means the next Saturday, so the command keeps
+meaning what it says next year. The run says so in its header.
+
+It shifts the clock forward by whole days rather than freezing it, so time
+still passes inside a test. It moves `django.utils.timezone.now` and everything
+that reads through it, which is 154 of the 165 clock reads outside tests. The
+other 11 are `datetime.date.today()`, a builtin this cannot reach without a
+freezing library the repo does not carry.
+
+**Known failure under both simulated dates**, and it is the shim rather than
+the product: `core/tests/test_textstyle.py::test_timesince1_collapses_to_one_unit`.
+`timesince1` calls Django's `timesince` without a comparison time, and Django
+falls back to its own `datetime.now()` rather than to
+`django.utils.timezone.now`, so the filter reads the real clock while the test's
+timestamp reads the shifted one. Two fixes, neither taken here: pass
+`timezone.now()` explicitly from `timesince1`, which also makes the app read one
+clock everywhere; or add `time-machine` as a dev dependency and freeze at the C
+level.
+
+The cheap half of this runs on every ordinary `pytest`:
+`coverage_web/core/tests/test_date_fragility.py` fails on a test that compares a
+real-clock read to a bare date literal, which is the shape that actually rots.
+Date literals on their own are fine and the suite is full of them.

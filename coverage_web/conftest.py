@@ -4,9 +4,96 @@ test under coverage_web/ and nothing outside it.
 
 from __future__ import annotations
 
+import datetime as _dt
+import os
 from unittest import mock
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# The simulated clock (WS-OPS-12).
+#
+# `audit-perf-tests.md §2` found no test that is red on a specific future
+# date, but the finding was one reader's manual pass over 256 date literals in
+# 40 test files, and three tests hardcoded today's date in a single night. A
+# manual pass does not repeat; a command does.
+#
+#     COVERAGE_FAKE_TODAY=2026-12-24 pytest ...
+#     COVERAGE_FAKE_TODAY=saturday   pytest ...
+#
+# Both dates are chosen. 2026-12-24 sits inside `crm.today.outreach_blackout`'s
+# Dec 20 to Jan 2 window and a Saturday is the other half of that same rule, so
+# those are the two calendar shapes the product behaves differently on.
+# `saturday` resolves to the NEXT Saturday rather than a fixed date, so the
+# command keeps meaning what it says next year.
+#
+# WHAT IT PATCHES, and therefore what it does not cover:
+# `django.utils.timezone.now`, which `timezone.localdate` and
+# `timezone.localtime` both reach through at call time — 154 of the 165 clock
+# reads in non-test code. The other 11 are `datetime.date.today()`, a C-level
+# builtin this cannot reach without a dependency (freezegun, time-machine)
+# that this repo does not carry. Those 11 stay on the real clock under a
+# simulated run, which is stated here rather than discovered later.
+#
+# `_ordinary_weekday` below still neutralises the blackout for every test that
+# has not asked for it, so a simulated run does not turn a hundred Today tests
+# red on Dec 24; what it exercises is every other date-dependent branch.
+# ---------------------------------------------------------------------------
+_FAKE_TODAY_ENV = "COVERAGE_FAKE_TODAY"
+
+
+def _simulated_date():
+    """The date `COVERAGE_FAKE_TODAY` asks for, or None."""
+    raw = (os.environ.get(_FAKE_TODAY_ENV) or "").strip().lower()
+    if not raw:
+        return None
+    if raw == "saturday":
+        today = _dt.date.today()
+        return today + _dt.timedelta(days=(5 - today.weekday()) % 7 or 7)
+    try:
+        return _dt.date.fromisoformat(raw)
+    except ValueError:
+        raise pytest.UsageError(
+            f"{_FAKE_TODAY_ENV}={raw!r} is not an ISO date or the word "
+            f"'saturday'"
+        )
+
+
+def pytest_report_header(config):
+    """Say it in the header. A run whose clock is a lie must not look like an
+    ordinary run in anyone's scrollback."""
+    simulated = _simulated_date()
+    if simulated:
+        return (f"{_FAKE_TODAY_ENV}: running as if today were "
+                f"{simulated.isoformat()} ({simulated:%A})")
+    return None
+
+
+@pytest.fixture(autouse=True)
+def _simulated_clock():
+    """No-op unless `COVERAGE_FAKE_TODAY` is set. See the block above.
+
+    IT SHIFTS THE CLOCK, IT DOES NOT FREEZE IT. A frozen `now()` returns the
+    same instant to every caller, and that is a different lie from the one
+    this is trying to tell: two consecutive writes then share a timestamp, and
+    "a run finished later than the one before it" becomes false. Two tests
+    failed exactly that way on the first attempt (`ops/tests/test_tracking.py`
+    on a strictly-increasing `finished_at`, `core/tests/test_textstyle.py` on
+    a `timesince` that collapsed to zero). Returning `real now + a whole
+    number of days` moves the calendar without stopping the second hand, which
+    is what "run the suite as if it were December 24" actually means.
+    """
+    simulated = _simulated_date()
+    if simulated is None:
+        yield
+        return
+    from django.utils import timezone as dj_timezone
+
+    real_now = dj_timezone.now
+    offset = simulated - dj_timezone.localdate()
+    with mock.patch("django.utils.timezone.now",
+                    side_effect=lambda: real_now() + offset):
+        yield
 
 
 def pytest_configure(config):
