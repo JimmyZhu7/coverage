@@ -24,6 +24,9 @@ into the module that already owns it — this file contains no date math beyond
   * "new for you"         -> `directory.recommend.recommend` (the same
     scorer behind Opportunities' Picked-for-you rail), gated the same way
     that rail is: an empty survey profile gets nothing, never a padded list.
+    The digest does not re-score; what it adds is WHICH ROWS the scorer is
+    allowed to see, which since D-11 is the ones first seen inside a week.
+    See NEW_WINDOW_DAYS.
 
 WHY "CLOSING THIS WEEK" USES THE APP'S OWN WINDOW, NOT A HARDCODED 7 DAYS.
 `directory.deadlines.CLOSING_SOON_DAYS` (10 days as of writing — "roughly
@@ -59,6 +62,10 @@ from datetime import date
 
 from django.utils import timezone
 
+# The product's one definition of "days since" — see its docstring, and the
+# do-not-build register's item 44. The digest gets no second one.
+from crm.utils import _calendar_days_ago
+
 # A digest is read in an inbox, worked from a page. Past this many rows the
 # email becomes the thing it's trying to save the student from (a wall of
 # text), so the rest are named only by count, with a link back to Today for
@@ -69,6 +76,44 @@ MAX_ACTIONS = 8
 # `directory.recommend.recommend`'s own DEFAULT_LIMIT is tuned for a browsing
 # page with room to scroll; an email earns a much smaller, higher-bar slice.
 MAX_PICKS = 4
+
+# ---------------------------------------------------------------------------
+# "NEW FOR YOU" MEANS NEW (D-11, 2026-09-02)
+# ---------------------------------------------------------------------------
+# The section used to run the page's scorer over the page's board and print
+# the top four. Measured on the founder's account 2026-09-01: all four of his
+# digest picks were picks one to four on the Opportunities page, a 100%
+# overlap, so the Monday email was a copy of Tuesday's page. Meanwhile 289 of
+# his tiered firms' open campus rows had been first seen inside a week and
+# 284 of them reached him only if he browsed the feed. An email that repeats
+# the page has no reason to exist; the rows only the feed carries are the
+# reason it does.
+#
+# SEVEN DAYS because the digest is weekly: the window is the gap between two
+# sends, so a student who reads every email sees each new row once. Not tuned,
+# and nothing here is scored on it — `first_seen` decides who is ELIGIBLE and
+# the same scorer as before ranks whoever qualifies.
+NEW_WINDOW_DAYS = 7
+
+# Below this many qualifying rows the email drops the claim rather than the
+# section. TWO, not one and not four: "new" is a weaker filter than "best",
+# and a section of one row reads as the product scraping the barrel while a
+# bar of four would fall back nearly every quiet week. `first_seen` is also
+# only an approximation of "new to you" — nothing records what a student has
+# already been shown — so the fallback is the honest half of the qualifier,
+# not a defect in it.
+MIN_NEW_PICKS = 2
+
+# The two modes, and the one sentence each prints. Named constants because
+# the templates, the tests and this module all have to mean the same thing by
+# them; the sentences live here for the same reason every other line of digest
+# copy does.
+MODE_NEW = "new"
+MODE_BEST = "best"
+MODE_LINES = {
+    MODE_NEW: f"Open roles first seen in the last {NEW_WINDOW_DAYS} days.",
+    MODE_BEST: "Nothing new enough this week, so these are your best open roles.",
+}
 
 
 def assemble_digest(user, *, today: date | None = None) -> dict | None:
@@ -100,7 +145,7 @@ def assemble_digest(user, *, today: date | None = None) -> dict | None:
 
     from accounts.unsubscribe import make_token
 
-    picks, picks_note = _new_for_you(user, today=today)
+    picks, picks_note, picks_mode = _new_for_you(user, today=today)
     return {
         "today": today,
         # THE WAY OUT, IN THE EMAIL ITSELF. settings-page.md's LATER section
@@ -124,6 +169,12 @@ def assemble_digest(user, *, today: date | None = None) -> dict | None:
         # One honest sentence when every pick is for a cycle the student is
         # NOT recruiting for, else "". See `_cycle_note`.
         "picks_note": picks_note,
+        # WHICH MODE THE SECTION IS IN, in one sentence (D-11). "new" when
+        # the picks qualified on `first_seen`, "best" when too few did and
+        # the scorer answered instead. The email says which; it never lets
+        # the heading imply the stronger one.
+        "picks_mode": picks_mode,
+        "picks_mode_line": MODE_LINES[picks_mode],
         # Section-level provenance flags for the templates' "(reported)"
         # key, which prints ONCE per digest: under Closing if any closing
         # row is prose-read, else under New for you if any pick is. The
@@ -489,20 +540,37 @@ def _who_to_ping(user) -> tuple[list[dict], int]:
     return shown, overflow
 
 
-def _new_for_you(user, *, today: date) -> tuple[list[dict], str]:
-    """`(picks, note)`: up to `MAX_PICKS` open roles from
+def _new_for_you(user, *, today: date) -> tuple[list[dict], str, str]:
+    """`(picks, note, mode)`: up to `MAX_PICKS` open roles from
     `directory.recommend.recommend`, scored against the same survey-derived
     profile and firm/warmth signals Opportunities' Picked-for-you rail
     builds, over the same open campus board minus whatever the student has
     already tracked or dismissed — a role already on their board is not
     news, however well it would have scored — plus `_cycle_note`'s one
-    sentence ("" when the picks include the student's own cycle).
+    sentence ("" when the picks include the student's own cycle) and which
+    of the two modes below produced the list.
 
-    Returns `([], "")` whenever `recommend()` would return nothing: an empty
-    survey profile, or nothing clearing its score bar. Blocked roles (the
-    posting's own text excludes this student) are passed through to
-    `recommend()` rather than filtered here, so the exclusion rule lives in
-    exactly one place.
+    NEW MEANS NEW (D-11). The candidates are first cut to the rows first
+    seen inside `NEW_WINDOW_DAYS`, and only then scored. That is the whole
+    change: the same scorer, the same profile, the same board, a smaller
+    eligible set. Fewer than `MIN_NEW_PICKS` rows clear the score bar and
+    the function falls back to scoring the whole board — `MODE_BEST` — so
+    the section is never padded with weak rows to protect a word in its
+    heading. Every pick carries `first_seen_days`, and the templates print
+    the mode's sentence above the rows, so both claims are checkable from
+    the inbox.
+
+    WHY A FALLBACK AND NOT A HARD FILTER. Nothing records what a student has
+    already been SHOWN, so `first_seen` is an approximation of "new to you",
+    not the fact itself; on a quiet week it can leave two mediocre rows
+    where the scorer would have found four good ones. The fallback is that
+    limit acknowledged in the product rather than argued about in a comment.
+
+    Returns `([], "", MODE_BEST)` whenever `recommend()` would return
+    nothing: an empty survey profile, or nothing clearing its score bar.
+    Blocked roles (the posting's own text excludes this student) are passed
+    through to `recommend()` rather than filtered here, so the exclusion
+    rule lives in exactly one place.
 
     Every pick carries its deadline WITH provenance — `deadline_marker`'s
     countdown and `deadline_provenance`'s "(reported)" dict, the exact pair
@@ -548,7 +616,7 @@ def _new_for_you(user, *, today: date) -> tuple[list[dict], str]:
 
     profile = Profile.from_user(user, tier_by_firm, warm_firms=warm_by_firm)
     if profile.is_empty:
-        return [], ""
+        return [], "", MODE_BEST
 
     elig_profile = _eligibility_profile(user)
     touched = set(
@@ -563,14 +631,33 @@ def _new_for_you(user, *, today: date) -> tuple[list[dict], str]:
     )
     folded = fold_duplicates(list(open_qs))[0]
     by_id = {o.id: o for o in folded}
-    candidates = [
-        Candidate.from_opportunity(
-            o,
-            blocked=bool((lambda v: v and v["blocking"])(_eligibility(o, elig_profile))),
-        )
-        for o in folded
+
+    def _candidates(rows):
+        return [
+            Candidate.from_opportunity(
+                o,
+                blocked=bool((lambda v: v and v["blocking"])(_eligibility(o, elig_profile))),
+            )
+            for o in rows
+        ]
+
+    # THE QUALIFIER. `_calendar_days_ago` is the product's one definition of
+    # "days since" (P5, and the do-not-build register's item 44), reading the
+    # same `first_seen` the feed's "first seen Nd ago" chip prints — so a row
+    # this email calls new and a row the page calls new are the same row.
+    fresh = [
+        o for o in folded
+        if _calendar_days_ago(o.first_seen, as_of_date=today) <= NEW_WINDOW_DAYS
     ]
-    recs = recommend(profile, candidates, limit=MAX_PICKS, today=today)
+    recs = recommend(profile, _candidates(fresh), limit=MAX_PICKS, today=today)
+    mode = MODE_NEW
+    if len(recs) < MIN_NEW_PICKS:
+        # THE FALLBACK, and the sentence that goes with it. "New" is a weaker
+        # filter than "best": on a quiet week the qualifier can return two
+        # mediocre rows where the scorer would return four good ones. Below
+        # two qualifying rows the email stops claiming novelty and says so.
+        recs = recommend(profile, _candidates(folded), limit=MAX_PICKS, today=today)
+        mode = MODE_BEST
     picks = []
     for r in recs:
         card = _pick_card(r)
@@ -587,5 +674,13 @@ def _new_for_you(user, *, today: date) -> tuple[list[dict], str]:
             today=today,
         )
         card["reported"] = deadline_provenance(o) if o else None
+        # THE CLAIM, PRINTED ON EVERY PICK. The section is headed "New for
+        # you", so every row carries the fact that word rests on, in the
+        # feed's own wording ("first seen Nd ago"). A reader can check the
+        # heading against the rows without leaving the email, and in fallback
+        # mode the rows are what make the sentence above them true.
+        card["first_seen_days"] = (
+            _calendar_days_ago(o.first_seen, as_of_date=today) if o else None
+        )
         picks.append(card)
-    return picks, _cycle_note(user, recs)
+    return picks, _cycle_note(user, recs), mode

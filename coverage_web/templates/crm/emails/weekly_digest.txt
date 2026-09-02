@@ -52,15 +52,20 @@ WHO TO PING
 {% endif %}{% endif %}{% if digest.picks %}
 NEW FOR YOU
 {% comment %}
-`picks_note`: one honest sentence when no pick is for a declared cycle. The
-pick's date prints only with its provenance, in the same words the closing
-rows use, and never when past — see the HTML half. The key prints here only
-when Closing did not already print it.
-{% endcomment %}{% if digest.picks_note %}
+`picks_mode_line`: which mode the section is in, in one sentence, always
+printed (`crm.digest.MODE_LINES`). `picks_note`: one honest sentence when no
+pick is for a declared cycle. Every row prints how old it is, which is the
+fact the heading rests on. The pick's date prints only with its provenance,
+in the same words the closing rows use, and never when past — see the HTML
+half. The key prints here only when Closing did not already print it.
+{% endcomment %}
+{{ digest.picks_mode_line }}
+{% if digest.picks_note %}
 {{ digest.picks_note }}.
 {% endif %}{% for pick in digest.picks %}
 * {{ pick.firm_name }} · {{ pick.title }}{% if pick.location %} · {{ pick.location }}{% endif %}
-  {{ pick.why }}{% if pick.deadline_marker.posted and not pick.deadline_marker.past %}
+  {{ pick.why }}
+  {% if pick.first_seen_days == 0 %}First seen today{% else %}First seen {{ pick.first_seen_days }}d ago{% endif %}{% if pick.deadline_marker.posted and not pick.deadline_marker.past %}
   {{ pick.deadline_marker.countdown }}{% if pick.reported %} ({{ pick.reported.label }}){% endif %}{% endif %}
   {{ pick.url }}
 {% endfor %}{% if digest.picks_reported and not digest.closing_reported %}
