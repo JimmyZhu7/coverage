@@ -75,9 +75,32 @@ class Command(BaseCommand):
                 )
                 firm_by_slug[slug] = firm
                 self.stdout.write(f"  created catalog firm: {slug} ({board.firm})")
-            elif not firm.tracks and slug in DEFAULT_TRACKS:
-                firm.tracks = DEFAULT_TRACKS[slug]
-                firm.save(update_fields=["tracks"])
+            else:
+                fields = []
+                if not firm.tracks and slug in DEFAULT_TRACKS:
+                    firm.tracks = DEFAULT_TRACKS[slug]
+                    fields.append("tracks")
+                # The same backfill for `recruiting_style`, and the reason
+                # D-22 is closed rather than half-closed. The pre-create
+                # above tags a NEW firm from `ASSESSMENT_RECRUITING`, and
+                # migration 0017 tagged the rows that already existed the day
+                # the column shipped; a firm added to the constant afterwards
+                # was tagged on neither path and stayed `campus` forever on
+                # every long-lived database. That is the drift the constant
+                # exists to prevent, and this is where it is corrected.
+                #
+                # ADD ONLY, never un-tag: 0017's reverse already refuses to
+                # undo a hand edit, and a firm an admin marked `assessment`
+                # off the list is a judgement this command has no evidence
+                # against.
+                if (slug in ASSESSMENT_RECRUITING
+                        and firm.recruiting_style != "assessment"):
+                    firm.recruiting_style = "assessment"
+                    fields.append("recruiting_style")
+                    self.stdout.write(
+                        f"  tagged assessment recruiting: {slug} ({firm.name})")
+                if fields:
+                    firm.save(update_fields=fields)
             boards.append(_with_firm_name(board, firm.name))
 
         label = opts["provider"] or ("firm:" + opts["firm"] if opts["firm"] else "all")
