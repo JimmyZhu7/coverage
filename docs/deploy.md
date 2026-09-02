@@ -266,6 +266,39 @@ is no subscription, no customer portal, and no paid-Pro representation at all
    Both are already declared in `render.yaml` as `sync: false`, so they
    survive a Blueprint re-apply.
 
+## Dependency scanning
+
+No CVE scan had ever been run against this tree (`audit-security.md §9`), and
+"we would have noticed" is not a control. `pip-audit` is a dev dependency; the
+command is:
+
+```bash
+uv run pip-audit --strict
+```
+
+`--strict` fails on a package it cannot resolve rather than skipping it
+silently, which is the only version of this worth running: a scanner that
+quietly ignores what it does not understand reports clean for the wrong reason.
+Add `--requirement uv.lock` to scan the locked resolution rather than whatever
+happens to be installed.
+
+Run it before a deploy and after any dependency change. A finding is either
+fixed by taking the release that closes it, or written down here with the
+reason it is being accepted — never left unread.
+
+**Not yet run.** The scan needs network access and the executor that added this
+section had none. Outstanding with it, from the same audit section: the point
+releases for django-allauth (65.18.0 to 65.19.2), cryptography (49.0.0 to
+50.0.1), google-auth, stripe, psycopg, gunicorn and playwright, each one point
+behind. Take them in ONE commit with the full suite as the gate, and state the
+before and after versions in the commit body.
+
+**The anthropic pin does not move with them.** 0.122.0 against 1.3.0 is a major
+version, and `assistant/`'s agent loop depends on the streaming and tool APIs
+that a major release is exactly where it would change. Read the migration notes
+first; it is its own commit, not a line in a batch. Django stays on 5.2.x, which
+is LTS to 2028.
+
 ## What still isn't automated (by design)
 
 - The Google OAuth clients (sections 3 and 4) — need your Cloud project.
