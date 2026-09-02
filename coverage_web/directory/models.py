@@ -460,6 +460,37 @@ class FirmDate(models.Model):
     # `Meta.constraints`'s `firm_dates_confidence_in_range` for why this is a
     # database CHECK rather than a validator on the field.
     confidence = models.FloatField(default=0.0)
+    # The TIME OF DAY the firm stated, and the zone it stated it in. Both
+    # nullable, both populated only where a `confirmed_official` row's own
+    # source says the hour out loud, and NEVER derived from anything.
+    #
+    # WHY THE PAIR EXISTS. `date` is a bare `DateField`, so every renderer
+    # has been reading a deadline as "the whole of that day, in the reader's
+    # own zone". The real closes are not: HSBC's Hong Kong CIB close is
+    # 30 October, Citi HK's is "Friday, October 30, 2026 at 23:59 HKT", and
+    # Morgan Stanley HK ran two staged deadlines both at 23:55 HKT
+    # (`seeds/timeline_hk.yaml`, all Grade A). For a Los Angeles student
+    # 23:59 HKT on the 30th is 08:59 on the 30th local, so the row sat on
+    # the deadlines rail for fifteen more hours after the door had shut.
+    #
+    # WHY NOT ONE AWARE `DateTimeField`. Because the two halves are not
+    # equally known. A row can have a day and no hour — that is 25 of the 41
+    # rows this decision was measured against — and an aware datetime cannot
+    # express "this day, hour unknown" without inventing midnight, which is
+    # a time no firm stated. Keeping `date` authoritative and hanging an
+    # OPTIONAL instant off it means the absence stays visible in the schema
+    # rather than being papered over with a default. `closes_at()` below is
+    # the one place the two are combined.
+    #
+    # WHY AN IANA KEY AND NOT "HKT". An abbreviation cannot be converted:
+    # `zoneinfo` has no "HKT", "CST" is three different zones on two
+    # continents, and half of them shift by an hour twice a year. The zone
+    # key can produce the abbreviation (`%Z` gives "HKT", and "PDT" or "PST"
+    # for the reader depending on the date); the abbreviation cannot produce
+    # the zone. So the column stores the convertible fact and the label is
+    # rendered from it — P5, one definition per fact.
+    close_time = models.TimeField(null=True, blank=True)
+    close_tz = models.CharField(max_length=64, blank=True, default="")
     source_url = models.URLField(max_length=1024, blank=True, default="")
     found_on = models.DateTimeField(null=True, blank=True)
     history = models.JSONField(default=list, blank=True)
@@ -563,11 +594,101 @@ class FirmDate(models.Model):
                 condition=models.Q(precision__in=FIRM_DATE_PRECISIONS),
                 name="firm_dates_precision_vocabulary",
             ),
+            # A time without its zone is not a fact, it is a number. "23:59"
+            # is 15 hours apart depending on where it was said, and the whole
+            # reason these columns exist is that the product was reading a
+            # deadline in the wrong zone. A zone without a time is the same
+            # emptiness wearing a label. So: both, or neither.
+            #
+            # On the column rather than in a validator for the reason every
+            # other constraint on this model is: `full_clean()` runs on none
+            # of the writers here — not `FirmDateAdmin`'s change form, not
+            # `import_firm_dates`, not a `manage.py shell` write.
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(close_time__isnull=True) & models.Q(close_tz=""))
+                    | (models.Q(close_time__isnull=False) & ~models.Q(close_tz=""))
+                ),
+                name="firm_dates_close_time_needs_a_zone",
+            ),
+            # A time may only sit on a row that locates a real day. "month"
+            # is a legitimate confirmed precision — Goldman's "Applications
+            # will open in the fall 2026" is stored as 2026-09 — and an hour
+            # on a month is not a more precise fact, it is a fabricated one:
+            # combining it with `date` would produce an instant on the first
+            # of the month that nobody stated. "estimated" is worse again,
+            # and 25 of the 41 rows this was measured against are estimates.
+            #
+            # `date IS NULL` is covered too: a row whose day is "to be
+            # confirmed" cannot carry an hour either.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(close_time__isnull=True)
+                    | (models.Q(precision__in=["", "day"]) & models.Q(date__isnull=False))
+                ),
+                name="firm_dates_close_time_needs_a_day",
+            ),
         ]
         ordering = ["firm_id", "cycle", "event_kind"]
 
     def __str__(self) -> str:
         return f"{self.firm.name} {self.cycle} {self.event_kind}"
+
+    def closes_at(self):
+        """The instant this date closes, aware, or None when the firm never
+        said an hour.
+
+        None is the common and correct answer: only a `confirmed_official`
+        row whose own source states a time is ever populated, so every
+        estimate, every rumour and every row whose posting simply did not say
+        answers None here and its readers fall back to local midnight. That
+        fallback is today's behaviour exactly (P3) — the countdown a student
+        sees on a row with no stated hour does not move.
+
+        A `close_tz` that `zoneinfo` cannot resolve answers None rather than
+        raising. A renderer is the wrong place to discover that a zone
+        database is missing a key, and the honest degradation is the same one
+        a row with no time gets.
+        """
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        if self.close_time is None or not self.close_tz or self.date is None:
+            return None
+        try:
+            zone = ZoneInfo(self.close_tz)
+        except (ZoneInfoNotFoundError, ValueError):
+            return None
+        return timezone.datetime.combine(self.date, self.close_time, tzinfo=zone)
+
+    def close_time_label(self, viewer_tz: str = "") -> str:
+        """"23:59 HKT, 08:59 your time" — the firm's stated hour, and the
+        reader's own clock beside it.
+
+        Empty string when the firm stated no time, which is what every caller
+        renders as nothing at all. The second half appears only when the
+        reader's zone is known AND differs from the firm's: "23:59 HKT, 23:59
+        your time" is noise, and a student in Hong Kong reading a Hong Kong
+        deadline should just see the deadline.
+
+        Both zone abbreviations are read off the zone AT THIS DATE rather
+        than stored, so a close in November prints PST and one in October
+        prints PDT without anybody maintaining a table of which is which.
+        """
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        instant = self.closes_at()
+        if instant is None:
+            return ""
+        firm_half = f"{instant:%H:%M} {instant:%Z}".strip()
+        if not viewer_tz or viewer_tz == self.close_tz:
+            return firm_half
+        try:
+            local = instant.astimezone(ZoneInfo(viewer_tz))
+        except (ZoneInfoNotFoundError, ValueError):
+            return firm_half
+        if local.utcoffset() == instant.utcoffset():
+            return firm_half
+        return f"{firm_half}, {local:%H:%M} your time"
 
 
 class FirmCycleObservation(models.Model):

@@ -98,6 +98,21 @@
   <section class="section">
     <h2>Open Roles <span class="scrub-count">{{ total }}</span></h2>
     {% comment %}
+    THE UNREADABLE-BOARD LINE (P9). This firm runs a campus board, we know
+    its address, and we do not read it: its own robots.txt asks us not to,
+    and D-20 settled that we honour that. Without this sentence the page
+    shows a firm's experienced requisitions and no internship, which a
+    student reads as "the programme is not running" — a claim the product
+    has no evidence for and would be making by omission. So the page says
+    what it cannot see and hands over the link.
+
+    Above the scope line on purpose: the scope line explains which of the
+    rows we HAVE are printed, and this explains which rows we never had.
+    {% endcomment %}
+    {% if unreachable_board %}
+      <p class="scope-line scope-hidden">We do not scrape {{ firm.name }}'s campus board<span class="scope-sep">·</span>{{ unreachable_board.reason }}<span class="scope-sep">·</span><a href="{{ unreachable_board.url }}" rel="noopener noreferrer" target="_blank">Open it yourself</a></p>
+    {% endif %}
+    {% comment %}
     THE SCOPE LINE. This page counted every open requisition a firm had —
     925 for Barclays, against the "13 Open" the contacts board showed for the
     same firm on the same day. The gap was all experienced hiring, and the

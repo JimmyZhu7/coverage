@@ -237,3 +237,23 @@ def parse_timeline_yaml(text: str) -> tuple[str, str, list[dict]]:
         entries.append(cur)
 
     return region, cycle_label, [_parse_timeline_entry(e) for e in entries]
+
+
+# --------------------------------------------------------------------------- firm_date_times.yaml
+
+def parse_firm_date_times(text: str) -> list[dict]:
+    """The `entries:` block of `seeds/firm_date_times.yaml`, as entry dicts.
+
+    A third shape only in the sense that it has a different header; the
+    entries themselves are the same block mappings `firm_dates:` uses, so
+    they go through the same `_parse_timeline_entry`. Reusing it rather than
+    writing a second parser is the point — this repo has no YAML library (see
+    the module docstring), and two hand-rolled readers of one shape is
+    exactly what "one definition per fact" is there to prevent.
+
+    Every value comes back as a string; the command that reads them owns the
+    coercion, because it is also the thing that has to report a bad value as
+    a skipped entry with a reason rather than as an exception.
+    """
+    return [_parse_timeline_entry(e)
+            for e in _block_entries(text.splitlines(), "entries")]

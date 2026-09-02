@@ -12,7 +12,12 @@ is neither — it says so instead of picking a winner.
         <span class="tl-date">{{ row.date_text }}</span>
         <span class="tl-event">
           {{ row.event_label }}
-          <span class="tl-scope">{{ row.cycle }}{% if row.region %} · {{ row.region }}{% endif %}</span>
+          <span class="tl-scope">{{ row.cycle }}{% comment %}
+          The closing hour the firm published, and the same instant on the
+          reader's clock. Present only where the firm stated one, which is a
+          handful of rows: a time this product worked out for itself would be
+          precision it has no source for. See `FirmDate.close_time_label`.
+          {% endcomment %}{% if row.time_text %} · {{ row.time_text }}{% endif %}{% if row.region %} · {{ row.region }}{% endif %}</span>
         </span>
         <span class="markers">
           {% comment %}

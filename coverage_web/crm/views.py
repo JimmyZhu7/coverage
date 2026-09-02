@@ -1278,10 +1278,21 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # prints as "~ Nov 2026") arrive here as an `app_close`, where it adds up
     # to 3 exposure points via `coverage.deadline_bonus` and prints "5d to
     # close" on the card. See `crm.utils.confirmed_firm_dates`.
+    #
+    # A row that states its closing HOUR is dropped once that hour has
+    # passed, not once its day has (D-19). `date__gte=today` is right for
+    # every row whose firm never published a time and wrong for the few that
+    # did: HSBC's 23:59 HKT close is 08:59 in Los Angeles, so this card would
+    # otherwise print "closes today" through a whole Californian working day
+    # after the form went down. `closes_at()` is None for every other row, so
+    # nothing else here changes (P3).
+    now = timezone.now()
     closes: dict[int, Any] = {}
     for fd in confirmed_firm_dates().filter(
         firm_id__in=firm_ids, event_kind="app_close", date__gte=today
     ):
+        if (fd.closes_at() or now) < now:
+            continue
         if fd.firm_id not in closes or fd.date < closes[fd.firm_id]:
             closes[fd.firm_id] = fd.date
     act_by_firm: dict[int, int] = {}

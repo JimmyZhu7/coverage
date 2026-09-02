@@ -418,8 +418,25 @@ _STATE_SUFFIX = re.compile(
     # ak/sc/ks joined 2026-08-09 (Anchorage AK, Summerville SC, Olathe KS).
     # The boundary keeps them honest: ", Akron" and ", Scotland" cannot fire
     # because a letter follows the code.
+    #
+    # oh/in joined 2026-09-02 with the regional-bank boards, and the omission
+    # was not cosmetic: the Midwest is where these banks ARE. 36 open campus
+    # rows sat at region="" on three Ohio-headquartered firms — Fifth Third
+    # in Cincinnati (16), KeyBank in Brooklyn, Cleveland, Vandalia, Chagrin
+    # Falls and Toledo (20) and Huntington in Columbus (6) — so registering
+    # their boards would have put every one of those rows outside the `us`
+    # facet, the hk/us tabs and D-2's own supply count. Both are airtight
+    # under the boundary: ", Ohio" and ", Ohrid" cannot fire because a letter
+    # follows, and neither can ", India", ", Indiana" or ", Indonesia".
+    #
+    # `or` is DELIBERATELY LEFT OUT, and it is the one code where the
+    # boundary does not save us: ", or" is also an English conjunction, so
+    # `,\s*or(?![a-z])` fires on any location field that lists an
+    # alternative. Two rows (Albany and Portland, Oregon) are not worth a
+    # rule that can be wrong; they stay blank, which is the honest answer
+    # rather than a guessed one.
     r",\s*(?:ny|il|ma|ca|wa|tx|ga|nc|fl|tn|pa|co|md|ct|nj|va|ak|sc|ks|az|mo"
-    r"|mn|ia|nv|ut|id|mi|usa?)(?![a-z])",
+    r"|mn|ia|nv|ut|id|mi|oh|in|usa?)(?![a-z])",
     re.IGNORECASE)
 _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
                             ", ga", ", nc", ", fl", ", tn", ", pa", ", co",

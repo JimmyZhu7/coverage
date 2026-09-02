@@ -501,6 +501,37 @@ def board_health_table() -> str:
     return "\n".join(out)
 
 
+def boards_unreachable_by_policy() -> list[dict]:
+    """Campus boards Coverage knows the address of and does not fetch.
+
+    `boards.UNREACHABLE_BY_POLICY` is the record; this reads it into the same
+    shape every other line of the health report uses, so an operator sees
+    "we are not allowed to read this" beside "this one is broken" and can
+    tell the two apart. Nothing here is derived and nothing here is checked
+    against the database: unlike `firms_without_campus_board`, this is not a
+    claim about what a board contains, it is a claim about a decision, and a
+    decision does not expire because a row appeared somewhere.
+
+    Deliberately not filtered by `Firm` — see `UNREACHABLE_BY_POLICY`'s own
+    note. The firm name comes from the catalog entry, and the live `Firm`
+    row's name is preferred where one exists so a renamed firm reads
+    correctly in both places.
+    """
+    from .boards import UNREACHABLE_BY_POLICY
+
+    if not UNREACHABLE_BY_POLICY:
+        return []
+    names = dict(
+        Firm.objects.filter(slug__in=UNREACHABLE_BY_POLICY).values_list("slug", "name")
+    )
+    return [
+        {"slug": slug, "firm": names.get(slug, entry["firm"]),
+         "tenant_host": entry["tenant_host"], "site": entry["site"],
+         "reason": entry["reason"], "url": entry["url"]}
+        for slug, entry in sorted(UNREACHABLE_BY_POLICY.items())
+    ]
+
+
 def firms_without_campus_board() -> list[dict]:
     """Catalog firms whose registered board is the experienced-hire site.
 
@@ -718,5 +749,30 @@ def health_report() -> list[str]:
         lines.append(
             f"⚠ a stated date the board contradicts (check the firm's own "
             f"page): {line}"
+        )
+
+    # CONTEXT, LAST, AND ONLY WHEN THERE IS A REPORT TO GIVE IT TO.
+    #
+    # Every line above is a thing that changed. This one never does: it names
+    # the campus boards Coverage knows the address of and will not fetch,
+    # because their tenants' own `robots.txt` disallows them (D-20). An
+    # operator reading "BlackRock: 0 campus rows" needs it, and reading it is
+    # the whole point — which is exactly why it must not print on a clean
+    # run. `health_report() == []` is the signal the nightly pipeline acts
+    # on, and a report that is never empty is a report nobody reads. So a
+    # healthy run stays silent and this rides along with the first real
+    # finding.
+    #
+    # It is also the one line here that is not checked against the database.
+    # Unlike `firms_without_campus_board`, it is not a claim about what a
+    # board contains; it is a claim about a decision, and a decision does not
+    # expire because a row turned up somewhere.
+    unreachable = boards_unreachable_by_policy()
+    if lines and unreachable:
+        lines.append(
+            "· known campus board, deliberately not fetched (the tenant's own "
+            "robots.txt disallows it — D-20; students get the link instead): "
+            + ", ".join(f"{b['slug']} ({b['tenant_host']}/{b['site']} -> {b['url']})"
+                        for b in unreachable)
         )
     return lines

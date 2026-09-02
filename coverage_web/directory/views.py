@@ -68,6 +68,7 @@ from directory.deadlines import (
     is_posting_closed,
 )
 from directory import estimates
+from directory.boards import UNREACHABLE_BY_POLICY
 from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
@@ -1188,6 +1189,16 @@ def _firm_date_row(fd, *, today):
         # compare rows to each other — see `_drop_contradicted_openings`.
         "date": d,
         "date_text": date_text,
+        # "23:59 HKT, 08:59 your time", and "" on every row whose firm never
+        # stated an hour. Deliberately a SEPARATE key from `date_text`
+        # rather than appended to it: `date_text` already carries three
+        # shapes keyed off precision, one of which is "~ Oct 2027", and a
+        # time may only ever ride a day-level row. Keeping them apart means
+        # the constraint that stops an hour landing on an estimate
+        # (`firm_dates_close_time_needs_a_day`) is the only rule the
+        # renderer has to trust. `get_current_timezone_name` is the zone
+        # `TimezoneMiddleware` activated for this request.
+        "time_text": fd.close_time_label(timezone.get_current_timezone_name()),
         # ALREADY GONE. This page had no date cutoff of any kind: 10 of the
         # 41 live rows sit in the past, and the founder's own firm pages
         # rendered Morgan Stanley's 6 Aug insight deadline and BlackRock's
@@ -5527,6 +5538,13 @@ def firm_detail(request, slug):
         "role": role,
         "campus_total": campus_total,
         "other_total": other_total,
+        # P9, made visible on the one page where its absence is a lie. This
+        # firm HAS a campus board, Coverage knows its address, and Coverage
+        # does not read it because the tenant's own robots.txt says not to
+        # (D-20). Without this note the page shows a firm's experienced reqs
+        # and no internship, which reads as "the programme is not running".
+        # The note names the reason and hands over the link.
+        "unreachable_board": UNREACHABLE_BY_POLICY.get(firm.slug),
         **_my_network_at(request.user, firm, today=today),
     }
     return render(request, "directory/firm_detail.html", context)
