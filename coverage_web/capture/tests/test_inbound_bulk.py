@@ -127,6 +127,47 @@ class TestClassifyInbound:
         })
         assert inbound.classify_inbound(OWN, message).is_bulk is True
 
+    def test_machine_only_separates_a_robot_from_a_list(self):
+        """"Software composed this" and "software sent this to a list" are
+        two different statements, and only the first one can describe a
+        calendar server relaying one person's invite to one other person.
+        `machine_only` is the fact `capture.gmail_live._ics_rsvp` needs to
+        tell them apart; it is False for every list-shaped signal, including
+        one riding on the SAME message as the auto-reply header (the tier-1
+        early return used to mean the list evidence was never even read)."""
+        robot = _message({
+            "From": "Alice Ng <alice@firm.example>", "To": OWN,
+            "Subject": "Accepted: Coffee chat @ Wed Sep 2, 2026",
+            "Auto-Submitted": "auto-replied",
+        })
+        assert inbound.classify_inbound(OWN, robot).machine_only is True
+
+        blast = _message({
+            "From": "Programme <programme@firm.example>", "To": OWN,
+            "Subject": "Invitation: Sophomore Series",
+            "Auto-Submitted": "auto-generated",
+            "List-Unsubscribe": "<https://firm.example/u/1>",
+        })
+        assert inbound.classify_inbound(OWN, blast).is_bulk is True
+        assert inbound.classify_inbound(OWN, blast).machine_only is False
+
+        listed = _message({
+            "From": "Someone <someone@list.example>",
+            "To": "usc-finance@list.example", "Subject": "Weekly digest",
+            "List-Id": "<usc-finance.list.example>",
+            "Auto-Submitted": "auto-generated",
+        })
+        assert inbound.classify_inbound(OWN, listed).machine_only is False
+
+    def test_machine_only_is_false_when_nothing_is_bulk(self):
+        message = _message({
+            "From": "Alice Ng <alice@firm.example>", "To": OWN,
+            "Subject": "Re: coffee chat",
+        })
+        verdict = inbound.classify_inbound(OWN, message)
+        assert verdict.is_bulk is False
+        assert verdict.machine_only is False
+
     def test_mailing_list_headers_are_bulk(self):
         message = _message({
             "From": "Someone <someone@list.example>",

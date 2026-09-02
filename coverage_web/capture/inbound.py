@@ -49,6 +49,27 @@ that is machine-generated *within* a thread:
   - `Auto-Submitted:` anything but `no` (RFC 3834) — an out-of-office
     responder is in-thread and is not a person answering you.
   - a `no-reply@` sender — nobody is reading the other end.
+
+"A MACHINE SENT IT" IS NOT "A LIST GOT IT" (2026-09-01)
+--------------------------------------------------------
+The verdict above is deliberately blunt about `Auto-Submitted`, and that
+blunt reading threw away the single most valuable message in the mailbox.
+Google Calendar stamps `Auto-Submitted: auto-replied` on the mail it sends
+when someone accepts an invitation, so every "Accepted: Coffee Chat @ ..."
+a counterparty ever sent the founder was classified as bulk and reached
+`apply_findings` with `chat_status: "none"` — five of the six `review`
+MailFacts on his live account (read-only, 2026-09-01) are exactly that
+message, unread. The verdict is still correct as a verdict: no PERSON typed
+that mail. What was missing is that the message carries a structured `.ics`
+stating, in iTIP's own vocabulary, that a named person accepted an invite
+the student themselves organised — evidence, not prose.
+
+So the fix is not to soften this test. `capture.gmail_live._ics_rsvp` reads
+the invite and overrides the verdict on the strength of the `.ics`, and
+`machine_only` below is the one fact it needs back from here: whether the
+bulk verdict rests only on "software composed this" or also on "software
+sent this to a list". The West Monroe blast the module exists to stop is a
+list send and stays bulk under every rule.
 """
 
 from __future__ import annotations
@@ -169,6 +190,19 @@ class InboundVerdict:
     # September 2" live. Deliberately LAST in the field list: existing call
     # sites construct this positionally.
     auto_submitted: bool = False
+    # True when the ONLY thing that made this message bulk is that a machine
+    # composed it (`Auto-Submitted:`, `X-Autoreply`, a stock auto-reply
+    # subject) — no list headers, no unsubscribe headers, no campaign id, no
+    # blast-shaped recipient list. It is the difference between "software
+    # sent this" and "software sent this TO A LIST", and only the first one
+    # describes a calendar server relaying one person's invite to one other
+    # person. `capture.gmail_live` reads it to decide whether an iTIP
+    # `METHOD:REQUEST` may still be read as a chat someone proposed: a
+    # programme blast carries `List-Unsubscribe` (the live West Monroe case
+    # this module was written around) and so is never machine-only, while
+    # Google Calendar's own invitation mail carries `Auto-Submitted` and
+    # nothing else. Bulk-only: False whenever `is_bulk` is False.
+    machine_only: bool = False
 
     @property
     def reason_text(self) -> str:
@@ -239,6 +273,9 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
 
     # --- tier 1: nothing rescues these ------------------------------------ #
     always: list[str] = []
+    # The subset of `always` that says "a machine composed this" rather than
+    # "this went to a list". See `InboundVerdict.machine_only`.
+    machine: list[str] = []
 
     _, from_addr = ("", "")
     from_pairs = getaddresses([headers.get("from", "")])
@@ -251,6 +288,7 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
     is_auto_reply = False
     if auto_submitted and auto_submitted != "no":
         always.append(f"Auto-Submitted: {auto_submitted}")
+        machine.append(always[-1])
         is_auto_reply = True
 
     # The header-less responders. `X-Autoreply`/`X-Autorespond` are the
@@ -262,10 +300,12 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
     # inflated warmth off a vacation responder.
     if headers.get("x-autoreply") or headers.get("x-autorespond"):
         always.append("X-Autoreply (vacation responder)")
+        machine.append(always[-1])
         is_auto_reply = True
     subject = headers.get("subject", "")
     if _AUTOREPLY_SUBJECT_RE.match(subject):
         always.append("auto-reply subject prefix")
+        machine.append(always[-1])
         is_auto_reply = True
 
     precedence = headers.get("precedence", "").strip().lower()
@@ -276,12 +316,14 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
     if present_list:
         always.append("mailing-list headers (" + ", ".join(present_list) + ")")
 
-    if always:
-        return InboundVerdict(
-            True, tuple(always), threaded, addressed, auto_submitted=is_auto_reply
-        )
-
     # --- tier 2: strong, overridden by a genuine reply pointer ------------- #
+    #
+    # Computed BEFORE tier 1 returns, though it is only USED after: a message
+    # can carry both an `Auto-Submitted` and a `List-Unsubscribe`, and the
+    # tier-1 early return meant the list evidence was never even looked at.
+    # That is the difference between "a calendar server relayed one person's
+    # invite" and "a marketing system sent a calendar invite to a list", and
+    # `machine_only` is exactly the fact that distinguishes them.
     strong: list[str] = []
 
     present_unsub = [h for h in _UNSUBSCRIBE_HEADERS if headers.get(h)]
@@ -302,6 +344,21 @@ def classify_inbound(own_email: str, message: dict) -> InboundVerdict:
         weak.append("you are not on To: or Cc:")
     if len(recipients) > BULK_RECIPIENT_COUNT:
         weak.append(f"{len(recipients)} people on To:/Cc:")
+
+    if always:
+        return InboundVerdict(
+            True,
+            tuple(always),
+            threaded,
+            addressed,
+            auto_submitted=is_auto_reply,
+            # Machine-composed and nothing else: every tier-1 reason is an
+            # auto-reply signal, and no weaker tier found list, campaign or
+            # blast-shaped evidence either.
+            machine_only=(
+                len(machine) == len(always) and not strong and len(weak) < 2
+            ),
+        )
 
     reasons = strong + (weak if len(weak) >= 2 else [])
     if reasons and not threaded:

@@ -1,4 +1,4 @@
-"""Two ways a calendar invite could put a time on the page it has not earned.
+"""Three ways a calendar invite lied about a chat, or lost one.
 
 Both live in `capture.gmail._upsert_scheduled_chat` and its siblings, and both
 are the same failure wearing different clothes: a statement with LESS evidence
@@ -18,6 +18,15 @@ behind it overwriting one with more.
    still on the grid, still riding out to a subscribed .ics feed and onto a
    phone, still pulling a prep card onto Today for a chat nobody was attending.
 
+3. AN ACCEPTANCE PUT NOTHING ON THE CALENDAR AT ALL (2026-09-01). The mirror
+   image of 2, and the more expensive one: "Accepted: Jimmy <> Lily Coffee
+   Chat" is a counterparty saying yes to the student's own invite, and every
+   one of them was classified auto-submitted bulk and reached `apply_findings`
+   with `chat_status: "none"`. Five of the six `review` MailFacts on the
+   founder's live account (read-only, 2026-09-01) are that message. The
+   classifier fix is `capture.gmail_live._ics_rsvp`; this file is where it has
+   to actually produce a `CalendarEvent`.
+
 `transaction=True` for the reason `test_gmail.py` documents: applying a
 finding calls `crm.services.log_touch`, which opens its own connection.
 """
@@ -25,7 +34,7 @@ finding calls `crm.services.log_touch`, which opens its own connection.
 from __future__ import annotations
 
 import base64
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -33,6 +42,7 @@ from django.utils import timezone
 
 from capture import gmail_live
 from capture.gmail import apply_findings
+from capture.models import MailFact
 from crm.models import CalendarEvent, Contact
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -406,3 +416,129 @@ def test_a_cancellation_stays_inside_one_users_calendar(student, lily):
     theirs = CalendarEvent.all_objects.get(user=other)
     assert theirs.cancelled_at is None, "another student's calendar is untouched"
     assert theirs.title == "Chat with Lily Liu"
+
+
+# ---------------------------------------------------------------------------
+# 3 — the acceptance
+# ---------------------------------------------------------------------------
+
+def _rsvp_message(student, *, when, partstat="ACCEPTED", uid=UID, sent_at=None,
+                  sender="Lily Liu <lily.liu@barclays.com>"):
+    """The real Google Calendar shape: `Auto-Submitted: auto-replied`, a
+    `text/calendar; method=REPLY` part, the STUDENT as ORGANIZER, and one
+    ATTENDEE line carrying the answer."""
+    stamp = sent_at or timezone.now()
+    ics = (
+        "BEGIN:VCALENDAR\r\n"
+        "PRODID:-//Google Inc//Google Calendar 70.9054//EN\r\n"
+        "VERSION:2.0\r\n"
+        "METHOD:REPLY\r\n"
+        "BEGIN:VEVENT\r\n"
+        f"DTSTART:{when.astimezone(dt_timezone.utc).strftime('%Y%m%dT%H%M%SZ')}\r\n"
+        f"ORGANIZER;CN={student.email}:mailto:{student.email}\r\n"
+        f"UID:{uid}\r\n"
+        "ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;"
+        f"PARTSTAT={partstat};CN=Lily Liu;X-NUM-GUESTS=0:"
+        "mailto:lily.liu@barclays.com\r\n"
+        "STATUS:CONFIRMED\r\n"
+        "SUMMARY:Jimmy <> Lily Coffee Chat\r\n"
+        "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+    verb = "Accepted" if partstat == "ACCEPTED" else "Declined"
+    return {
+        "threadId": f"thread-rsvp-{partstat.lower()}",
+        "internalDate": str(int(stamp.timestamp() * 1000)),
+        "snippet": f"{verb}: Jimmy <> Lily Coffee Chat",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": sender},
+                {"name": "To", "value": student.email},
+                {"name": "Subject",
+                 "value": f"{verb}: Jimmy <> Lily Coffee Chat @ Thu Sep 3, 2026"},
+                {"name": "Auto-Submitted", "value": "auto-replied"},
+            ],
+            "parts": [{
+                "mimeType": "text/calendar",
+                "headers": [{"name": "Content-Type",
+                             "value": "text/calendar; charset=UTF-8; method=REPLY"}],
+                "body": {"data": base64.urlsafe_b64encode(ics.encode()).decode()},
+            }],
+        },
+    }
+
+
+def test_an_acceptance_of_the_students_own_invite_books_the_chat(student, lily):
+    """THE BUG. She said yes, on a message carrying the time in a machine-
+    readable field, and the calendar stayed empty."""
+    when = _at(days=3, hour=15)
+    apply_findings(student, [gmail_live._classify_message(
+        student.email, _rsvp_message(student, when=when))])
+
+    ev = CalendarEvent.objects.for_user(student).get()
+    assert timezone.localtime(ev.starts_at) == when
+    assert ev.contact_id == lily.id
+    assert ev.ics_uid == UID
+
+    lily.refresh_from_db()
+    assert lily.thread_state == "chat_scheduled", (
+        "an accepted invite is the strongest thread state the ladder has"
+    )
+
+
+def test_an_acceptance_from_googles_robot_still_reaches_the_right_contact(
+        student, lily):
+    """Two of the founder's six live acceptances came From
+    `calendar-notification@google.com`. The `.ics` names the attendee; the
+    From: header names a robot, and only one of those is a person he knows."""
+    when = _at(days=4, hour=11)
+    apply_findings(student, [gmail_live._classify_message(
+        student.email,
+        _rsvp_message(student, when=when,
+                      sender="Google Calendar <calendar-notification@google.com>"))])
+
+    ev = CalendarEvent.objects.for_user(student).get()
+    assert ev.contact_id == lily.id
+    assert timezone.localtime(ev.starts_at) == when
+
+
+def test_an_acceptance_is_no_longer_surfaced_as_unreadable(student, lily):
+    """What the student actually saw before: "automated reply we could not
+    read — surfaced for your look", five times over, for the five clearest
+    messages in the mailbox."""
+    apply_findings(student, [gmail_live._classify_message(
+        student.email, _rsvp_message(student, when=_at(days=3)))])
+
+    assert not MailFact.all_objects.filter(
+        user=student, kind=MailFact.KIND_REVIEW).exists()
+
+
+def test_a_decline_retires_the_chat_instead_of_rebooking_it(student, lily):
+    """A DECLINED reply carries the whole event back, DTSTART included. Read
+    for its time alone it books the meeting she just refused."""
+    booked = timezone.now() - timedelta(minutes=10)
+    apply_findings(student, [gmail_live._classify_message(
+        student.email, _rsvp_message(student, when=_at(days=3), sent_at=booked))])
+    assert CalendarEvent.objects.for_user(student).get().cancelled_at is None
+
+    apply_findings(student, [gmail_live._classify_message(
+        student.email,
+        _rsvp_message(student, when=_at(days=3), partstat="DECLINED",
+                      sent_at=timezone.now()))])
+
+    ev = CalendarEvent.all_objects.get(user=student)
+    assert ev.cancelled_at is not None
+    assert ev.title.startswith("Cancelled: "), ev.title
+
+
+def test_an_acceptance_of_somebody_elses_event_books_nothing(student, lily):
+    """The organiser test is the gate: a REPLY the student was merely copied
+    on answers an invite they never sent."""
+    message = _rsvp_message(student, when=_at(days=3))
+    body = message["payload"]["parts"][0]["body"]
+    ics = base64.urlsafe_b64decode(body["data"]).decode()
+    ics = ics.replace(student.email, "events@bigconf.example")
+    body["data"] = base64.urlsafe_b64encode(ics.encode()).decode()
+
+    apply_findings(student, [gmail_live._classify_message(student.email, message)])
+    assert CalendarEvent.all_objects.filter(user=student).count() == 0
