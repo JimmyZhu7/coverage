@@ -67,7 +67,19 @@ only reintroduce the clipping bug this file's history is full of.
   nested `title` wins on hover. Two different facts, two different hover
   targets, neither swallowing the other.
   {% endcomment %}
-  <span class="rr-due"{% if r.verified_days is not None %} title="Coverage last confirmed this posting live {% if r.verified_days == 0 %}today{% elif r.verified_days == 1 %}1 day ago{% else %}{{ r.verified_days }} days ago{% endif %}"{% endif %}>
+  {% comment %}
+  HOW LONG IT HAS BEEN OPEN RIDES HERE TOO (2026-09-02). "Open 14d" used to
+  be the last span of the meta line below. It is a fact about the EVIDENCE,
+  how long Coverage has watched this posting stay open, not about the reader
+  or their eligibility, which its own comment there said outright, and it was
+  the item that pushed 66% of dated rows onto a second meta line and left the
+  orphan separator at the end of the first. So it joins the other
+  evidence-age fact, on the hover of the column that makes the date claim.
+  Nothing is softened: the "not a forecast" sentence travels with it, because
+  the whole reason this figure exists rather than a "typically open N days"
+  one is that it predicts nothing (see `directory.open_runs`).
+  {% endcomment %}
+  <span class="rr-due"{% if r.verified_days is not None or r.dated and r.open_run_days is not None %} title="{% if r.verified_days is not None %}Coverage last confirmed this posting live {% if r.verified_days == 0 %}today{% elif r.verified_days == 1 %}1 day ago{% else %}{{ r.verified_days }} days ago{% endif %}.{% endif %}{% if r.dated and r.open_run_days is not None %}{% if r.verified_days is not None %} {% endif %}Coverage watched this posting open {% if r.open_run_days == 0 %}today{% elif r.open_run_days == 1 %}1 day ago{% else %}{{ r.open_run_days }} days ago{% endif %} and it is still open. Not a forecast of when it closes.{% endif %}"{% endif %}>
     {% if r.dated %}
       {% comment %}
       The abbreviation is deliberate (views.py: "Closes in 12 days" does not
@@ -202,33 +214,34 @@ only reintroduce the clipping bug this file's history is full of.
       <span class="rr-kind"{% if r.cohort %} title="{{ r.cohort }} programme year"{% endif %}>{{ r.bucket_label }}{% if r.cohort %} {{ r.cohort }}{% endif %}</span>
       {% if r.class_year %}<span class="rr-cls" title="Class year stated in the posting">Class of {{ r.class_year }}</span>{% endif %}
       {% comment %}
-      HOW LONG THIS ONE HAS BEEN OPEN. Last in the meta line on purpose, and
-      that placement is the whole argument for it being safe to add at all:
-      LAST IN READING ORDER (see above), because it is about the posting's
-      HISTORY, not about the reader and not about their eligibility: nothing
-      that could end the decision should be met after it. It used to be last
-      for a second reason: it was the slot that ellipsised first, and that
-      is what made it safe to add. That reasoning is retired with the policy:
-      under `:last-child` truncation this span was measured at 0px width on a
-      live Picked row, which is not "ellipsising first", it is being deleted.
-      The line wraps now, so it is simply read last.
+      HOW LONG THIS ONE HAS BEEN OPEN used to render here, last in the meta
+      line, as "Open 14d". It moved to the deadline column's `title` on
+      2026-09-02. See that span at the top of this file for the wording and
+      the argument.
+
+      WHY IT WAS THE ONE TO GO. Everything else on this line is about the
+      READER (the verdict, the assessment route) or about what the POSTING
+      states (sponsorship, pay, grad years, GPA, location, programme, the
+      deadline or its absence). This one was about our own observation
+      history, which is the definition of provenance on this board, and it
+      said so in its own comment: "LAST IN READING ORDER, because it is about
+      the posting's HISTORY, not about the reader and not about their
+      eligibility". It fires on 66% of dated rows, and measured at 1280px it
+      was the span that carried the line onto a second row and left the
+      trailing separator hanging at the end of the first.
 
       NOT a duration prediction, and the distinction is the reason this
       feature shipped in this shape. See `directory.open_runs`: the obvious
       "typically open N days" figure is measurable but wrong, because a
       39-day observation window can only pair the postings that closed inside
       it, and 77% of the still-open rows have already outlived the median
-      that pairing produces. This counts up from an open we watched, and
-      predicts nothing.
+      that pairing produces. It counts up from an open we watched, and
+      predicts nothing, which is why the tooltip it moved to says so.
 
-      DATED ROWS ONLY. An undated row's `.rr-undated` span below already ends
-      with "first seen 12d ago", the same measurement, in wording pinned by
-      a test, and printing both would be the row saying one fact twice. A
-      dated row has nowhere else that says it.
+      DATED ROWS ONLY, unchanged. An undated row's `.rr-undated` span below
+      already ends with "first seen 12d ago", the same measurement, in
+      wording pinned by a test, and stating both would be one fact twice.
       {% endcomment %}
-      {% if r.dated and r.open_run_days is not None %}
-        <span class="rr-open" title="Coverage watched this posting open and it is still open. Not a forecast of when it closes.">Open {% if r.open_run_days == 0 %}today{% else %}{{ r.open_run_days }}d{% endif %}</span>
-      {% endif %}
       {% comment %}
       "first seen", never "posted": this is when the row entered OUR
       database, and a bulk import once wore "New" on 794 of 805 roles at

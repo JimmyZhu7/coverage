@@ -207,9 +207,16 @@ def test_the_picked_column_prints_both_sentences(client, django_user_model):
     _market("pagefirm", region="us", months=[date(2027, 2, 1), date(2027, 3, 1)])
 
     body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
-    assert "haven&#x27;t opened" in body or "haven't opened" in body
+    assert "not open in your regions yet" in body
+    assert "Closest fits" in body
     assert "Estimated to open" in body
     assert "Feb 2027 to Mar 2027" in body
+    # THE PROVENANCE MOVED TO THE HOVER (2026-09-02) and must still be on the
+    # page. The claim is the line a student reads; where the claim came from
+    # is the line's `title`. `cycle_open_estimate` still joins the two for the
+    # digest, which has no hover to put anything on.
+    assert 'title="From past cycles at' in body
+    assert "Not a firm&#x27;s own published date." in body
 
 
 def test_a_rail_that_scores_nothing_still_explains_itself(client, django_user_model):
@@ -231,7 +238,7 @@ def test_a_rail_that_scores_nothing_still_explains_itself(client, django_user_mo
 
     body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
     assert "firmcol--picked" in body, "the column must not vanish"
-    assert "Nothing on the board scores high enough for you yet" in body
+    assert "Nothing scores high enough yet" in body
     # Paired with the cycle sentences, which on an early-cycle profile are
     # usually the whole of the answer.
     assert "Estimated to open" in body
@@ -255,7 +262,15 @@ def test_an_anonymous_visitor_gets_no_picked_column(client):
 def test_the_digest_reads_the_same_sentence_the_page_does(django_user_model):
     """P5. The email and the page are two renderings of one fact; the day the
     digest wrote its own month range is the day they could disagree about a
-    date."""
+    date.
+
+    THE PAGE SPLITS THE SENTENCE, THE DIGEST DOES NOT (2026-09-02), and both
+    still read one function. `_cycle_open_parts` builds the claim and counts
+    the firms; `cycle_open_estimate` joins them for the email, which has room
+    for the disclaimer inline and no hover to put it on; `cycle_open_note`
+    hands the column the claim and the provenance separately. A date can no
+    more differ between the two than it could before, because neither one
+    formats a date."""
     from crm.digest import _cycle_note
     from directory.recommend import Candidate, Recommendation
 
@@ -296,3 +311,41 @@ def test_the_digest_stays_quiet_when_the_picks_are_in_the_students_cycle(django_
         score=40, reasons=(),
     )
     assert _cycle_note(user, [rec]) == ""
+
+
+def test_the_page_and_the_digest_are_built_from_one_forecast(django_user_model):
+    """The split is a presentation split and nothing else: joined back
+    together, the column's two halves are the digest's sentence, character
+    for character. If they ever stop being, the email and the board are free
+    to disagree about a month range, which is the whole thing P5 forbids."""
+    from directory.views import cycle_open_note
+
+    user = _profile(django_user_model, "split@example.com", regions=["us"],
+                    tracks=["ib"], target_cycles=["2028 Summer Internship"])
+    _market("splitfirm", region="us", months=[date(2027, 2, 1)])
+
+    whole = cycle_open_estimate(user)
+    note = cycle_open_note(user)
+    assert whole
+    assert note["text"] == "Estimated to open United States Feb 2027"
+    # The claim is the visible line, so the honesty word has to be on it.
+    assert note["text"].startswith("Estimated to open")
+    # The provenance is the hover, and it is a sentence rather than a fragment.
+    assert note["why"] == "From past cycles at 3 firms. Not a firm's own published date."
+    assert whole == f"{note['text']}, {note['why'][0].lower()}{note['why'][1:]}"
+
+
+def test_a_corpus_that_cannot_say_gives_the_column_nothing_to_render():
+    """`{}` rather than a dict of empty strings: the template guards on
+    `pick_cluster.cycle_open.text`, and an empty-string `text` inside a truthy
+    dict would render an empty italic line where the old code rendered
+    nothing. P3, unchanged behaviour on thin data."""
+    from directory.views import cycle_open_note
+
+    class _Thin:
+        target_cycles = ()
+        regions = ()
+        tracks = ()
+
+    assert cycle_open_note(_Thin()) == {}
+    assert cycle_open_estimate(_Thin()) == ""

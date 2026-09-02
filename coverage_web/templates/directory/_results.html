@@ -128,6 +128,7 @@ exactly the moment it had something to say.
             straight under the page's h1 — the 1→3 jump a screen-reader user
             hears as a missing level.{% endcomment %}
             <h2 class="firmcol-h"><span class="firmcol-name" id="pickcol-h">Picked for you</span></h2>
+            <div class="firmcol-stats">
             {% comment %}
             TWO KINDS OF EMPTY, and until 2026-09-02 only one of them had a
             sentence. "None match this filter" is true when the student's
@@ -143,11 +144,18 @@ exactly the moment it had something to say.
             this one 24" question the number cannot answer. The cycle
             sentences below carry the rest of the answer, which on an
             early-cycle profile is usually the whole of it.
+
+            "Nothing scores high enough yet", not "Nothing on the board
+            scores high enough for you yet" (2026-09-02): this span shares
+            its line with the tier slot now and shrinks to fit it, and the
+            long form was the only string on the board wide enough to be
+            ellipsised by that. "On the board" and "for you" were the words
+            adding no lever; the sentence one line below still names both.
             {% endcomment %}
-            <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% elif pick_cluster.nothing_scored %}Nothing on the board scores high enough for you yet{% else %}None match this filter{% endif %}</span>
+            <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% elif pick_cluster.nothing_scored %}Nothing scores high enough yet{% else %}None match this filter{% endif %}</span>
             {% comment %}
-            The shared "why", as ONE text line in the firm columns' own third-
-            line voice ("Tier 1"), not a row of pills. Pills wrapped
+            The shared "why", as ONE text line in the firm columns' own meta
+            voice ("Tier 1"), not a row of pills. Pills wrapped
             the moment two reasons showed ("2027 INTAKE" + "2027 SUMMER
             INTERNSHIP" is 266px against a 236px row), and a wrapped stats row
             made this header 122px against its neighbours' 92px, pushing every
@@ -162,34 +170,31 @@ exactly the moment it had something to say.
             now prints per card, as each row's own `.rr-why` line (see
             _rolecard.html); this line and those lines partition the
             scorer's reasons between them, nothing printed twice.
+
+            It rides the SAME line as the count above, in `.firmcol-stats`,
+            which is where a firm column now carries "GLOBAL BANK · 24 OPEN ·
+            TIER 1". Two headers, one shape.
             {% endcomment %}
             {% comment %}
-            THE EYEBROW, IN THE TIER SLOT. Three things were meant to say
-            "this column is not a firm": the accent top edge, the star tile,
-            and the accent border. On a board where every firm is one of the
-            student's own targets the firm columns wear that same accent
-            border (all 12 of the founder's do), so two of the three signals
-            are shared with the columns they were supposed to distinguish
-            this one from and the star is left carrying it alone — one tile
-            against twelve tiles. A word cannot be confused with a tint.
+            THE "PICKED" EYEBROW IS GONE (2026-09-02), and the argument it was
+            added on is what retires it. It was a mono uppercase word reading
+            "PICKED" directly under a heading reading "Picked for you" — the
+            founder's review named it as pure redundancy and he is right: a
+            label that repeats the heading above it teaches a reader nothing
+            the heading did not.
 
-            IN THIS LINE, not on a line of its own above the name. Measured:
-            an eyebrow above the name made this header 141px against every
-            firm column's 126, so the Picked column's first role row started
-            15px below the row it visually belongs to — the exact defect
-            `.firmcol-head`'s own comment records and pins a min-height for.
-            This slot costs no line and is the better parallel anyway: it is
-            where a firm column says "TIER 1", in the same mono uppercase
-            voice, so the two headers answer the same question in the same
-            place. `.firmcol-why` ellipsises around it exactly as it does
-            around a tier pill.
-
-            `aria-hidden`: the heading above already says "Picked for you",
-            and a screen reader announcing "PICKED, Picked for you" is the
-            same fact twice. This is a visual signal for a visual ambiguity.
+            What it was there to do still gets done, by the two signals no
+            firm column can wear. The star tile is `--accent`-filled (a firm
+            tile is a white logo plate or a pastel monogram, never the accent)
+            and the heading is `--accent-ink` (a firm name is `--ink`). The
+            third signal, the accent border, IS shared with every `.is-mine`
+            column and was never the one carrying this — see
+            `test_the_picked_column_still_says_it_is_not_a_firm_without_the_wash`,
+            which pins all three. The tile only started rendering in the
+            accent when its cascade bug was fixed (`.firmcol-logo.
+            firmcol-logo--picked`), which is AFTER the eyebrow was written to
+            compensate for a tile that was quietly drawing a monogram chip.
             {% endcomment %}
-            <div class="firmcol-stats">
-              <span class="fc-eyebrow" aria-hidden="true">Picked</span>
               {% if pick_cluster.reasons %}<span class="firmcol-why" title="{% for r in pick_cluster.reasons %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_cluster.reasons %}{% if forloop.first %}<strong>{{ r.text }}</strong>{% else %}<span class="fc-stat">{{ r.text }}</span>{% endif %}{% endfor %}</span>{% endif %}
             </div>
             {% comment %}The early-cycle student's reframe: their stored
@@ -215,13 +220,23 @@ exactly the moment it had something to say.
             of the first lend itself to the second.
 
             Same span class, so it reads as one block of context rather than
-            a new kind of thing. `""` whenever the corpus cannot say, in
+            a new kind of thing. `{}` whenever the corpus cannot say, in
             which case nothing renders and the column is exactly as it was —
-            see `cycle_open_estimate` in views.py for the three-firm floor
+            see `_cycle_open_parts` in views.py for the three-firm floor
             and why every date here is labelled a forecast.
+
+            THE PROVENANCE IS THE `title`, NOT THE LINE (2026-09-02). The
+            sentence used to print whole — "Estimated to open United States
+            Nov 2026 to Jan 2027, from past cycles at 16 firms. Not a firm's
+            own published date." — three wrapped lines in a 320px header, two
+            of them answering "where did this come from". A fact a student
+            ACTS on is a line here; a fact about where the fact came from is a
+            hover. The word "Estimated" stays on the visible half, so the line
+            cannot read as a published date to someone who never hovers, and
+            the digest still sends the whole sentence (`cycle_open_estimate`).
             {% endcomment %}
-            {% if pick_cluster.cycle_open %}
-              <span class="firmcol-cycle-note">{{ pick_cluster.cycle_open }}</span>
+            {% if pick_cluster.cycle_open.text %}
+              <span class="firmcol-cycle-note" title="{{ pick_cluster.cycle_open.why }}">{{ pick_cluster.cycle_open.text }}</span>
             {% endif %}
             {% comment %}
             Never a silent truncation. This column obeys the filters like its

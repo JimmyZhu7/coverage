@@ -430,7 +430,10 @@ def test_irrelevant_rows_no_longer_silence_the_note():
     qs = Opportunity.objects.filter(status="open")
     note = _cycle_not_open_note(_P("2028 Summer Internship", regions=("hk", "us")), qs)
     assert "2028 Summer Internship" in note
-    assert "haven't opened in your regions yet" in note
+    # The scoping clause is what this test is about and it survived the
+    # 2026-09-02 shortening intact: the sentence may only claim what the query
+    # asked, and the query was scoped to the student's regions.
+    assert "not open in your regions yet" in note
     assert "—" not in note
 
     # A student who named no regions is asked the board-wide question, as

@@ -511,58 +511,74 @@ def test_a_short_posting_gets_no_fold():
 # ---------------------------------------------------------------------------
 
 
-def test_the_picked_column_says_it_is_not_a_firm(client, db):
-    """Three signals were meant to distinguish this column from the firm
-    columns beside it: the accent top edge, the star tile and the accent
-    border. On a board where every firm is one of the student's own targets
-    the firm columns wear that same accent border, so two of the three are
-    shared with the thing they were distinguishing it from and the star is
-    left carrying it alone — one tile against twelve tiles.
+def test_the_picked_column_says_it_is_not_a_firm_without_repeating_its_name():
+    """REWRITTEN 2026-09-02. This used to assert the `.fc-eyebrow` rule — a
+    mono, letterspaced, accent word reading "PICKED". It is gone.
 
-    `aria-hidden`: the heading beside it already says "Picked for you", and a
-    screen reader announcing "PICKED, Picked for you" is the same fact twice.
-    This is a visual signal for a visual ambiguity.
-    """
+    The word was added when three signals were supposed to distinguish this
+    column and only one of them worked: on a board where every firm is one of
+    the student's own targets, the firm columns wear the same `--accent-line`
+    border, so the star tile was carrying it alone — and the tile was ALSO
+    broken at the time, drawing a default monogram chip through a one-class
+    cascade bug (see `test_the_star_tile_actually_wins_the_cascade` in
+    test_firmcol_head.py, which fixed it by specificity in the same pass).
+
+    With the tile actually rendering on `--accent` and the heading on
+    `--accent-ink`, the eyebrow sat directly beneath a heading reading
+    "Picked for you" and told a reader nothing the heading had not. A label
+    that repeats the heading above it is the founder's own example of copy
+    that should not exist.
+
+    Two signals no firm column can wear are what carry it now, and they are
+    asserted here rather than merely in the file that removed the word."""
     css = _css()
-    body = _rule(css, ".fc-eyebrow")
-    assert "letter-spacing: 0.12em" in body
-    assert "var(--font-mono)" in body
+    assert ".fc-eyebrow" not in css, (
+        "the 'PICKED' eyebrow is back; it repeats the heading directly above it")
+    tile = _rule(css, ".firmcol-logo.firmcol-logo--picked")
+    assert "background: var(--accent)" in tile, (
+        "the accent-filled tile is the signal no firm column can wear — a "
+        "firm tile is a white logo plate or a pastel monogram")
+    assert "var(--accent-ink)" in _rule(css, ".firmcol--picked .firmcol-name"), (
+        "and the accent heading is the second; a firm name is --ink")
 
 
-def test_the_picked_columns_header_still_has_the_firm_columns_line_count():
-    """The word rides `.firmcol-stats`, in the slot a firm column spends on
-    its tier, and NOT on a line of its own above the name.
+def test_the_picked_columns_header_spends_the_same_two_rows_a_firms_does():
+    """REWRITTEN 2026-09-02. Its premise was the eyebrow's POSITION: the word
+    had to ride `.firmcol-stats` rather than take a line of its own above the
+    name, because a line of its own measured 141px of header against every
+    firm column's 126 and dropped this column's first role row 15px below the
+    row it belongs to.
 
-    Measured in the browser when the first cut put it above the name: the
-    Picked header rendered 141px against every firm column's 126, so this
-    column's first role row started 15px below the row it visually belongs
-    to. That is the exact defect `.firmcol-head`'s own comment records — a
-    header whose height depends on its content in a grid row where the
-    columns are supposed to agree — and it is why that rule carries a
-    min-height at all.
+    There is no eyebrow to place any more. The invariant it was protecting —
+    this header must not grow a row its neighbours do not have — is now
+    structural, and stronger: the head is a two-row grid, the name is row one
+    and `.firmcol-stats` is row two, in both columns.
 
-    Asserted structurally rather than geometrically: this suite renders HTML
-    and has no layout engine, so the promise it can keep is "the eyebrow adds
-    no row to the id block", which is the thing that produced the pixels.
-
-    And asserted against the TEMPLATE, not a rendered page. The Picked column
-    only draws for a student whose profile scores some picks, so a rendered
-    assertion would skip on every fixture that has not built one — a test
-    that silently does nothing is worse than no test, and this one exists
-    precisely because the defect it guards was invisible until measured.
+    Asserted against the TEMPLATES, not a rendered page, for the reason the
+    original gave: the Picked column only draws for a student whose profile
+    scores picks, so a rendered assertion would silently skip on most
+    fixtures, and this test exists precisely because the defect it guards was
+    invisible until measured.
     """
-    src = (pathlib.Path(__file__).resolve().parents[2]
-           / "templates" / "directory" / "_results.html").read_text()
-    eyebrow = src.index('class="fc-eyebrow"')
-    heading = src.index('id="pickcol-h"')
-    stats = src.index('<div class="firmcol-stats">')
-    assert heading < stats < eyebrow, (
-        "the eyebrow moved back above the column name; that costs the Picked "
-        "header a fourth line and drops its first role row 15px below the "
-        "row it belongs to (see .firmcol-head's min-height and its comment)")
-    assert eyebrow < src.index("</div>", stats), (
-        "the eyebrow must be inside .firmcol-stats, the line a firm column "
-        "spends on its tier")
+    here = pathlib.Path(__file__).resolve().parents[2] / "templates" / "directory"
+    picked = (here / "_results.html").read_text()
+    assert "fc-eyebrow" not in picked
+    heading = picked.index('id="pickcol-h"')
+    stats = picked.index('<div class="firmcol-stats">')
+    meta = picked.index('class="firmcol-meta"')
+    assert heading < stats < meta, (
+        "the Picked column's count line moved out of the stats row; that is a "
+        "third row in a header whose neighbours have two")
+
+    firms = (here / "_columns.html").read_text()
+    fstats = firms.index('<div class="firmcol-stats">')
+    fmeta = firms.index('class="firmcol-meta"')
+    ftier = firms.index('class="firmcol-tier')
+    assert fstats < fmeta < ftier, (
+        "a firm column's category, open count and tier belong on ONE line "
+        "inside .firmcol-stats — stacked, they are the three-row block beside "
+        "a square tile that the founder's review called cluttered")
+    assert firms.index('class="firmcol-h"') < fstats
 
 
 def test_the_mobile_filter_disclosure_carries_its_active_count(client, db):

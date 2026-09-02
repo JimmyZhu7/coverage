@@ -307,8 +307,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      the only control in the group got skipped with the paragraphs around it.
      Its own tinted band now: still quiet (an offer, not a nag), but visibly
      a different KIND of line from the ones reporting what is hidden. */
-  .scope-line--act { display: flex; align-items: center; gap: var(--s3);
-    flex-wrap: wrap; margin: 0 0 var(--s3);
+  /* `--s4` under it, not `--s3`. This is a BORDERED box and the stat strip
+     under it is bare text: 12px between a boxed edge and a line of numbers
+     reads tighter than 12px between two lines of text, so the two bands were
+     touching by eye even before the footnote's negative margin (see
+     `.scope-foot`) put them on top of each other for real. The block now
+     goes 16 / 8 / 16 down the page: out of the banner, into the footnote,
+     out into the columns.
+
+     PINNED BY SPECIFICITY, not by source order. This rule was
+     `.scope-line--act` — one class — and `.scope-line` further down this file
+     is also one class, so the generic rule won and this element's margin was
+     whatever `.scope-line` said, silently. The values happened to agree, so
+     nothing showed until the moment one of them needed to change. Same trap
+     and same fix as `.firmcol-logo.firmcol-logo--picked` above. */
+  .scope-line.scope-line--act { display: flex; align-items: center; gap: var(--s3);
+    flex-wrap: wrap; margin: 0 0 var(--s4);
     padding: var(--s2) var(--s4) var(--s2) var(--s3);
     background: var(--accent-soft); border: 1px solid var(--accent-line);
     border-left: 3px solid var(--accent); border-radius: 10px;
@@ -604,7 +618,11 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      regression when there is nothing to disclose. */
   #cov-scope { border-top: 1px solid var(--line); padding-top: var(--s3); }
   .board-state { margin: 0 0 var(--s4); }
-  .board-state .stat-strip { margin-bottom: 6px; }
+  /* `--s2`, and the footnote below it states no margin of its own — see
+     `.scope-foot`. This is the ONE declaration setting the distance between
+     the strip and its footnote, so the two can no longer be written against
+     each other. */
+  .board-state .stat-strip { margin-bottom: var(--s2); }
   .board-state .cycband { margin-bottom: 0; }
 
   /* The month rail, folded. It is a decorative shape (role="img" — a shown
@@ -633,11 +651,27 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      aligned and a size quieter than v4: the strip is orientation, not a
      dashboard, and the fs-l numbers were competing with the firm names below. */
   .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
-    justify-content: flex-start; gap: var(--s2) var(--s3); margin: 0 0 var(--s3);
+    justify-content: flex-start; row-gap: var(--s2); column-gap: 18px;
+    margin: 0 0 var(--s3);
+    /* So a divider that lands outside the strip is clipped rather than
+       drawn — see `.ss-item`'s rule below. */
+    overflow: hidden;
     padding: 0; font-size: var(--fs-xs); color: var(--ink-2); }
-  .stat-strip .ss-item { display: inline-flex; align-items: baseline; gap: 6px; }
-  .stat-strip .ss-item:not(:first-child)::before { content: ""; align-self: center;
-    width: 1px; height: 15px; background: var(--line-strong); margin-right: 6px; }
+  /* THE DIVIDER SITS IN THE GAP, NOT INSIDE THE ITEM (2026-09-02).
+
+     It was an in-flow `::before` on every item but the first, which meant
+     that at 375px — where this strip wraps to two lines — line two opened
+     with a hairline and nothing to its left: "⎸ 12 Closing This Week". The
+     same orphan the role row's meta line had at the other end, and the same
+     fix: take the mark out of flow, put it in the item's own gap, and let
+     the container's `overflow: hidden` clip it wherever the item starts a
+     line. `column-gap` is not applied at the start of a wrapped line, so
+     the first item on line two sits at x=0 and its divider at x=-9. */
+  .stat-strip .ss-item { position: relative;
+    display: inline-flex; align-items: baseline; gap: 6px; }
+  .stat-strip .ss-item:not(:first-child)::before { content: "";
+    position: absolute; left: -9px; top: 50%; margin-top: -7.5px;
+    width: 1px; height: 15px; background: var(--line-strong); }
   .stat-strip .ss-live { align-self: center; margin-right: 2px; }
   .stat-strip b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: var(--fs-m); font-weight: var(--w-bold); color: var(--ink);
@@ -880,16 +914,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .firmcol--picked:hover { border-color: var(--accent);
     box-shadow: inset 0 3px 0 0 var(--accent), var(--shadow-2); }
   .firmcol--picked .firmcol-head { border-bottom-color: var(--accent-line);
-    /* Measured 2026-08-31: a real firm's head carries three lines (name,
-       "TIER · N OPEN", "Tier N") and lands at 126px; Picked for you has
-       always shown two (name, its own single-line "why") and landed at
-       107px, so its first role row started 19px higher than every real
-       firm column beside it in the same grid row -- correct internally,
-       misaligned across the row it visually belongs to. Matched to the
-       real columns' height rather than the reverse: 126px is what most
-       of the founder's own 81 real firms render at, so bringing the
-       shorter one up to meet them moves one column, not eighty. */
-    min-height: 126px; }
+    /* Was 126px, matched to a firm head that carried three rows. Both
+       headers are two rows now (see `.firmcol-head`), so both take the same
+       76px floor and a Picked column with nothing extra to say lands exactly
+       level with its neighbours instead of being padded up to meet them.
+       When it DOES have something extra to say — the cycle sentences below —
+       it grows past them, and that is the honest outcome: those two lines
+       are content this column has and a firm column does not. They cost two
+       rows now rather than the five the founder's screenshot caught. */
+    min-height: 76px; }
   .firmcol--picked .firmcol-name { color: var(--accent-ink); }
   /* Not a link — it names a view, not a firm — so it must not offer a link's
      hover affordance. */
@@ -922,13 +955,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      rather than left as a no-op. */
   /* "N more hidden by your filters" — this column obeys the filters, so it
      owns up to what they removed. */
-  .firmcol-hidden { display: block; font-size: var(--fs-micro); color: var(--ink-3);
-    letter-spacing: 0; text-transform: none; margin-top: 2px; line-height: 1.35; }
+  .firmcol-hidden { grid-column: 2; display: block; font-size: var(--fs-micro);
+    color: var(--ink-3);
+    letter-spacing: 0; text-transform: none; line-height: 1.35; }
   /* "Your cycle hasn't opened yet" — the header sentence that reframes the
      whole column for an early-cycle student. Same quiet voice as the
      hidden-count line: it is context, not an alert. */
-  .firmcol-cycle-note { display: block; font-size: var(--fs-micro); color: var(--ink-3);
-    letter-spacing: 0; text-transform: none; margin-top: 2px; line-height: 1.35;
+  .firmcol-cycle-note { grid-column: 2; display: block; font-size: var(--fs-micro);
+    color: var(--ink-3);
+    letter-spacing: 0; text-transform: none; line-height: 1.35;
     font-style: italic; }
   /* Filtered down to nothing, the column stays (vanishing reads as breakage)
      but shrinks to its header — a 468px empty box would be worse than either.
@@ -945,21 +980,63 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     font-size: var(--fs-micro); }
 
 
-  /* Fixed header height so every firm card's header aligns, regardless of how
-     the name wraps or which pills show. The names hang from the TOP of the
-     head, not from the centre of their own stack: a fixed box is only half
-     the promise, and `align-items: center` broke the other half by making
-     each name's position depend on what came after it. Picked-for-you has no
-     tier pill, so its id block ran 42.2px against a firm's 61.4px and
-     centring pushed its name 9.6px lower than Morgan Stanley's beside it.
-     A two-line firm name would have done the same thing. The logo keeps its
-     own centring, so the tiles stay exactly where they were. */
-  .firmcol-head { display: flex; gap: var(--s3); align-items: flex-start; flex: none;
-    min-height: 92px; padding: var(--s3) var(--s5); border-bottom: 1px solid var(--line); }
+  /* TWO ROWS, NOT A TILE BESIDE A STACK (2026-09-02).
+
+     It was a flex row — a 38px logo, then an id column holding the name, a
+     "GLOBAL BANK · 24 OPEN" line and a "TIER 1" chip. Three short rows next
+     to one tile, and the tile's own `align-self: center` put it level with
+     the SECOND of them, so the logo sat beside the category rather than
+     beside the firm it belongs to. The founder's review: "the top part of
+     these widgets look weird ... make it more visually harmonious." Two
+     things were wrong and both are structural. The tile had nothing to align
+     to (it anchored three lines, so it aligned with none of them), and the
+     text had three left-hand starts at three different heights against one
+     square.
+
+     The grid says what the header means. Row one is the identity: the tile
+     and the name, centred on each other, so a 38px square is level with the
+     words it stands for. Row two is everything else, on ONE line, starting
+     at the name's own x — so the block has a single text rail with the tile
+     hanging off it, which is the alignment a reader can actually follow
+     across thirteen columns.
+
+     `minmax(38px, auto)` on row one: the tile sets the floor and a name that
+     wraps to its two-line clamp takes what it needs, so a long name grows
+     the row instead of overflowing it.
+
+     WHAT THIS KEEPS FROM THE OLD RULE. The promise that every column's name
+     lands on the same baseline whatever follows it — the whole reason the
+     flex version carried `align-items: flex-start`. It is now structural
+     rather than a declaration: the name is in row one and the meta is in row
+     two, so no amount of content below can move the name. The min-height
+     stays for the same reason it always had one, and drops from 92px to 76px
+     because the header genuinely lost a row. */
+  .firmcol-head { display: grid; flex: none;
+    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-rows: minmax(38px, auto) auto;
+    column-gap: var(--s3); row-gap: var(--s1); align-items: center;
+    min-height: 76px; padding: var(--s3) var(--s5); border-bottom: 1px solid var(--line); }
+  /* The id block was a flex column holding the name and the meta; the grid
+     above holds them now, one per row, so this element steps out of the box
+     tree and lets its children BE the grid items. Kept as an element rather
+     than deleted: it is the hook `_columns.html` and `_results.html` both
+     build their headers around, and every test that reads those templates. */
+  .firmcol-id { display: contents; }
+  /* `margin: 0` is load-bearing, not tidiness. This is an h2 and the shared
+     stylesheet gives an h2 20px of vertical margin; inside the old flex
+     column that was collapsing away, and inside the grid it is not. Measured
+     before the reset: row one computed 58px against the 38px tile, so every
+     column's header ran 20px taller than the design and the tile floated in
+     the middle of an empty band. */
+  .firmcol-h { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; }
+  .firmcol-stats { grid-column: 2; grid-row: 2; }
   /* Per-firm tint: --hue comes from the firm_hue filter; saturation and
      lightness are fixed here so every chip shares one muted color family. */
   .firmcol-logo { width: 38px; height: 38px; flex: none; border-radius: 10px;
-    align-self: center;
+    /* Row one, column one — beside the NAME and nothing else. It kept its
+       `align-self: center` and that is now a statement about one row rather
+       than about a three-row stack, which is the whole alignment fix. */
+    grid-column: 1; grid-row: 1; align-self: center;
     /* 31% lightness measured 4.11:1 against the 90% tile on some hues —
        under the 4.5 the monogram's text needs. 24% clears it on every hue
        in the wheel; the tile stays put, so nothing else shifts. */
@@ -988,19 +1065,32 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .firmcol-logo.has-logo img { width: 100%; height: 100%; object-fit: contain;
     display: block; transition: transform var(--t-med); }
   .firmcol:hover .firmcol-logo.has-logo img { transform: scale(1.06); }
-  .firmcol-id { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
   /* Full name, wrapping up to 2 lines — no mid-word "Bank of Amer…" cut. */
   .firmcol-name { font-weight: var(--w-bold); font-size: var(--fs-m); color: var(--ink);
     letter-spacing: -0.01em; line-height: 1.2;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .firmcol-name:hover { color: var(--accent-ink); }
-  .firmcol-meta { font-size: var(--fs-xs); color: var(--ink-3);
-    text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
-  /* Third line: tier · (N closing) · N rolling. */
-  .firmcol-stats { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
+  /* THE WHOLE SECOND ROW: "GLOBAL BANK · 24 OPEN · TIER 1", one line.
+     `flex-wrap: nowrap` and a shrinkable meta are what make that a promise
+     rather than a hope — a wrapped second row would put the header back to
+     three rows and undo the grid above. The meta is the part that gives way
+     (a truncated category is legible; a truncated tier is not a tier), and
+     the tier is `flex: none` for the same reason `.rr-cls` is on the role
+     row: a half-rendered figure reads as a fault. */
+  .firmcol-stats { display: flex; align-items: baseline; gap: var(--s1);
+    flex-wrap: nowrap; min-width: 0;
     font-size: var(--fs-xs); text-transform: uppercase; letter-spacing: 0.04em;
-    color: var(--ink-3); margin-top: 1px; }
-  .firmcol-tier { font-weight: var(--w-bold); color: var(--ink-2); }
+    color: var(--ink-3); }
+  .firmcol-meta { flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--fs-xs); color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  /* The middot that used to be typed into the template between the category
+     and the count now also separates the count from the tier. In the gap, on
+     the FOLLOWING item, so nothing ever renders a trailing one. */
+  .firmcol-stats > *:not(:first-child)::before { content: "·";
+    color: var(--ink-3); margin-right: var(--s1); }
+  .firmcol-tier { flex: none; font-weight: var(--w-bold); color: var(--ink-2); }
   .firmcol-tier.is-mine { color: var(--accent-ink); }
   .fc-stat { display: inline-flex; align-items: center; gap: var(--s2); }
   .fc-stat::before { content: "·"; color: var(--ink-3); }
@@ -1023,8 +1113,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Plain inline here, not the row's inline-flex: an atomic inline box can't
      be split by text-overflow, so the ellipsis would drop a whole reason the
      moment it didn't fit rather than showing as much of it as does. */
-  .firmcol-why > .fc-stat { display: inline; margin-left: var(--s2); }
-  .firmcol-why > .fc-stat::before { margin-right: var(--s2); }
+  /* `--s1`, matching `.firmcol-stats`'s own separator above. At `--s2` a
+     middot inside this line sat 16px from its neighbours while the one
+     between "24 OPEN" and "TIER 1" sat at 8px, so one header line carried
+     two different separator widths. */
+  .firmcol-why > .fc-stat { display: inline; margin-left: var(--s1); }
+  .firmcol-why > .fc-stat::before { margin-right: var(--s1); }
 
   /* The scroll window: standardized role cards, a permanent thin scrollbar. */
   /* Scrolling shadows, so a half-visible card reads as "more below" instead of
@@ -1351,7 +1445,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      history is full of". A one-line meta with `overflow: hidden` was a fixed
      height wearing a different name, and it was clipping. */
   .rr-meta { display: flex; flex-wrap: wrap; align-items: baseline;
-    column-gap: 5px; row-gap: 0;
+    column-gap: 12px; row-gap: 0;
     flex: 1; min-width: 0; overflow: hidden;
     font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.4; }
   /* Each PART stays on one line; only the line of parts wraps. Without this
@@ -1369,11 +1463,32 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      States · Insight Programme 2026" -- five identical marks, two of them
      inside one label, and no way to tell which separated facts. The pill era
      drew a border around each fact and hid that; the row has no border to
-     hide behind. A vertical hairline is the ledger's own column rule, cannot
-     be confused with punctuation inside a label, and belongs to the item it
-     follows, so no line ever opens with it. */
-  .rr-meta > *:not(:last-child) { padding-right: 6px;
-    border-right: 1px solid var(--line-strong); }
+     hide behind. A vertical hairline is the ledger's own column rule and
+     cannot be confused with punctuation inside a label.
+
+     IT LEADS ITS ITEM AND IS CLIPPED WHERE THAT ITEM OPENS A LINE
+     (2026-09-02). It used to trail — `:not(:last-child)` with a
+     `border-right` — which closed the stray-middot-opens-line-two bug and
+     opened its mirror image: a wrapped line ENDED with a rule and nothing
+     after it. The founder's review named it, "trailing pipes with nothing
+     after them". Both are one bug. A rule owned by the item on its left is
+     orphaned by a break after it; a rule owned by the item on its right is
+     orphaned by a break before it.
+
+     The asymmetry that settles it: the second kind can be CLIPPED and the
+     first cannot. A leading rule sits in its item's own negative margin, so
+     on the first item of a wrapped line it lands at x=-6, outside
+     `.rr-meta`'s padding box — and `.rr-meta` is already `overflow: hidden`
+     for its own reasons. A trailing rule sits at the end of a line, in the
+     slack that made the line wrap, with nothing to clip against.
+
+     The arithmetic: `column-gap: 12px` above, `margin-left: -6px`,
+     `padding-left: 6px`. Mid-line the rule lands exactly halfway between two
+     items, 6px of air each side, which is what it had before. Line-leading,
+     the border box starts at -6 and the content at +1, so a wrapped line is
+     indented by one pixel and the rule is not drawn. */
+  .rr-meta > *:not(:first-child) { margin-left: -6px; padding-left: 6px;
+    border-left: 1px solid var(--line-strong); }
   .rr-firm { font-weight: var(--w-med); color: var(--ink-2); flex: none; }
   /* THE ONE TRUNCATION POINT (see the contract note below `.rr-fact`).
      205px is off the measured distribution of every `.rr-loc` on the
@@ -1407,14 +1522,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      words are the why -- so a fragment of them is worse than a wrapped line
      carrying all of them. */
   .rr-undated { flex: none; }
-  /* `flex: none` like every other part of the line, and NOT a truncation
-     rule of its own: the single `.rr-loc` cap above is the one thing on this
-     line allowed to cut. A second, independent shrink rule here is precisely
-     the "FOUR separate mid-word ellipses" regression that comment records.
-     Being rendered last no longer means being the thing that gives way --
-     under `:last-child` it did, which is how the open-run figure reached 0px on
-     a live row. */
-  .rr-open { flex: none; }
+  /* `.rr-open` was here. The open-run figure moved to the deadline column's
+     `title` on 2026-09-02 (see `_rolecard.html`), no template renders the
+     class any more, and the rule is deleted rather than left orphaned --
+     the same call this file made for `.fc-closing`, and for the same reason:
+     a class that still styles is an invitation to put the span back without
+     re-reading why it left. */
   /* The one fact about the READER rather than about the posting, and so
      the only one that keeps colour now that the pills are gone. */
   .rr-vd { flex: none; font-weight: var(--w-med); }
@@ -1860,7 +1973,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      a number, not a warning. Same `.scope-line` family the firm page uses
      for its own "what this scope is not showing" sentence, which is the
      same kind of claim. */
-  .scope-foot { margin: calc(var(--s3) * -1) 0 var(--s3); font-size: var(--fs-xs);
+     THE NEGATIVE TOP MARGIN IS GONE (2026-09-02) and it was a real overlap,
+     not a tight gap. This rule read `margin: calc(var(--s3) * -1) 0 var(--s3)`
+     — a -12px pull written to cancel `.stat-strip`'s own 12px bottom margin.
+     But `.board-state .stat-strip` overrides that margin to 6px, so the pull
+     was 6px larger than the thing it was cancelling: measured live at 1280px,
+     the strip's box ran 412..431 and this footnote's box started at 425,
+     INSIDE it. The founder's words were "crammed directly beneath with no
+     breathing room"; the boxes were literally on top of each other.
+
+     The rhythm is stated here instead of cancelled here. `--s2` under the
+     strip, because a footnote belongs to the number above it and must read
+     as attached to it, and `.board-state`'s own `--s4` still owns the wider
+     boundary into the firm columns. Nothing left subtracts anything. */
+  .scope-foot { margin: 0; font-size: var(--fs-xs);
     color: var(--ink-3); }
   /* Spacing only. The separator keeps `.scope-sep`'s own `--ink-3`: pushing
      it to `--line-strong` measured 1.89:1 on dark, which put a NEW row in
@@ -1871,27 +1997,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .scope-foot .scope-sep { margin: 0 6px; }
 
   /* ======================================================================
-     "PICKED" — the word that says this column is not a firm.
+     `.fc-eyebrow` — the word "PICKED" — was here and is gone (2026-09-02).
 
-     Three things were supposed to say it: the accent top edge, the star
-     tile, and the accent border. On the founder's own board all twelve firm
-     columns are `.is-mine`, so they wear the same accent border, and the
-     star is the only signal left carrying real weight. A word cannot be
-     confused with a tint.
+     It was added to say "this column is not a firm" at a moment when the
+     star tile was silently drawing a monogram chip (a one-class cascade bug,
+     fixed in the same pass: see `.firmcol-logo.firmcol-logo--picked` above
+     and `test_the_star_tile_actually_wins_the_cascade`). With the tile
+     actually rendering on `--accent` and the heading on `--accent-ink`,
+     the word sat directly under a heading reading "Picked for you" and told
+     a reader nothing the heading had not. The founder's review named it as
+     redundancy; the rule is removed rather than left orphaned so nobody
+     reintroduces the word by reaching for a class that still styles.
 
-     It sits IN `.firmcol-stats`, in the slot a firm column spends on its
-     tier — not on a line of its own above the name. That was the first cut
-     and it measured 141px of header against every neighbour's 126, pushing
-     this column's first role row 15px below the row it belongs to: the
-     exact misalignment `.firmcol-head` above pins a min-height to prevent.
-     Mono, uppercase and accent, the same voice as `.firmcol-tier.is-mine`
-     beside it, so the two headers answer the same question in the same
-     place. `flex: none` keeps `.firmcol-why` ellipsising around it rather
-     than squeezing it, exactly as it does around a tier pill. */
-  .fc-eyebrow { flex: none; font-family: var(--font-mono);
-    font-size: var(--fs-nano); font-weight: var(--w-bold);
-    letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--accent-ink); line-height: 1.2; }
+     ====================================================================== */
 
   /* ======================================================================
      DARK — the tiles that were painted in light-mode literals.

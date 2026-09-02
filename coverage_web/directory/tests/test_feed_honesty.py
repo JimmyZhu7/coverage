@@ -599,7 +599,12 @@ def test_a_stated_window_gets_a_personal_verdict(client, student):
     _grad_role(firm, ["2027", "2028"], "2027–2028", title="Other Year Intern")
     client.force_login(student)
     body = client.get("/opportunities/").content.decode()
-    assert "Your year (2029)" in body
+    # "Your year", not "Your year (2029)": the parenthesised figure was the
+    # READER's own class year, and the row prints the posting's window beside
+    # it, so the label named a year the line had already named. Cut 2026-09-02
+    # in the founder's copy review; the verdict itself is unchanged.
+    assert "Your year" in body
+    assert "Your year (2029)" not in body
     assert "For 2027–2028 grads" in body
 
 
@@ -935,17 +940,25 @@ def test_a_blocking_year_verdict_does_not_repeat_the_window_beside_itself(client
 
 @pytest.mark.django_db
 def test_a_non_blocking_year_verdict_keeps_the_stated_window(client, student):
-    """year_ok says "Your year (2029)" and never repeats the window, so the
-    fact chip is the ONLY place the posting's own stated years appear. It must
-    survive — suppressing it there would delete information rather than a
-    duplicate."""
+    """year_ok says "Your year" and names no year at all, so the fact chip is
+    the ONLY place the posting's own stated years appear. It must survive —
+    suppressing it there would delete information rather than a duplicate.
+
+    REWRITTEN 2026-09-02. The label used to read "Your year (2029)" and this
+    docstring used to say it "never repeats the window", which was true and
+    was not the whole story: the bracketed figure was the reader's own class
+    year, so the row still printed a year twice in two formats, and on the
+    founder's board that was one of the things pushing the meta line to three
+    rows. The label dropped the brackets; what this test guards is unchanged
+    and is now unambiguous."""
     firm = Firm.objects.create(slug="bofa", name="Bank of America")
     _grad_role(firm, ["2029"], "2029", title="Mine Summer Analyst")
     client.force_login(student)
     body = client.get("/opportunities/").content.decode()
     card = body[body.index("Mine Summer Analyst"):]
     card = card[:card.index("</article>")] if "</article>" in card else card[:2000]
-    assert "Your year (2029)" in card
+    assert "Your year" in card
+    assert "Your year (2029)" not in card
     assert "Grad 2029" in card
 
 
