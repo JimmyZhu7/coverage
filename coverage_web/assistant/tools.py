@@ -94,7 +94,9 @@ from coverage_domain.pipeline import CHANNELS, THREAD_STATES, TOUCH_TRANSITIONS,
 from crm import campaigns as crm_campaigns, services
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
 from crm.today import (
-    QUEUE_SILENT_THREAD_STATES, TUNABLE_CADENCE_PARAMS, _build_actions,
+    BLACKOUT_HOLIDAY, HOLIDAY_BLACKOUT_END, HOLIDAY_BLACKOUT_START,
+    QUEUE_SILENT_THREAD_STATES, TUNABLE_CADENCE_PARAMS, _blackout_resumes,
+    outreach_blackout, today_plan,
 )
 from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS, _calendar_days_ago
 from crm.views import _display_note
@@ -326,7 +328,16 @@ TOOL_SCHEMAS: list[dict] = [
             "contact next, what action it wants, and the reason it gives. "
             "This is the same ranked list the Today page shows — use it for "
             "any 'who should I follow up with' or 'what should I do today' "
-            "question rather than reasoning it out from contacts yourself."
+            "question rather than reasoning it out from contacts yourself. "
+            "`lane` says WHERE the page puts each row and is the answer to "
+            "'why is X not on today's plan': `today` is in the day's plan on "
+            "screen, `up_next` is queued behind the day's cap and is NOT owed "
+            "today, `still_open` is an old question the plan has stopped "
+            "budgeting for, `park` is the page suggesting the student stop "
+            "chasing that person rather than write to them. `paced_by` names "
+            "the firm whose daily contact budget is already spent, and is "
+            "null on every row that is not paced — quote it when the student "
+            "asks why somebody is waiting."
         ),
         "strict": True,
         "input_schema": _schema({}),
@@ -478,11 +489,24 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "get_calendar",
         "description": (
             "Coffee chats and events on the student's calendar, soonest first. "
-            "Only what is actually scheduled — this is not the deadline board."
+            "Only what is actually scheduled — this is not the deadline board. "
+            "Chats that were called off are LEFT OUT unless you pass "
+            "include_cancelled, and every row carries `cancelled` so a row "
+            "you did ask for is never read as a chat that is still on."
         ),
         "strict": True,
         "input_schema": _schema(
-            {"days_ahead": {"type": "integer", "description": "Look-ahead window in days. Defaults to 14."}}
+            {
+                "days_ahead": {"type": "integer", "description": "Look-ahead window in days. Defaults to 14."},
+                "include_cancelled": {
+                    "type": "boolean",
+                    "description": (
+                        "Include chats that were cancelled. Defaults to false. "
+                        "Pass true only when the student asks about a chat "
+                        "that was called off."
+                    ),
+                },
+            }
         ),
     },
     {
@@ -523,7 +547,14 @@ TOOL_SCHEMAS: list[dict] = [
             "(returns its weekday and days_until, negative if already past) "
             "OR a holiday name: labor_day, mlk_day, memorial_day, "
             "independence_day, thanksgiving, christmas, new_year, "
-            "lunar_new_year (returns that holiday's next upcoming date). "
+            "lunar_new_year (returns that holiday's next upcoming date), OR "
+            "holiday_blackout for the window in which the Today page stops "
+            "asking for outreach. Every dated answer also carries "
+            "`outreach_blackout`: \"holiday\" or \"weekend\" on a day the "
+            "queue holds new threads back, null on an ordinary working day, "
+            "plus `outreach_resumes` naming the day it starts asking again. "
+            "Read it before telling a student to email anyone on a given "
+            "date — the page and your answer have to agree about December. "
             "Call this instead of stating any calendar date, a 'days until' "
             "figure, or a holiday's date from memory — that kind of "
             "confident, wrong answer is the one error this product cannot "
@@ -537,7 +568,8 @@ TOOL_SCHEMAS: list[dict] = [
                     "description": (
                         "A YYYY-MM-DD date, or one of: labor_day, mlk_day, "
                         "memorial_day, independence_day, thanksgiving, "
-                        "christmas, new_year, lunar_new_year."
+                        "christmas, new_year, lunar_new_year, "
+                        "holiday_blackout."
                     ),
                 }
             },
@@ -658,7 +690,11 @@ TOOL_SCHEMAS: list[dict] = [
             "and check firm_text is not empty whenever the student named an "
             "employer — 'Marcus Lee, Associate at Evercore' means "
             "firm_text='Evercore', not firm_text left blank because the "
-            "sentence was 'about' the person rather than the firm."
+            "sentence was 'about' the person rather than the firm. The firm "
+            "text is matched against Coverage's own directory, so a named "
+            "employer puts the person ON that firm's coverage board and gives "
+            "them a market; `firm_on_board` in the result says whether it "
+            "matched."
         ),
         "strict": True,
         "input_schema": _schema(
@@ -786,10 +822,28 @@ def _get_today_queue(user, _args) -> dict:
     """The cadence queue, unchanged. `crm.today._build_actions` already ranks,
     labels, and explains every row; re-deriving any of that here would let the
     advisor and the Today page disagree about the same student's week, which
-    is worse than either being wrong on its own."""
-    actions, contacts = _build_actions(user)
+    is worse than either being wrong on its own.
+
+    AND NOW THE PLAN, NOT ONLY THE QUEUE. `crm.today.today_plan` runs the same
+    `plan_split` the cockpit does, so `lane` and `paced_by` on each row are
+    the page's own answers rather than a second derivation. Before this the
+    payload carried neither, so the model could not tell a card in the day's
+    plan from one the cap is holding back, and could not answer "why is X not
+    on today's plan" at all: measured on the founder's account 2026-09-02,
+    3 of 21 rows were in the plan, 18 were held and 1 of those was held by
+    Goldman Sachs's own daily contact budget — none of which reached the
+    model. (`audit-personalization-networking.md §1` Q1 measured 36 of 44
+    paced on the same account a day earlier; pacing is the common case, not
+    the corner one.)
+
+    The rows come back in the PAGE's order (`_today_sort_key`) rather than the
+    engine's, which is what the tool description has always claimed. The
+    engine's order is cadence priority then firm alphabet, and it was putting
+    cold strangers above people who had written back.
+    """
+    actions, contacts, plan = today_plan(user)
     rows = []
-    for a in actions[:MAX_ROWS]:
+    for a in plan["ordered"][:MAX_ROWS]:
         c = a["contact"]
         rows.append(
             {
@@ -800,6 +854,14 @@ def _get_today_queue(user, _args) -> dict:
                 "firm": _s(c.get("firm_text") or "", 120),
                 "warmth": c.get("warmth"),
                 "thread_state": c.get("thread_state"),
+                # Where the Today page puts this card — `crm.today.plan_split`
+                # stamps it, nothing here decides it (P5).
+                "lane": a.get("plan_lane"),
+                # The firm whose daily contact budget is spent, or None. The
+                # `reason` above already discloses it in a sentence; this is
+                # the same fact as a field, so the model can answer "who is
+                # waiting on Goldman's pace" without parsing prose.
+                "paced_by": a.get("paced_by"),
                 "reason": _s(a.get("reason")),
                 # BUSINESS days, not calendar — `last_business_days` is the
                 # cadence engine's own reasoning (`crm.today`/`_build_actions`),
@@ -916,6 +978,61 @@ def _search_contacts(user, args) -> dict:
     return result
 
 
+# Outbound kinds a reply can answer. `reping` is deliberately in: it is a
+# send, and a reply landing after one is still this person replying. The
+# clock-silent kinds (`cadence._CLOCK_SILENT_KINDS`) are excluded by
+# construction — a park is not an email and an inbound bulk send is not one
+# of ours — and so are `chat` and `chat_scheduled`, which are meetings.
+_REPLY_TRIGGER_KINDS = frozenset({"outreach", "follow_up", "thank_you", "reping"})
+
+# How many reply pairs it takes before a median is a median. Two numbers have
+# a midpoint, not a habit, and "she usually replies in half a day" said off
+# one exchange is the confident-and-thin claim P1 exists to stop. Measured on
+# the founder's live account 2026-09-02: 16 of 265 contacts have at least one
+# pair (18 pairs in total, median 0.71 days) and NONE has three, so this
+# field is dark on his data today. That is the intended failure direction —
+# the number arrives when the history justifies it — and the floor is worth
+# revisiting against a student who actually runs long threads.
+MIN_REPLY_PAIRS = 3
+
+
+def _reply_gaps(user, contact_id: int) -> list[float]:
+    """Days between each outbound touch and the reply that answered it.
+
+    Pairs strictly: one send is answered by at most one reply, and a reply
+    with no send before it is not a reply to anything we did (an inbound
+    cold email is a real thing and counting it as a 0-day turnaround would
+    invent a statistic out of somebody else's initiative).
+    """
+    gaps: list[float] = []
+    pending = None
+    for kind, ts in (
+        Touch.objects.for_user(user)
+        .filter(contact_id=contact_id)
+        .order_by("ts")
+        .values_list("kind", "ts")
+    ):
+        if kind in _REPLY_TRIGGER_KINDS:
+            pending = ts
+        elif kind == "reply_received" and pending is not None:
+            gaps.append((ts - pending).total_seconds() / 86400)
+            pending = None
+    return gaps
+
+
+def _median_days(gaps: list[float]) -> float:
+    """The middle gap, to one decimal. Median rather than mean because one
+    three-week reply in an otherwise same-day thread is exactly the outlier a
+    mean would let decide the number."""
+    ordered = sorted(gaps)
+    mid = len(ordered) // 2
+    value = (
+        ordered[mid] if len(ordered) % 2
+        else (ordered[mid - 1] + ordered[mid]) / 2
+    )
+    return round(value, 1)
+
+
 def _get_contact(user, args) -> dict:
     contact = (
         Contact.objects.for_user(user)
@@ -955,6 +1072,7 @@ def _get_contact(user, args) -> dict:
         }
         for t in touches
     ]
+    pairs = _reply_gaps(user, contact.id)
     return {
         "contact_id": contact.id,
         "name": _s(contact.name, 120),
@@ -986,6 +1104,17 @@ def _get_contact(user, args) -> dict:
         # and the model cannot avoid resending what it was never shown.
         "my_opener": _s(contact.opener),
         "recent_subjects": recent_subjects,
+        # HOW FAST THIS PERSON WRITES BACK. Present only past
+        # `MIN_REPLY_PAIRS` — see `_reply_gaps`. `reply_pairs` goes out
+        # either way so the absence is explicable ("two replies on record,
+        # not enough to call it a habit") rather than silent, and so a median
+        # that IS present is never read as a stronger claim than its sample
+        # supports.
+        "reply_pairs": len(pairs),
+        **(
+            {"median_reply_days": _median_days(pairs)}
+            if len(pairs) >= MIN_REPLY_PAIRS else {}
+        ),
         "recent_interactions": history,
     }
 
@@ -1240,23 +1369,50 @@ def _get_my_firms(user, _args) -> dict:
 
 
 def _get_calendar(user, args) -> dict:
+    """What is actually on the calendar — and, by default, only what is
+    still on.
+
+    A CANCELLED CHAT IS NOT AN APPOINTMENT. `CalendarEvent.cancelled_at` is
+    set when a `METHOD:CANCEL` invite retires a captured chat, and the row
+    survives on purpose (the model's own comment argues it: a delete is a
+    ghost on a twice-daily sync loop). Every surface that says what is
+    HAPPENING drops those rows — `crm.today._schedule`, and so the day bar
+    and the chat-prep card — and every surface that is a RECORD keeps them
+    and MARKS them: the month grid strikes them through, the .ics feed
+    retitles them "Cancelled: ...". This tool was in neither camp. It
+    returned the row with `kind: "chat"` and a "Cancelled: " prefix buried
+    in the title as the only tell, which is a formatting convention, not a
+    field — and a model reading `kind: chat, starts_at: Thursday 2pm` has
+    every reason to tell the student they have a chat on Thursday.
+    Measured on the founder's account 2026-09-02: 0 future events and 0
+    cancelled rows all-time, so nothing was mis-stated live; the payload was
+    wrong by construction, which is the kind of defect that only shows up on
+    the day it matters.
+
+    So: filtered by default, `include_cancelled` for the explicit ask, and
+    `cancelled` on every row either way so the two cases can never be
+    confused by a caller that forgot which argument it passed.
+    """
     days = args.get("days_ahead")
     days = days if isinstance(days, int) and 1 <= days <= 180 else 14
+    include_cancelled = args.get("include_cancelled") is True
     now = timezone.now()
-    events = list(
-        CalendarEvent.objects.for_user(user)
-        .filter(starts_at__gte=now, starts_at__lte=now + timedelta(days=days))
-        .select_related("contact")
-        .order_by("starts_at")[:MAX_ROWS]
+    qs = CalendarEvent.objects.for_user(user).filter(
+        starts_at__gte=now, starts_at__lte=now + timedelta(days=days)
     )
+    if not include_cancelled:
+        qs = qs.filter(cancelled_at__isnull=True)
+    events = list(qs.select_related("contact").order_by("starts_at")[:MAX_ROWS])
     return {
         "window_days": days,
+        "includes_cancelled": include_cancelled,
         "events": [
             {
                 "title": _s(e.title, 160),
                 "starts_at": timezone.localtime(e.starts_at).isoformat(),
                 "all_day": e.all_day,
                 "kind": e.kind,
+                "cancelled": e.cancelled_at is not None,
                 "with_contact": _s(e.contact.name, 120) if e.contact_id else None,
                 "contact_id": e.contact_id,
                 "location": _s(e.location, 120),
@@ -1334,6 +1490,26 @@ def _get_situation(user, _args) -> dict:
             row["deadline_source"] = e.get("deadline_source")
         elif row["kind"] == "new_role_at_known_firm":
             row["location"] = _s(e.get("location"), 120)
+            # HOW NEW IS "NEW". The event used to say a firm had opened
+            # something and nothing else, so the model had no way to tell a
+            # posting that appeared this morning from one a week old — and
+            # the measured lag is real: the founder's three rows on
+            # 2026-09-01 were 4.4 to 5.4 days past `first_seen`
+            # (`audit-opportunities.md §C2`). Both the date and the day count
+            # go out: the date so nothing has to be recomputed, the count
+            # because that is the sentence a student reads. Absent when the
+            # row carries no `first_seen` at all — no `first_seen`, no age,
+            # rather than an age of zero (P1).
+            first_seen = e.get("first_seen")
+            if first_seen is not None:
+                seen_date = timezone.localtime(first_seen).date()
+                row["first_seen"] = seen_date.isoformat()
+                row["first_seen_days_ago"] = (_today(user) - seen_date).days
+            # How many OTHER fresh roles at that firm this one row stands in
+            # for — `assistant.situation` folds to one card per firm, and a
+            # model told "a role" about a firm that opened four has been
+            # handed the wrong size of news.
+            row["folded_count"] = e.get("folded_count") or 0
         events.append(row)
     return {"total": len(events), "events": events}
 
@@ -1427,6 +1603,32 @@ def _lunar_new_year(year: int) -> date:
         ) from None
 
 
+# The one `query` value that is neither a date nor a public holiday: the
+# product's OWN quiet window, which is a fact about what Coverage will ask
+# for and not about anybody's calendar.
+BLACKOUT_QUERY = "holiday_blackout"
+
+
+def _blackout_facts(day: date) -> dict:
+    """Whether the Today page would hold outreach back on `day`, in
+    `crm.today`'s own words.
+
+    Never a sentence written here. `outreach_blackout` returns "holiday",
+    "weekend" or None, and `_blackout_resumes` names the day the page starts
+    asking again — both imported, so this tool and the card the student is
+    looking at cannot describe the same Thursday differently (P5). `None` on
+    an ordinary weekday, and the resume key is omitted entirely then rather
+    than sent empty.
+    """
+    blackout = outreach_blackout(day)
+    if not blackout:
+        return {"outreach_blackout": None}
+    return {
+        "outreach_blackout": blackout,
+        "outreach_resumes": _blackout_resumes(day, blackout),
+    }
+
+
 # name -> (label shown to the model, year -> date function)
 HOLIDAY_RULES = {
     "labor_day": ("Labor Day (US)", _labor_day),
@@ -1446,13 +1648,50 @@ def _date_facts(user, args) -> dict:
     if it's already past) or one of `HOLIDAY_RULES`' keys, which returns that
     holiday's NEXT upcoming occurrence — this year's if it hasn't happened
     yet, otherwise next year's, so "when is Labor Day" always means the one
-    still ahead."""
+    still ahead.
+
+    AND WHETHER THE PAGE WOULD ASK FOR OUTREACH THAT DAY. `crm.today.
+    outreach_blackout` is the product's one definition of "not a day to start
+    an email thread" — Dec 20 through Jan 2, and any weekend — and it shipped
+    at the view level in `03e1253`, which left the advisor and the queue
+    disagreeing about December: the Today page holds every cold card and says
+    why, while this tool would happily answer "Christmas Eve is 113 days
+    away" with nothing to suggest the product itself would not send then.
+    Imported, never restated (P5): the words "holiday" and "weekend" and the
+    window they come from are that function's, not this module's, so the
+    string the model quotes is the same one the card carries.
+    """
     raw = _s(args.get("query"), 40)
     if not raw:
         raise ToolError("query is required — a YYYY-MM-DD date, or a holiday name.")
 
     today = _today(user)
     base = {"today": today.isoformat(), "today_weekday": today.strftime("%A")}
+
+    key = raw.lower().strip().replace(" ", "_").replace("-", "_")
+    if key == BLACKOUT_QUERY:
+        # The window itself, for "when should I stop emailing over Christmas".
+        # Both edges are read off `crm.today`'s own constants and the resume
+        # day off its own function, so nothing here can name a different
+        # December from the one the queue observes. The pair below is the
+        # window we are IN, or the next one: Jan 1 and Jan 2 sit inside a
+        # window that opened last December, which is the only case that needs
+        # saying out loud.
+        if today <= date(today.year, *HOLIDAY_BLACKOUT_END):
+            start = date(today.year - 1, *HOLIDAY_BLACKOUT_START)
+            end = date(today.year, *HOLIDAY_BLACKOUT_END)
+        else:
+            start = date(today.year, *HOLIDAY_BLACKOUT_START)
+            end = date(today.year + 1, *HOLIDAY_BLACKOUT_END)
+        return {
+            **base,
+            "holiday": BLACKOUT_QUERY,
+            "holiday_label": "Holiday outreach blackout",
+            "starts": start.isoformat(),
+            "ends": end.isoformat(),
+            "outreach_resumes": _blackout_resumes(end, BLACKOUT_HOLIDAY),
+            "outreach_blackout": outreach_blackout(today),
+        }
 
     try:
         target = date.fromisoformat(raw)
@@ -1465,13 +1704,14 @@ def _date_facts(user, args) -> dict:
             "date": target.isoformat(),
             "weekday": target.strftime("%A"),
             "days_until": (target - today).days,
+            **_blackout_facts(target),
         }
 
-    key = raw.lower().strip().replace(" ", "_").replace("-", "_")
     if key not in HOLIDAY_RULES:
         raise ToolError(
             f"{raw!r} is not a YYYY-MM-DD date or a holiday this tool knows. "
-            f"Known holidays: {', '.join(sorted(HOLIDAY_RULES))}."
+            f"Known holidays: {', '.join(sorted(HOLIDAY_RULES))}, "
+            f"{BLACKOUT_QUERY}."
         )
     label, rule = HOLIDAY_RULES[key]
     occurrence = rule(today.year)
@@ -1484,6 +1724,7 @@ def _date_facts(user, args) -> dict:
         "date": occurrence.isoformat(),
         "weekday": occurrence.strftime("%A"),
         "days_until": (occurrence - today).days,
+        **_blackout_facts(occurrence),
     }
 
 
@@ -1784,46 +2025,77 @@ def _add_contact(user, args) -> dict:
     carries; the rest is exactly the friction the quick-add path already
     decided a first capture doesn't need.
 
-    A same-name contact already in the network is refused rather than
-    duplicated: "add Jane Chen" said about someone already tracked is the
-    common case, and a second Jane Chen splits a history in two — the same
-    fork `crm.views`' archive comment describes, arriving through a
-    different door. The refusal names the existing id so the model can talk
-    about the person the student already has.
+    A person already in the network is refused rather than duplicated: "add
+    Jane Chen" said about someone already tracked is the common case, and a
+    second Jane Chen splits a history in two — the same fork `crm.views`'
+    archive comment describes, arriving through a different door. The refusal
+    names the existing id so the model can talk about the person the student
+    already has.
+
+    WHO COUNTS AS ALREADY THERE IS `capture.discovery._match_existing`, not a
+    `name__iexact` over live rows. That comparison was wrong in both
+    directions at once. It missed the corporate address-book spellings every
+    other door in this app already recognises — "Chen, Jane" and a middle
+    initial are the same person to `names_equivalent` and were two people
+    here — and it looked only at unarchived rows, so a contact the student
+    had archived came back as a SECOND card with the history stranded on the
+    first. `_match_existing` is the single matcher `consider_finding`,
+    `accept`, `restore` and mailfacts already share, it reads archived rows
+    too, and it abstains rather than picking when two rows answer to one
+    name; abstaining here means "add them", which is the same false-split
+    the merge panel is built to offer back, never a false merge.
+
+    AND THE FIRM IS RESOLVED. Every row this tool wrote landed off the
+    coverage board: `firm_text` was stored verbatim and `firm_id` left null,
+    so the contact never appeared on their firm's page, never counted toward
+    that firm's coverage, and — because `Contact.resolve_region` reads the
+    FIRM's markets — carried a blank region. `accounts.services.
+    match_firm_text` is the CSV importer's own rule, imported rather than
+    restated (P5), and the region then falls out of `Contact.save()` with no
+    help from here. Unmatched text still writes `firm_text` exactly as
+    before: a firm the directory does not carry is a real answer.
+
+    Founder rows affected today: 0. The tool has never been used, on his
+    account or the demo's (measured 2026-09-02), so this is a defect fixed
+    before it wrote anything, not one repaired after.
     """
     from django.core.exceptions import ValidationError
+
+    from accounts.services import match_firm_text
+    from capture.discovery import _match_existing
 
     name = _s(args.get("name"), 255)
     if not name:
         raise ToolError("name is required.")
 
-    existing = (
-        Contact.objects.for_user(user)
-        .filter(archived=False, name__iexact=name)
-        .first()
-    )
+    email = _s(args.get("email"), 254)
+    existing = _match_existing(user, email, name)
     if existing is not None:
         return {
             "added": False,
             "already_exists": True,
+            "archived": existing.archived,
             "contact_id": existing.id,
             "name": _s(existing.name, 120),
             "firm": _firm_name(existing),
             "instruction": (
-                "Someone with this name is already in the student's network, "
-                "so nothing was added. Tell them that and say where the "
-                "relationship stands rather than saying you added anyone. If "
-                "it is genuinely a different person with the same name, they "
-                "can add them on the Network page."
+                "This person is already in the student's network, so nothing "
+                "was added. Tell them that and say where the relationship "
+                "stands rather than saying you added anyone. If the row is "
+                "archived, say so and point them at the contact's own page to "
+                "bring it back. If it is genuinely a different person with "
+                "the same name, they can add them on the Network page."
             ),
         }
 
+    firm_text = _s(args.get("firm_text"), 255)
     contact = Contact(
         user=user,
         name=name,
-        firm_text=_s(args.get("firm_text"), 255),
+        firm=match_firm_text(firm_text),
+        firm_text=firm_text,
         role=_s(args.get("role"), 255),
-        email=_s(args.get("email"), 254),
+        email=email,
         source="assistant",
     )
     try:
@@ -1841,6 +2113,11 @@ def _add_contact(user, args) -> dict:
         "contact_id": contact.id,
         "name": contact.name,
         "firm": _firm_name(contact),
+        # Whether the row landed ON the coverage board. True means the firm
+        # text resolved to a directory firm, so this person now counts toward
+        # that firm's coverage and shows on its page; False means the text is
+        # stored as typed and nothing was invented to make it match.
+        "firm_on_board": contact.firm_id is not None,
         "role": contact.role,
         "region": contact.region or "unknown",
         "undo": "The student can edit or archive this on the contact's page in Coverage.",

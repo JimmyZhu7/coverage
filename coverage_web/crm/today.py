@@ -1061,6 +1061,14 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
     for a in actions:
         a["firm_paced"] = False
         a["pace_note"] = ""
+        # WHOSE budget is spent, as a bare label rather than a sentence.
+        # `pace_note` is copy for a card; `paced_by` is the same fact for
+        # anything that needs to name the firm without parsing the sentence
+        # back out of it (`assistant.tools.get_today_queue`, so the advisor
+        # can answer "why is X not on today's plan" with the firm's own
+        # name). Set at the one place the decision is made, so the label and
+        # the note can never disagree about which firm is at pace (P5).
+        a["paced_by"] = None
         key = _pace_firm_key(a["contact"])
         if key is None:
             continue
@@ -1092,6 +1100,7 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
         # able to see at a glance that the note is not about them.
         market = _PACE_MARKET_LABELS.get(key[2], key[2].upper()) if len(key) == 3 else ""
         where = f"{firm} ({market})" if market else firm
+        a["paced_by"] = where
         a["pace_note"] = (
             f"{where} already has {budget[key]} today, "
             "so this one is better tomorrow"
@@ -2703,28 +2712,249 @@ def _quiet_line(wave: dict | None) -> str:
     return f"Quiet on the cadence. Next wave: {n} follow-up{plural} {verb} {when}."
 
 
-def _cockpit_context(user) -> dict:
-    """The Today cockpit: a capped, momentum-ordered daily plan in three
-    semantic lanes, an honest held-back remainder, a weekly pace figure, the
-    chats that are already on the calendar, and a recent-activity feed."""
-    today = timezone.localdate()
-    actions, contacts = _build_actions(user)
-    # The bench (see `_opening_bench`'s module note above it): at most one
-    # parked chatted/advocate contact, drawn back into view by a live opening
-    # at their firm today. Computed off `actions`/`contacts` already loaded
-    # above — no re-run of the cadence engine.
-    bench = _opening_bench(user, contacts, actions, today)
-    pace = _pace(user, today)
-    cap = _daily_cap(pace["goal"], pace["done"], today)
+# ---------------------------------------------------------------------------
+# The Gaps strip — three things a quiet Today page measured and never said.
+#
+# THE DEFECT. On the night of 2026-09-01 the founder's Today page recommended
+# chasing eight people he had parked hours earlier, while three true and
+# actionable facts sat one query away (`audit-ai-mechanisms.md §3`, "What
+# Today does NOT recommend that it could"):
+#
+#   1. 25 of his 54 tiered firms have ZERO contacts, two of them tier 1
+#      (Centerview, RBC Capital Markets), and RBC has a live role with a
+#      deadline and nobody there to ask about it.
+#   2. Both of his two advocates are parked, which means the cadence engine's
+#      `advocate_touch_min_weeks` branch cannot fire on either. The strongest
+#      relationships in the network are the ones the queue has gone silent
+#      about, and nothing anywhere says so.
+#   3. Whether a role that clears his track, region, level and eligibility is
+#      closing soon and unsaved had never been checked. It returned 0 of 7 on
+#      the night, so nothing was lost — but the check is one query and the
+#      day it returns 1 is the day it matters.
+#
+# IT MARKS, IT DOES NOT FILTER (P4). Every row is a ledger line naming its own
+# source. Nothing here changes the queue, hides a card, or writes anything.
+#
+# AND IT COSTS A BUSY DAY NOTHING. Every query below is behind the quiet
+# branch in `_cockpit_context` — the same gate `_starter_seeds` and
+# `_next_wave` already sit behind — so a student with work on the page pays
+# for none of it. `audit-perf-tests.md §1` measures `_cockpit_context` at 44
+# queries and 96-149ms, and that number is unchanged on any day the plan has
+# a card in it.
+# ---------------------------------------------------------------------------
+GAPS_MAX = 3
 
-    for a in actions:
-        a["touch_kind"] = _ACTION_TOUCH.get(a["action"])
-        # Whether the card may offer Snooze/Skip. A card whose action is
-        # snooze-exempt must not draw the buttons: writing snoozed_until on
-        # an exempt card is worse than a no-op, it silently snoozes the
-        # contact's OTHER actions while the visible card stays put.
-        a["snoozable"] = a["action"] not in _SNOOZE_EXEMPT_ACTIONS
+# How many dated postings a gap row reads before it gives up looking for one
+# that is FOR this student. The queryset is deadline-ordered, so the first
+# match is always the soonest; the cap is what stops a board with thousands
+# of live rows turning a quiet-day nicety into a full-table scan. 200 is the
+# whole closing-soon window several times over on the live board.
+GAP_ROLE_SCAN = 200
 
+
+def _relevant(user, opportunity, profile) -> bool:
+    """Whether one posting is FOR this student, by the app's own rules.
+
+    Every rule is imported, none is restated (P5): track and region and level
+    from `directory.recommend` (the same three `assistant.situation` applies
+    to the what-changed strip), and the blocking verdict from
+    `directory.views._eligibility`, which is the one the Opportunities feed
+    issues. Nothing stated on either side means nothing is filtered, so a
+    student who has told us little sees what they saw before (P3).
+    """
+    from directory.recommend import (
+        role_matches_level, role_matches_regions, role_matches_tracks,
+    )
+    from directory.views import _eligibility
+
+    if not role_matches_tracks(opportunity.title, user.tracks):
+        return False
+    if not role_matches_regions(opportunity.region, user.regions):
+        return False
+    if not role_matches_level(
+        opportunity.bucket, opportunity.class_year_derived,
+        user.target_cycles, user.class_year,
+        # The title rung too, which is off by default for the two callers
+        # that predate it. Without it the founder's own strip named a
+        # "Summer Associate" role at an MBA rung he is four years from:
+        # right firm, right market, wrong ladder.
+        title=opportunity.title,
+        study_level=getattr(user, "study_level", "") or "",
+    ):
+        return False
+    verdict = _eligibility(opportunity, profile) if profile else None
+    return not (verdict and verdict["blocking"])
+
+
+def _gap_role(opportunity) -> dict:
+    """One posting as a gap row's role, with its deadline's provenance.
+
+    "(reported)" comes from `directory.views.deadline_provenance`, the one
+    function that owns that question. 96% of dated open campus rows are
+    Coverage's own reading of a posting's prose, and a bare date on this
+    strip would be the page vouching for our regex as the firm's decision
+    (P1).
+    """
+    from directory.views import deadline_provenance
+
+    when = f"{opportunity.deadline:%b} {opportunity.deadline.day}"
+    if deadline_provenance(opportunity) is not None:
+        when += " (reported)"
+    return {
+        "firm": opportunity.firm.name,
+        "title": opportunity.title,
+        "url": opportunity.url,
+        "deadline": opportunity.deadline,
+        "when": when,
+    }
+
+
+def _gaps(user, contacts, today) -> list[dict]:
+    """At most `GAPS_MAX` ledger rows for a quiet Today page.
+
+    Empty for a student with no tiered firms, no advocates and no tracked
+    roles, which is exactly today's behaviour for them (P3).
+    """
+    from directory.views import _eligibility_profile
+
+    rows: list[dict] = []
+    profile = _eligibility_profile(user)
+
+    # 1. TIERED FIRMS WITH NOBODY ON THEM, and a role there this student
+    # could actually apply for. `contacts` is the live list `_build_actions`
+    # already loaded, so the "which firms do I know somebody at" half costs
+    # no query at all.
+    covered = {c.firm_id for c in contacts if c.firm_id}
+    tiered = [
+        uf for uf in UserFirm.objects.for_user(user)
+        .filter(tier__isnull=False).select_related("firm")
+        if uf.firm_id not in covered
+    ]
+    if tiered:
+        best = sorted(tiered, key=lambda uf: (uf.tier, uf.firm.name))
+        named = best[:2]
+        names = " and ".join(uf.firm.name for uf in named)
+        count = (
+            "1 of your tiered firms has nobody on it." if len(tiered) == 1
+            else f"{len(tiered)} of your tiered firms have nobody on them."
+        )
+        which = (
+            "" if len(tiered) == len(named) == 1
+            else f" {names} {'is' if len(named) == 1 else 'are'} the highest tiered."
+        )
+        row = {
+            "kind": "no_contacts",
+            "label": "No contacts",
+            "text": count + which,
+            "source": "Your firm tiers and your contact list",
+        }
+        # The soonest dated open role at any of them that is FOR this
+        # student. Relevance matters here as much as it does in gap 3: an
+        # operations req in Malaysia is a true fact about RBC and a false
+        # reason for an IB-track student to go find someone there (P2). The
+        # row still stands without a role — the coverage hole is the fact,
+        # the role is the urgency.
+        for opportunity in (
+            Opportunity.objects.filter(
+                firm_id__in={uf.firm_id for uf in tiered}, status="open",
+                bucket__in=TARGET_BUCKETS,
+                deadline__isnull=False, deadline__gte=today,
+            )
+            .select_related("firm")
+            .order_by("deadline", "id")[:GAP_ROLE_SCAN]
+        ):
+            if _relevant(user, opportunity, profile):
+                row["role"] = _gap_role(opportunity)
+                break
+        rows.append(row)
+
+    # 2. ADVOCATES THE QUEUE HAS GONE SILENT ABOUT. Parking writes
+    # `thread_state`, never `warmth` (`_opening_bench`'s note says so), so an
+    # advocate stays an advocate while the engine's `advocate_touch_min_weeks`
+    # branch can no longer fire on them. Read off `contacts`: no query.
+    advocates = [c for c in contacts if c.warmth == "advocate"]
+    parked = [c for c in advocates if c.thread_state == "parked"]
+    if parked:
+        n, total = len(parked), len(advocates)
+        which = "both parked" if n == total == 2 else (
+            "all parked" if n == total else f"{n} parked"
+        )
+        rows.append({
+            "kind": "parked_advocates",
+            "label": "Advocates",
+            "text": (
+                f"{total} advocate{'' if total == 1 else 's'}, {which}. "
+                "The keep-warm clock cannot run on a parked contact."
+            ),
+            "source": "Warmth and thread state on your own contacts",
+            "contacts": [{"id": c.id, "name": c.name} for c in parked[:3]],
+        })
+
+    # 3. A ROLE FOR THIS STUDENT, CLOSING SOON, NOT SAVED. The window comes
+    # from `directory.deadlines.closing_soon_filter`, the app's one definition
+    # of closing soon: this deliberately does NOT spell its own seven-day
+    # window and make a second one (P5). The check had never been made at all
+    # before now; it returned nothing on the founder's board the night it was
+    # measured, which is the answer, not a reason to skip asking.
+    saved = set(
+        UserOpportunity.objects.for_user(user)
+        .values_list("opportunity_id", flat=True)
+    )
+    # And never the role row 1 is already pointing at. Two ledger lines about
+    # one posting is the strip repeating itself, which is worse than showing
+    # two rows instead of three.
+    already = {
+        (row.get("role") or {}).get("url") for row in rows if row.get("role")
+    }
+    for opportunity in closing_soon_filter(
+        Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)
+        .select_related("firm"),
+        today=today,
+    ).order_by("deadline", "id")[:GAP_ROLE_SCAN]:
+        if opportunity.url in already:
+            continue
+        if opportunity.id in saved or not _relevant(user, opportunity, profile):
+            continue
+        role = _gap_role(opportunity)
+        rows.append({
+            "kind": "unsaved_closing",
+            "label": "Closing soon",
+            "text": (
+                f"{role['firm']} closes {role['when']} and it is not in your "
+                "applications."
+            ),
+            "source": "Your track, region, year and work authorization",
+            "role": role,
+        })
+        break
+
+    return rows[:GAPS_MAX]
+
+
+def plan_split(actions: list[dict], *, cap: int, today) -> dict:
+    """Split one queue into the day's plan, the held remainder, the stale
+    "Still open" strip and the park strip, and stamp `plan_lane` on every
+    row.
+
+    LIFTED OUT OF `_cockpit_context` SO IT HAS EXACTLY ONE DEFINITION (P5).
+    The advisor's `get_today_queue` tool now answers "why is this person not
+    on today's plan", and the only honest way to answer that is to read the
+    same split the page drew rather than re-derive a second opinion out of
+    `firm_paced` and the cap. Everything here is pure — the sort key, the
+    staleness decay, the blackout, the cap, the quiet-upkeep ceiling — so
+    the page and the tool can call it on the same engine output and cannot
+    disagree.
+
+    `plan_lane` is on EVERY row now, and that is the one behaviour change
+    the lift makes. It used to be stamped on the plan and on the held rows
+    the brief is allowed to read, and left ABSENT on the four groups the
+    brief skips (firm-paced, blacked out, still-open, park) — so a missing
+    key meant four different things. The brief's own exclusion is unchanged
+    and is now spelled as its own condition rather than as an omitted lane:
+    a card the firm's pace or the December blackout is holding still renders
+    under "Up next" on the page, and labelling it anything else here would
+    make the tool and the page disagree about a card the student can see.
+    """
     ordered = sorted(actions, key=_today_sort_key)
 
     # STALENESS DECAY FOR THE CRITICAL LANE (see `_stale_critical`). A critical
@@ -2849,20 +3079,92 @@ def _cockpit_context(user) -> dict:
             held.append(a)
     planned = critical + planned_rest
 
-    # WHAT THE DAILY BRIEF READS (see `_actions_for_brief` in the return dict
-    # below for the measurement and the argument). The plan, then the rest of
-    # the queue in the same ranked order, minus the two flags that mean "the
-    # page is deliberately not asking for this today". Stamped with the lane
-    # so `assistant.brief._summarize_actions` can print it: a brief that lists
-    # eight people on a day the plan budgets three has to say which three.
+    # THE LANE EVERY ROW RENDERS IN. Four values, one per strip the page
+    # actually draws: the plan ("today"), the held remainder under "Up next",
+    # the stale-critical "Still open" strip, and the park strip. A card the
+    # firm's pace or the blackout is holding is "up_next" like any other held
+    # card — that is where the student sees it, and the reason line on it
+    # already says why it waits.
+    for a in park:
+        a["plan_lane"] = "park"
+    for a in still_open:
+        a["plan_lane"] = "still_open"
     for a in planned:
         a["plan_lane"] = "today"
-    brief_actions = list(planned)
     for a in held:
-        if a.get("firm_paced") or a.get("blackout"):
-            continue
         a["plan_lane"] = "up_next"
-        brief_actions.append(a)
+
+    # WHAT THE DAILY BRIEF READS (see `_actions_for_brief` in `_cockpit_
+    # context`'s return dict for the measurement and the argument). The plan,
+    # then the rest of the queue in the same ranked order, minus the two flags
+    # that mean "the page is deliberately not asking for this today". The lane
+    # is what `assistant.brief._summarize_actions` prints: a brief that lists
+    # eight people on a day the plan budgets three has to say which three.
+    brief_actions = list(planned) + [
+        a for a in held if not (a.get("firm_paced") or a.get("blackout"))
+    ]
+
+    return {
+        "ordered": ordered,
+        "park": park,
+        "still_open": still_open,
+        "planned": planned,
+        "held": held,
+        "brief_actions": brief_actions,
+        "blackout": blackout,
+        "blackout_resumes": blackout_resumes,
+    }
+
+
+def today_plan(user, today=None):
+    """This user's queue AND the plan the Today page would draw from it.
+
+    The advisor's door into `plan_split` (`assistant.tools.get_today_queue`).
+    It pays one query more than `_build_actions` alone — `_pace`, for the
+    daily cap — because the cap is what decides which cards hold a plan slot,
+    and a payload naming a lane computed from a guessed cap would be exactly
+    the second opinion `plan_split` exists to prevent.
+    """
+    today = today or timezone.localdate()
+    actions, contacts = _build_actions(user)
+    pace = _pace(user, today)
+    plan = plan_split(
+        actions, cap=_daily_cap(pace["goal"], pace["done"], today), today=today
+    )
+    return actions, contacts, plan
+
+
+def _cockpit_context(user) -> dict:
+    """The Today cockpit: a capped, momentum-ordered daily plan in three
+    semantic lanes, an honest held-back remainder, a weekly pace figure, the
+    chats that are already on the calendar, and a recent-activity feed."""
+    today = timezone.localdate()
+    actions, contacts = _build_actions(user)
+    # The bench (see `_opening_bench`'s module note above it): at most one
+    # parked chatted/advocate contact, drawn back into view by a live opening
+    # at their firm today. Computed off `actions`/`contacts` already loaded
+    # above — no re-run of the cadence engine.
+    bench = _opening_bench(user, contacts, actions, today)
+    pace = _pace(user, today)
+    cap = _daily_cap(pace["goal"], pace["done"], today)
+
+    for a in actions:
+        a["touch_kind"] = _ACTION_TOUCH.get(a["action"])
+        # Whether the card may offer Snooze/Skip. A card whose action is
+        # snooze-exempt must not draw the buttons: writing snoozed_until on
+        # an exempt card is worse than a no-op, it silently snoozes the
+        # contact's OTHER actions while the visible card stays put.
+        a["snoozable"] = a["action"] not in _SNOOZE_EXEMPT_ACTIONS
+
+    plan = plan_split(actions, cap=cap, today=today)
+    ordered = plan["ordered"]
+    park = plan["park"]
+    still_open = plan["still_open"]
+    planned = plan["planned"]
+    held = plan["held"]
+    brief_actions = plan["brief_actions"]
+    blackout = plan["blackout"]
+    blackout_resumes = plan["blackout_resumes"]
 
     planned_lanes = {key: [] for key, _ in _TODAY_LANES}
     for a in planned:
@@ -3125,6 +3427,11 @@ def _cockpit_context(user) -> dict:
     wave = _next_wave(user, today) if would_be_quiet else None
     quiet = would_be_quiet and wave is not None
     quiet_line = _quiet_line(wave) if quiet else ""
+    # THE GAPS STRIP, behind the same gate and for the same reason (see
+    # `_gaps`). `would_be_quiet` rather than `quiet`: the strip is worth
+    # showing on a day with nothing due whether or not `_next_wave` found a
+    # forecast to name, and those are two different questions.
+    gaps = _gaps(user, contacts, today) if would_be_quiet else []
 
     return {
         "lanes": lanes,
@@ -3182,6 +3489,11 @@ def _cockpit_context(user) -> dict:
         # make the template guard two keys instead of one.
         "quiet": quiet,
         "quiet_line": quiet_line,
+        # At most three ledger rows about what a quiet day measured and never
+        # said — see `_gaps`. Empty list on every busy day, and on a quiet day
+        # for a student with no tiered firms, no advocates and no tracked
+        # roles.
+        "gaps": gaps,
         # The next confirmed firm dates, named. Until 2026-08-31 this list
         # excluded any date "Your board" already printed, because that lane
         # and this card were reading the same rows and showing them twice.

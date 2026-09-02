@@ -111,10 +111,19 @@ def test_no_tool_body_takes_a_user_from_its_arguments():
 # the whole advisor down, not just the tool that pushed the count over. This
 # is not a per-tool defect a normal test would catch — each tool's own
 # schema is perfectly valid on its own, and it only breaks in combination
-# with every OTHER tool that already exists. A margin, not the bare limit:
-# 20 leaves room for one more small tool before this fires again as a real
-# warning instead of a live production outage.
-_MAX_TOTAL_OPTIONAL_PARAMS = 20
+# with every OTHER tool that already exists. A margin, not the bare limit,
+# so this fires as a warning with room left rather than as a live outage.
+#
+# RAISED 20 -> 21 ON 2026-09-02, and the one parameter it bought is
+# `get_calendar.include_cancelled`. The tool returned cancelled chats as live
+# ones, distinguished only by a "Cancelled: " prefix inside the title string —
+# a formatting convention, not a field, and a model reading `kind: chat,
+# starts_at: Thursday 2pm` has every reason to tell the student they have a
+# chat on Thursday. The fix has to be a default-off filter (silence about a
+# chat that was called off) plus a way to ask for them anyway (the student
+# who says "wasn't I meeting her?"), and the second half is a parameter.
+# Three of the four slots left under the hard limit remain.
+_MAX_TOTAL_OPTIONAL_PARAMS = 21
 
 
 def test_the_combined_tool_schemas_stay_under_the_apis_optional_param_ceiling():

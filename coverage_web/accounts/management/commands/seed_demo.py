@@ -49,10 +49,42 @@ from django.utils import timezone
 from crm import services
 from crm.models import Contact, UserFirm
 from directory.models import Firm, FirmDate
+from directory.recommend import CYCLE_LABELS, INTERNSHIP, cycle_choices
 
 User = get_user_model()
 
 EMAIL, PASSWORD = "demo@coverage.local", "demo1234"
+
+
+def demo_cycle(today=None) -> str:
+    """The demo student's target cycle, taken from the live dropdown.
+
+    THE DEFECT THIS EXISTS FOR. This file wrote the literal `"sa2028_ib"`,
+    which `directory.recommend.parse_target_cycle` has never recognised —
+    the vocabulary is `"2027 Summer Internship"`, built by `cycle_choices()`
+    from `CYCLE_LABELS`. An unparsed cycle costs the student nothing on
+    purpose (that function returns None rather than guessing), so the cycle
+    bonus and the level gate were simply OFF on the account every demo the
+    founder gives runs on: measured 2026-09-01, 0 of the demo's picks
+    carried a `W_CYCLE` reason, and no error anywhere said why.
+
+    Read out of `cycle_choices()` rather than spelled again here, so the
+    seed cannot drift from the dropdown the way the literal did.
+
+    NEXT YEAR'S SUMMER, not the furthest one offered. The dropdown runs
+    `base_year` to `base_year + 2`, and the intake actually in market is
+    always the next one: measured on the live board 2026-09-02, 1,103 open
+    campus rows carry a 2027 cohort against 4 carrying 2028. A demo account
+    pointed two summers out is a demo account whose cycle bonus fires on
+    nothing, which is the same silent zero the literal produced, arriving by
+    a better-looking route.
+    """
+    summers = [
+        value for value, _ in cycle_choices(base_year=today.year if today else None)
+        if value.endswith(CYCLE_LABELS[INTERNSHIP])
+    ]
+    # `summers` is [this year, next year, the year after] in display order.
+    return summers[1]
 
 
 class Command(BaseCommand):
@@ -67,9 +99,24 @@ class Command(BaseCommand):
             return
 
         now = timezone.now()
+        cycle = demo_cycle(now.date())
+        cycle_year = int(cycle.split()[0])
         demo = User.objects.create_user(email=EMAIL, password=PASSWORD)
-        demo.name, demo.school, demo.class_year = "Demo Student", "Demo University", 2028
-        demo.target_cycles, demo.regions, demo.tracks = ["sa2028_ib"], ["us"], ["ib"]
+        demo.name, demo.school = "Demo Student", "Demo University"
+        # The penultimate summer, which is what a summer analyst intake IS:
+        # a student graduating in 2028 does the 2027 internship. The class
+        # year and the seeded firm date below are both derived from
+        # `cycle_year` so the account cannot drift into recruiting for one
+        # intake while graduating in a year that does not follow from it.
+        demo.class_year = cycle_year + 1
+        demo.target_cycles, demo.regions, demo.tracks = [cycle], ["us"], ["ib"]
+        # ANSWERED FOR THE MARKET IT TARGETS. The live demo row carried
+        # `{"hk": "citizen"}` against `regions=["us"]` — an answer about a
+        # market this student does not recruit in, which leaves
+        # `directory.views._eligibility` with nothing to say about the only
+        # market they do. It is seeded here so it is part of the account's
+        # definition rather than something somebody set by hand once.
+        demo.work_authorization = {"us": "citizen"}
         demo.onboarded_at = now
         demo.save()
 
@@ -88,7 +135,8 @@ class Command(BaseCommand):
         # asserts this) and so audit_fixtures's FirmDate check excludes it
         # by name rather than by coincidence.
         FirmDate.objects.get_or_create(
-            firm=f3, cycle="sa2028", track="ib", region="us", event_kind="app_close",
+            firm=f3, cycle=f"sa{cycle_year}", track="ib", region="us",
+            event_kind="app_close",
             defaults={"date": now.date() + timedelta(days=10), "confidence": 1.0,
                       "source_url": "seed:demo"})
 

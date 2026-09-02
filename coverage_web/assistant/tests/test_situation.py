@@ -299,6 +299,39 @@ def test_one_firms_posting_batch_does_not_crowd_out_every_other_firm():
     assert "Bank Beta" in firms_reported
     assert len(firms_reported) == len(set(firms_reported)), "every firm reported at most once"
 
+    # AND EACH EVENT SAYS HOW MANY IT STANDS FOR. The one-per-firm rule above
+    # is right, but showing one of three with nothing saying so is the
+    # invisible filter P4 forbids: "CICC just opened a role" and "CICC just
+    # opened three" are different facts about how hard that firm is moving.
+    by_firm = {e["firm"]: e for e in result["new_role_at_known_firm"]}
+    assert by_firm["CICC"]["folded_count"] == 2
+    assert by_firm["Bank Alpha"]["folded_count"] == 0
+    assert busy_opps and quiet_a and quiet_b  # fixtures are load-bearing above
+
+
+def test_every_new_role_event_says_how_new_it_is():
+    """`first_seen` and `folded_count` on every row of this kind.
+
+    Without the first, the advisor could say a firm had opened something and
+    nothing about when — and the lag is real: the founder's three situation
+    rows on 2026-09-01 surfaced 4.4 to 5.4 days after `first_seen`
+    (`audit-opportunities.md §C2`), which "just opened" does not describe.
+    """
+    user = _user()
+    firm = _firm()
+    UserFirm(user=user, firm=firm, tier=1).save()
+    _opp(firm, url="https://example.com/old", first_seen=timezone.now() - timedelta(days=60))
+    seen = timezone.now() - timedelta(days=5)
+    _opp(firm, url="https://example.com/new", first_seen=seen)
+
+    events = situation.build_situation(user)["new_role_at_known_firm"]
+
+    assert events
+    for event in events:
+        assert event["first_seen"] is not None
+        assert isinstance(event["folded_count"], int)
+    assert events[0]["first_seen"] == seen
+
 
 def test_new_role_drops_the_wrong_market_and_the_wrong_rung():
     """The other two-thirds of the customer walk `role_matches_tracks` alone

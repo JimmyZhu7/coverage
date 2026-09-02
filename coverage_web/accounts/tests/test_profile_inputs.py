@@ -455,3 +455,89 @@ def test_the_migration_walk_above_left_the_database_at_the_head():
         "the migration walk in this module left the test database behind "
         f"head: {[name for _, name in ((m.app_label, m.name) for m, _ in plan)]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 0017: the stored cycle value no parser has ever recognised.
+# ---------------------------------------------------------------------------
+_BEFORE_0017 = ("accounts", "0016_user_pro_trial_notice_dismissed_at")
+_AFTER_0017 = ("accounts", "0017_parseable_target_cycles")
+
+
+@pytest.mark.parametrize(
+    "stored,expected",
+    [
+        ("sa2028_ib", "2028 Summer Internship"),
+        ("SA2027_ST", "2027 Summer Internship"),
+        ("sa2028", "2028 Summer Internship"),
+        # Everything the mapper must refuse.
+        ("2028 Summer Internship", None),
+        ("Off-Cycle / Immediate", None),
+        ("sa28_ib", None),
+        ("summer 2028", None),
+        ("", None),
+    ],
+)
+def test_the_legacy_cycle_mapper_is_narrow_and_refuses_what_it_cannot_read(
+    stored, expected
+):
+    """P1 in one function. `sa<year>` and `sa<year>_<track>` map; anything
+    else — a value already in the dropdown's words, a blank, wording nobody
+    here has seen — returns None and is left exactly as it was. A cycle this
+    migration cannot read is not a cycle it may guess at."""
+    import importlib
+
+    module = importlib.import_module(
+        "accounts.migrations.0017_parseable_target_cycles"
+    )
+
+    assert module.parse_legacy(stored) == expected
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_data_migration_rewrites_an_unparseable_stored_cycle():
+    """The measured defect (WS-AI-13). The demo account carried
+    `["sa2028_ib"]`, which `directory.recommend.parse_target_cycle` returns
+    None for — so the 15-point cycle bonus and the level gate were silently
+    off on the account every demo the founder gives runs on.
+
+    The track half is DROPPED rather than lost: `target_cycles` is a list of
+    cycles and `User.tracks` is where a track belongs. Encoding one inside
+    the other is what made the value unparseable in the first place.
+
+    Then forward to head, so this file leaves the database where every later
+    test expects it (see `_accounts_head`'s own note).
+    """
+    from directory.recommend import parse_target_cycle
+
+    executor = MigrationExecutor(connection)
+    executor.migrate([_BEFORE_0017])
+    OldUser = executor.loader.project_state([_BEFORE_0017]).apps.get_model(
+        "accounts", "User")
+    OldUser.objects.create(email="legacy@example.com", target_cycles=["sa2028_ib"])
+    OldUser.objects.create(email="already@example.com",
+                           target_cycles=["2028 Summer Internship"])
+    OldUser.objects.create(email="unknown@example.com",
+                           target_cycles=["whatever I typed"])
+    OldUser.objects.create(email="nothing@example.com", target_cycles=[])
+
+    executor = MigrationExecutor(connection)
+    executor.loader.build_graph()
+    executor.migrate([_AFTER_0017])
+    NewUser = executor.loader.project_state([_AFTER_0017]).apps.get_model(
+        "accounts", "User")
+
+    legacy = NewUser.objects.get(email="legacy@example.com")
+    assert legacy.target_cycles == ["2028 Summer Internship"]
+    assert parse_target_cycle(legacy.target_cycles[0]) == ("internship", 2028)
+
+    assert NewUser.objects.get(
+        email="already@example.com").target_cycles == ["2028 Summer Internship"]
+    assert NewUser.objects.get(
+        email="unknown@example.com").target_cycles == ["whatever I typed"]
+    assert NewUser.objects.get(email="nothing@example.com").target_cycles == []
+
+    executor = MigrationExecutor(connection)
+    executor.loader.build_graph()
+    executor.migrate([_accounts_head(executor)])
+    assert executor.migration_plan(executor.loader.graph.leaf_nodes()) == []

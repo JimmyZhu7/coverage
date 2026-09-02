@@ -98,6 +98,15 @@ def test_profile_form_target_cycles_choices_match_cycle_choices(user):
 # ---------------------------------------------------------------------------
 
 def test_a_stale_stored_cycle_value_appears_checked_not_dropped(user):
+    """REWRITTEN 2026-09-02. This used to assert that `sa2028_ib` is labelled
+    "no longer offered", which conflated two states the student has to be
+    able to tell apart. A cycle that has merely rolled off the dropdown still
+    WORKS — `parse_target_cycle` reads the year out of the words, so the
+    picks and the level gate score against it exactly as before. A cycle that
+    does not parse does nothing at all, silently, and the demo account sat in
+    that state for weeks under this very value. The label now says which,
+    and this pins the unparseable half. See `accounts.forms._stale_cycle_
+    label`."""
     user.target_cycles = ["sa2028_ib"]  # matches nothing this checkbox group has ever offered
     user.save(update_fields=["target_cycles"])
 
@@ -107,8 +116,24 @@ def test_a_stale_stored_cycle_value_appears_checked_not_dropped(user):
     rendered = str(form["target_cycles"])
     assert 'value="sa2028_ib"' in rendered
     assert "checked" in rendered                  # pre-checked, so a no-op save keeps it
-    assert "no longer offered" in rendered         # and visibly marked as such
+    # Marked as such, AND with the engine effect stated: this value scores
+    # nothing, which "no longer offered" does not say.
+    assert "not recognised, so it does not affect your matches" in rendered
     assert "disabled" not in rendered              # never disabled — see docstring above
+
+
+def test_a_cycle_that_rolled_off_the_window_is_marked_offered_not_broken(user):
+    """The other half of the same split. "2020 Summer Internship" is not in
+    this year's dropdown and parses perfectly, so it still scores — saying it
+    is "not recognised" would be a lie in the student's favour's opposite
+    direction, telling them a working setting is dead."""
+    user.target_cycles = ["2020 Summer Internship"]
+    user.save(update_fields=["target_cycles"])
+
+    rendered = str(ProfileForm.from_user(user)["target_cycles"])
+
+    assert "no longer offered" in rendered
+    assert "not recognised" not in rendered
 
 
 def test_a_current_stored_cycle_value_is_not_marked_stale(user):

@@ -211,6 +211,12 @@ def daily_brief(request: HttpRequest) -> HttpResponse:
         request.user,
         actions,
         situation=situation.get("events"),
+        # The same three ledger rows the page draws under the plan, so the
+        # sentence at the top can lead with one on an empty-queue day instead
+        # of falling back to a canned quiet line. `[]` on any day the page
+        # has work on it, because `_cockpit_context` only computes them
+        # behind its quiet branch. See `crm.today._gaps`.
+        gaps=cockpit.get("gaps"),
         silenced_ids=(
             queue_silenced_contact_ids(request.user) if not actions else None
         ),

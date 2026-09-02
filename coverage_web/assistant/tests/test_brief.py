@@ -355,6 +355,108 @@ def test_an_empty_queue_and_no_situation_events_still_spends_no_call():
 
 
 # ---------------------------------------------------------------------------
+# The Gaps strip in the prompt (`crm.today._gaps`, WS-AI-03). Three things a
+# quiet Today page measured and never said. The brief gets them as a fourth
+# data section so the sentence can lead with one on a day the queue is empty,
+# instead of falling back to a canned quiet line.
+# ---------------------------------------------------------------------------
+def _gap(text="25 of your tiered firms have nobody on them.",
+         source="Your firm tiers and your contact list"):
+    return {"kind": "no_contacts", "label": "No contacts", "text": text,
+            "source": source}
+
+
+def test_gaps_reach_the_prompt_on_an_empty_queue_day():
+    user = _user()
+    client = FakeClient(_response("Centerview and RBC have nobody on them."))
+
+    text = brief.get_or_build(user, [], [], [_gap()], client=client)
+
+    assert text == "Centerview and RBC have nobody on them."
+    prompt = client.messages.requests[0]["messages"][0]["content"]
+    assert "Gaps." in prompt
+    assert "25 of your tiered firms have nobody on them." in prompt
+    # The source travels with the line: a brief that leads with a number has
+    # to be able to say where the number came from, and the model cannot
+    # cite a source it was not given.
+    assert "source: Your firm tiers and your contact list" in prompt
+
+
+def test_gaps_are_omitted_from_the_prompt_when_the_queue_has_work_in_it():
+    """A brief that led with "25 of your tiered firms have nobody on them" on
+    a morning with three people to email would be answering a question nobody
+    asked, over work the student can do today. The test lives in
+    `get_or_build` rather than in the caller so the sentence and the page
+    cannot disagree about which kind of day it is."""
+    user = _user()
+    client = FakeClient(_response("Follow up with Ada."))
+
+    brief.get_or_build(user, [_action()], [], [_gap()], client=client)
+
+    prompt = client.messages.requests[0]["messages"][0]["content"]
+    assert "Gaps." not in prompt
+    assert "25 of your tiered firms" not in prompt
+
+
+def test_gaps_alone_on_an_empty_queue_spend_a_call_rather_than_a_canned_line():
+    """Same argument as the situation-only case above: a real, measured hole
+    in the board is worth a sentence even on a day the cadence has nothing."""
+    user = _user()
+    client = FakeClient(_response("Both your advocates are parked."))
+
+    text = brief.get_or_build(
+        user, [], [],
+        [_gap(text="2 advocates, both parked.", source="Warmth and thread state")],
+        client=client,
+    )
+
+    assert text == "Both your advocates are parked."
+    assert len(client.messages.requests) == 1
+
+
+def test_no_gaps_and_no_queue_is_still_the_quiet_line(user_email="gapsless@example.com"):
+    """P3: a student with no tiered firms, no advocates and no tracked roles
+    gets exactly what they got before the strip existed."""
+    user = _user(user_email)
+    client = FakeClient(_response("unused"))
+
+    text = brief.get_or_build(user, [], [], [], client=client)
+
+    assert text in brief._QUIET_DAY_MESSAGES
+    assert client.messages.requests == []
+
+
+def test_a_new_role_line_says_how_many_days_ago_it_appeared():
+    """"Just opened" was the only thing this line could say. The founder's
+    own three rows on 2026-09-01 were 4.4 to 5.4 days old when he read them
+    (`audit-opportunities.md §C2`), and five days is still worth acting on
+    and is not "just"."""
+    today = timezone.localdate()
+    event = {
+        "kind": "new_role_at_known_firm", "title": "Summer Analyst",
+        "firm": "CICC", "first_seen": today - timedelta(days=5),
+        "folded_count": 2,
+    }
+
+    line = brief._summarize_situation([event], today)
+
+    assert "CICC opened a new role 5 days ago: Summer Analyst" in line
+    # And how many it stands for: the situation strip shows one card per
+    # firm, so a firm that opened three reads as one without this.
+    assert "and 2 more at the same firm" in line
+
+
+def test_a_new_role_with_no_first_seen_prints_no_age_at_all():
+    """P1: no `first_seen`, no age — never an age of zero."""
+    event = {"kind": "new_role_at_known_firm", "title": "Summer Analyst",
+             "firm": "CICC"}
+
+    line = brief._summarize_situation([event], timezone.localdate())
+
+    assert line == "- CICC opened a new role: Summer Analyst"
+
+
+# ---------------------------------------------------------------------------
 # Concurrency: crm.views.daily_brief is an htmx POST endpoint a student can
 # fire twice (a double-load, two tabs on Today at once, a client-side retry
 # after a slow response). Both requests can pass the "nothing cached yet"
