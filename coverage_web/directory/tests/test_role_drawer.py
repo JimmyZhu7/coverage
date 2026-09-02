@@ -475,7 +475,12 @@ def test_the_drawer_states_the_eligibility_verdict_or_its_absence(client, django
     user.save()
     client.force_login(user)
     signed_in = _drawer(client, o)
-    assert "Your year (2028)" in signed_in
+    # The label lost its bracketed class year on 2026-09-02 (it restated the
+    # reader to the reader; see `_eligibility`). The posting's own sentence,
+    # which is the evidence, is the assertion that matters here and is
+    # unchanged.
+    assert "Your year" in signed_in
+    assert "Your year (2028)" not in signed_in
     assert "graduating in 2028" in signed_in
 
 

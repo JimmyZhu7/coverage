@@ -1,27 +1,32 @@
 """Every column header on the feed names its column on the same baseline.
 
-`.firmcol-head` is a fixed 92px box and its comment promises the headers align
-"regardless of how the name wraps or which pills show". A fixed box was only
-half of that: `align-items: center` centred each id stack in it, so where a
-name LANDED depended on what came after it. Picked-for-you emits its
-`.firmcol-stats` row unconditionally and it holds nothing until a why-chip
-exists, so that column's id block measured 42.2px against a firm's 61.4px and
-its name rendered 9.6px lower than Morgan Stanley's beside it — measured live
-on /opportunities/ at 1280px, with the logo tiles perfectly level in all
-three columns because a 38px box centred in a 92px head lands identically
-whatever its sibling does. A firm name wrapping to two lines would raise that
-column's name by the same mechanism.
+THE HEADER IS A TWO-ROW GRID (2026-09-02) and that is what keeps the promise
+now. Row one is the logo tile and the firm name, centred on each other. Row
+two is one line carrying the category, the open count and the tier. A name
+cannot move, whatever follows it, because it is in a row of its own.
 
-Anchoring the id stacks to the top of the head fixes both cases at once.
-Measured after: all 13 columns report nameTop 553.2 in their row band (the
-Picked column moved up 12.4px, the firm columns 2.8px), meta lines all at
-573.2, logo tiles unmoved at 567.7, and a name forced to two lines still
-starts at its neighbours' y.
+WHAT CAME BEFORE, and why the grid is the fix rather than a restyle. The head
+was a flex row: a 38px tile, then an id COLUMN of three short lines. Two
+defects came out of that shape. `align-items: center` centred each id stack,
+so where a name LANDED depended on what came after it — Picked-for-you emits
+its `.firmcol-stats` row unconditionally and it held nothing until a why-chip
+existed, so that column's id block measured 42.2px against a firm's 61.4px and
+its name rendered 9.6px lower than Morgan Stanley's beside it (measured live
+at 1280px). `align-items: flex-start` fixed that one by declaration. The
+second defect survived it: the tile kept its own centring against a three-row
+stack, so the logo sat level with the CATEGORY rather than with the firm it
+stands for, and the founder's review of the shipped page said so — "the top
+part of these widgets look weird ... make it more visually harmonious".
 
-Not the fix of dropping the empty stats div: removing that node live moved
-the name DOWN a further 1.5px (567.6 -> 569.1), because its margin-top and
-the flex gap it consumes are partly compensating today. `:empty` would not
-have matched it either — the div holds a whitespace text node.
+A tile anchoring three lines has nothing to align to. Two rows give it one.
+Measured after: the firm head went 126px -> 86px, the Picked head 194px ->
+139px, row one computes to exactly the 38px tile, and every column's name
+starts at the same y whether its neighbour's name wraps to two lines or not.
+
+The old note about the empty stats div is retired with the flex column that
+made it true: `.firmcol-stats` now always carries at least the category and
+count, and it is a grid row rather than a flex sibling, so nothing about the
+name's position depends on it at all.
 """
 
 from __future__ import annotations
@@ -93,20 +98,55 @@ def feed_with_both_columns(db):
     return client
 
 
-def test_the_header_anchors_its_names_to_the_top_not_to_their_own_centre():
+def test_the_header_puts_the_name_in_a_row_nothing_below_it_can_move():
+    """REWRITTEN 2026-09-02. The old assertions were `align-items:
+    flex-start`, no `align-items: center`, and `min-height: 92px` — three
+    declarations that made a FLEX row keep the name's y independent of the
+    stack under it. The header is a grid now, so the same promise is kept by
+    structure instead: the name is in row one and everything else is in row
+    two, and a grid row's position cannot depend on a later row's content.
+
+    `align-items: center` is not only allowed now, it is required — it is
+    what levels the 38px tile with the name beside it, which is the alignment
+    complaint that prompted the change. Under the old flex shape that same
+    declaration was the bug; under the grid it applies per row, and row one
+    holds nothing but the tile and the name."""
     css = _feed_css()
     rule = _rule(css, ".firmcol-head")
-    assert "align-items: flex-start" in rule, rule
-    assert "align-items: center" not in rule, (
-        "centring makes each name's position depend on how tall the stack "
-        "under it happens to be, which is the defect"
-    )
-    assert "min-height: 92px" in rule, "the fixed header height is the other half"
+    assert "display: grid" in rule, rule
+    assert "grid-template-rows: minmax(38px, auto) auto" in rule, (
+        "two rows, and row one floored at the tile's own height: identity "
+        "first, everything else second")
+    assert "min-height: 76px" in rule, "the fixed header height is still half of it"
+    name = _rule(css, ".firmcol-h")
+    assert "grid-row: 1" in name, name
+    stats = _rule(css, ".firmcol-stats")
+    assert "grid-row: 2" in stats, stats
+
+
+def test_the_logo_sits_in_the_name_row_and_nowhere_else():
+    """The founder's actual complaint, pinned. A tile centred against a
+    three-row text block lands beside the middle row, which on every firm
+    column was the category line rather than the firm name."""
+    css = _feed_css()
+    rule = _rule(css, ".firmcol-logo")
+    assert "grid-row: 1" in rule, rule
+    assert "grid-column: 1" in rule, rule
 
 
 def test_the_logo_tile_keeps_its_own_centring():
-    """The tiles were already level; the fix must not move them."""
+    """The tiles were already level; the fix must not move them. Under the
+    grid this centres the tile inside ROW ONE, against the name."""
     assert "align-self: center" in _rule(_feed_css(), ".firmcol-logo")
+
+
+def test_the_heading_carries_no_margin_of_its_own():
+    """`.firmcol-h` is an h2 and the shared stylesheet gives an h2 20px of
+    vertical margin. Inside the old flex column that collapsed away; inside
+    the grid it does not. Measured before the reset: row one computed 58px
+    against a 38px tile, so every header on the board ran 20px taller than
+    the design and the tile floated in an empty band."""
+    assert "margin: 0" in _rule(_feed_css(), ".firmcol-h")
 
 
 def test_the_picked_columns_shared_reasons_are_one_nowrap_line_not_wrapping_pills():
@@ -166,41 +206,43 @@ def test_the_picked_column_renders_shared_reasons_in_the_firmcol_why_line(db):
     assert 'title="' in head, "the full sentences must survive in the tooltip"
 
 
-def test_the_picked_column_really_does_render_a_shorter_id_stack(feed_with_both_columns):
-    """The condition that made centring fail, asserted on real markup.
+def test_both_columns_spend_the_same_two_rows_on_their_identity(feed_with_both_columns):
+    """REWRITTEN 2026-09-02, twice over, and the history is the argument.
 
-    REWRITTEN 2026-09-02, and the old assertion is why. It read
-    `stats[0].strip() == ""` — Picked's stats row present and EMPTY — with a
-    failure message saying "if it now carries chips, this test is no longer
-    exercising the failure". It does now carry something: the `fc-eyebrow`
-    span ("PICKED") moved into that slot when the column stopped relying on
-    the accent wash for its identity, so the empty state the assertion
-    described is no longer reachable and the test had been failing rather
-    than guarding anything.
+    It was first written to prove the Picked column's id STACK is shorter
+    than a firm's — the condition that made `align-items: center` misalign
+    the two — and then rewritten to assert the `fc-eyebrow` span, because
+    that word had moved into the stats slot and made the "empty row" premise
+    unreachable. Both premises are gone now. The header is a two-row grid, so
+    stack height cannot move a name at all; and the eyebrow is deleted,
+    because it read "PICKED" directly under a heading reading "Picked for
+    you" and the founder's review called that what it was.
 
-    The INVARIANT is unchanged and is what this now pins: the Picked column's
-    id stack is shorter than a firm column's, because it carries no tier
-    pill. That is the whole reason the header needs `align-items: start`
-    rather than centring — a shorter stack centred against a taller one is
-    the misalignment this file exists for. Asserting the eyebrow's presence
-    as well keeps the row's real content named, so a future edit that empties
-    it is a failure here rather than a silent change of premise.
+    What survives, and is the thing worth pinning: both columns say who they
+    are in exactly two rows, and row two is one line in both. The Picked
+    column has no tier, so its second row carries its count and whatever the
+    picks share; a firm's carries its category, its open count and its tier.
+    Different words, same two rows, which is why the headers line up.
     """
     html = feed_with_both_columns.get("/opportunities/").content.decode()
     html = _STYLE_RE.sub("", html)
 
     stats = re.findall(r'<div class="firmcol-stats">(.*?)</div>', html, re.S)
     assert len(stats) >= 2, f"expected the Picked column and a firm one, got {len(stats)}"
-    assert "fc-eyebrow" in stats[0], (
-        "the Picked column's stats row should carry its eyebrow — that word "
-        "is what stops the column reading as a firm called 'Picked for you'"
-    )
-    assert "firmcol-tier" not in stats[0], (
-        "the Picked column has no tier, and a tier pill appearing here would "
-        "mean its id stack is no longer the shorter one this header's "
-        "`align-items: start` exists for"
-    )
-    assert "firmcol-tier" in stats[1], "a firm column should carry its tier pill"
+    assert "fc-eyebrow" not in html, (
+        "the 'PICKED' eyebrow is back. It repeats the heading directly above "
+        "it; the accent star tile and the accent heading are what say this "
+        "column is not a firm (see the identity tests below)")
+    # Row two, both columns: one `.firmcol-meta` line, and the tier only
+    # where a tier exists.
+    assert "firmcol-meta" in stats[0], (
+        "the Picked column's second row should carry its own count line — "
+        "if it moved back out to a row of its own the header grew a third row")
+    assert "firmcol-tier" not in stats[0], "the Picked column has no tier"
+    assert "firmcol-meta" in stats[1] and "firmcol-tier" in stats[1], (
+        "a firm's category, open count and tier belong on ONE line; they were "
+        "two stacked rows beside the logo tile until 2026-09-02, which is the "
+        "layout the founder called cluttered")
     assert ":empty" not in _feed_css(), (
         "a :empty selector cannot match that row — it holds a whitespace text "
         "node — so a fix resting on one would be silently dead"

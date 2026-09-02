@@ -271,6 +271,21 @@ def _feed(client):
 
 
 def test_the_feed_row_prints_the_elapsed_figure_for_a_watched_dated_role(client):
+    """REWRITTEN 2026-09-02: the figure moved from the meta line to the
+    deadline column's `title`, and this test moved with it.
+
+    It used to assert `"Open 12d" in html` — the visible span. That span is
+    gone. It was the one item on the meta line that described OUR OWN
+    observation history rather than the reader or the posting (its own comment
+    said so), it fired on 66% of dated rows, and measured at 1280px it was
+    what carried the line onto a second row and left a hanging separator at
+    the end of the first. The founder's review asked for exactly this call:
+    what a student scans stays a line, what says where a fact came from
+    becomes a tooltip.
+
+    What must not change is that the figure is still ON THE PAGE, still
+    attached to the claim it qualifies, and still says it predicts nothing.
+    That is what is asserted now."""
     firm = _firm()
     _opp(firm, days_ago=40, url="https://example.test/onboard")
     _opp(firm, days_ago=12, title="Summer Analyst Programme",
@@ -278,7 +293,12 @@ def test_the_feed_row_prints_the_elapsed_figure_for_a_watched_dated_role(client)
          url="https://example.test/watched")
 
     html = _feed(client)
-    assert "Open 12d" in html
+    assert "Coverage watched this posting open 12 days ago" in html
+    assert "Not a forecast of when it closes." in html
+    # On the deadline column, which is the element making the date claim this
+    # figure qualifies — not loose in the markup somewhere.
+    due = html[html.index('class="rr-due"'):]
+    assert "Coverage watched this posting open 12 days ago" in due[:600]
 
 
 def test_the_feed_row_stays_silent_on_an_onboarding_batch_role(client):
@@ -316,41 +336,45 @@ def test_an_undated_row_says_the_age_once_not_twice(client):
     assert "Open 12d" not in html
 
 
-def test_the_new_fact_sits_last_in_the_meta_line():
-    """ORDER IS THE TRUNCATION POLICY. Whatever renders last is what a
-    student never reads when the ~165px line overflows, so a descriptive
-    firm-history fact belongs there and nothing decisive may end up behind
-    it. Asserted on source position because that ordering IS the contract —
-    a rendered page with a short meta line would pass either way.
+def test_the_elapsed_figure_is_not_on_the_meta_line_at_all():
+    """REWRITTEN 2026-09-02. Its premise — "ORDER IS THE TRUNCATION POLICY,
+    so a descriptive firm-history fact belongs last on the meta line" — is
+    retired twice over. Order stopped being the truncation policy on
+    2026-08-31 (the line wraps; `.rr-loc`'s stated cap is the one cut), and
+    the fact stopped being on that line on 2026-09-02.
+
+    The contract that replaces it is stronger and is the reason the span
+    moved: nothing on the meta line may be about Coverage's own observation
+    history. Every other item there is about the READER (the verdict, the
+    assessment route) or about what the POSTING states. This one was about
+    us, which is what makes it a tooltip on this board.
     """
     src = ROLECARD.read_text()
-    open_at = src.index('class="rr-open"')
-    for decisive in ('class="rr-vd', "{% for f in r.facts %}", 'class="rr-loc',
-                     'class="rr-kind"', 'class="rr-cls"'):
-        assert src.index(decisive) < open_at, decisive
+    assert 'class="rr-open"' not in src, (
+        "the elapsed-openness span is back on the meta line; it belongs on "
+        "the deadline column's title, beside the other evidence-age fact")
+    # And it is on that column, not merely deleted.
+    due = src[src.index('class="rr-due"'):]
+    assert "Coverage watched this posting open" in due[:1200]
 
 
-def test_the_new_fact_adds_no_second_truncation_rule():
-    """A first pass at this row let several spans shrink independently and
-    produced FOUR mid-word ellipses instead of one clean cut. `.rr-open` must
-    behave like every other sibling — `flex: none`, and truncation left to
-    the single rule that owns it.
+def test_the_elapsed_figure_leaves_no_orphaned_style_rule():
+    """REWRITTEN 2026-09-02, and the rewrite is the point.
 
-    That rule is `.rr-loc`'s stated max-width now, not `.rr-meta >
-    *:last-child` (see `test_the_feed_row_has_exactly_one_truncation_point`).
-    The change matters to THIS span specifically: being rendered last used to
-    make it the thing that gave way, and measured live on the founder's board
-    it was giving way all the way to 0px — the figure was on the page and
-    invisible. The assertions below are unchanged, because what they pin is
-    that this span never grows a shrink rule of its own, and that is true
-    under either owner."""
+    This used to assert that `.rr-open` was styled explicitly and never grew
+    a shrink rule of its own — a guard against the "FOUR separate mid-word
+    ellipses" regression. With the span moved to the deadline column's
+    `title` there is no `.rr-open` element left to style, so the old
+    assertions would have been pinning a rule that styles nothing.
+
+    This file's own convention for that case is to delete the rule rather
+    than leave it orphaned (see `.fc-closing`'s note in `_styles.html`): a
+    class that still styles is an invitation to put the span back without
+    re-reading why it left. That convention is what this now pins."""
     css = ROLE_STYLES.read_text()
-    rule = re.search(r"\.rr-open\s*\{([^}]*)\}", css)
-    assert rule, ".rr-open must be styled explicitly, not left to defaults"
-    body = rule.group(1)
-    assert "flex: none" in body
-    assert "text-overflow" not in body
-    assert "flex-shrink" not in body
+    assert not re.search(r"^\s*\.rr-open\s*\{", css, re.M), (
+        "`.rr-open` styles nothing — no template renders the class. Delete "
+        "the rule rather than leaving it as a landing pad for the span.")
 
 
 # ---------------------------------------------------------------------------

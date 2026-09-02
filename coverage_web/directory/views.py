@@ -713,6 +713,65 @@ def _reason_key(r):
     return (r.kind, r.text, r.detail)
 
 
+#: HOW MUCH OF A PICK'S REASONING GOES ON ITS OWN ROW, in characters.
+#:
+#: WHAT IT ENCODES. `.rr-why` is one line that never wraps and ellipsises at
+#: the row's edge (see its rule in `_styles.html`), so anything past the edge
+#: is cut by the browser MID-WORD. Measured on the founder's board: the Picked
+#: rows read "Tier 2 · matches IB · US · For 2028-2029 grads (yours) · You
+#: know so…" — a fragment of a word is not a shorter fact, it is a rendering
+#: fault, and it was the fourth line of a four-line row.
+#:
+#: WHY 50. `.rr-main` measures ~316px in a 366px column and `.rr-why` is
+#: `--fs-xs` (12px), which is ~5.9px per character in Instrument Sans, so ~53
+#: characters reach the edge. 50 leaves room for the "+N" that replaces what
+#: did not fit. The cut is made on WHOLE reasons here rather than on
+#: characters in CSS, so the line always ends on a complete claim.
+#:
+#: WHAT WOULD CHANGE IT. A wider column, a different `--fs-xs`, or a decision
+#: to let this line wrap. All three are measurable the same way this was.
+_PICK_WHY_CHARS = 50
+
+
+def _pick_why_line(reasons, verdict=None) -> dict:
+    """One pick's reasoning as `{pick_why, pick_why_title}`.
+
+    THE TITLE IS ALWAYS EVERY REASON. This is the only place a role's full
+    justification renders on the feed, so nothing below is allowed to shorten
+    it — the visible line is a budget, never a filter on what the product is
+    willing to say.
+
+    TWO CUTS, and they are different in kind:
+
+      * The `class` reason is dropped from the VISIBLE line when the row
+        already carries a year verdict. It is not a fourth fact then, it is
+        the third rendering of one: the meta line above says "Your year" and
+        prints the posting's own window ("Grad 2028-2029" or "Class of
+        2028"), and this line was adding "For 2028-2029 grads (yours)". Its
+        sentence stays in the title. A row with NO year verdict keeps it —
+        there it is the only place the year is answered.
+      * Whatever will not fit `_PICK_WHY_CHARS` is counted rather than
+        printed. Counted, never silently dropped: the line ends "+2" and the
+        title holds the two.
+    """
+    kind = (verdict or {}).get("kind") or ""
+    title = " ".join(r.detail for r in reasons)
+    visible = [r for r in reasons
+               if not (kind.startswith("year_") and r.kind == "class")]
+    shown, left = [], _PICK_WHY_CHARS
+    for r in visible:
+        cost = len(r.text) + (3 if shown else 0)
+        if shown and cost > left:
+            break
+        shown.append(r.text)
+        left -= cost
+    line = " · ".join(shown)
+    hidden = len(visible) - len(shown)
+    if hidden:
+        line = f"{line} +{hidden}" if line else f"+{hidden}"
+    return {"pick_why": line, "pick_why_title": title}
+
+
 def _cycle_not_open_note(profile, open_qs) -> str:
     """One honest sentence when NONE of the student's target cycles has any
     live postings, else "". Checked against the whole open campus board, not
@@ -771,13 +830,20 @@ def _cycle_not_open_note(profile, open_qs) -> str:
         names = f"{closed_labels[0]} and {closed_labels[1]}"
     else:
         names = ", ".join(closed_labels[:-1]) + f", and {closed_labels[-1]}"
-    # No em dash: house copy style. Two short sentences read cleaner here
-    # anyway. "In your regions" only when the check was scoped to them —
-    # the board may hold the cycle somewhere the student is not looking,
-    # and the sentence must not claim more than the query asked.
+    # No em dash: house copy style. "In your regions" only when the check was
+    # scoped to them — the board may hold the cycle somewhere the student is
+    # not looking, and the sentence must not claim more than the query asked.
+    #
+    # SHORTENED 2026-09-02, without dropping either claim. It used to read
+    # "{names} postings haven't opened{where} yet. These are today's closest
+    # fits." — 106 characters, which wrapped to two italic lines inside a
+    # 320px column header and, stacked under the open estimate below it, was
+    # half of the five-line preamble a student read before reaching a role.
+    # Both facts survive: the cycle is not open (scoped to where we looked),
+    # and what is in the column instead. "Postings", "today's" and "These
+    # are" were the words carrying neither.
     where = " in your regions" if regions else ""
-    return (f"{names} postings haven't opened{where} yet. "
-            f"These are today's closest fits.")
+    return f"{names} not open{where} yet. Closest fits below."
 
 
 #: HOW MANY FIRMS HAVE TO AGREE BEFORE A MARKET'S OPEN WINDOW IS PRINTED.
@@ -806,9 +872,22 @@ def _cycle_not_open_note(profile, open_qs) -> str:
 CYCLE_OPEN_MIN_FIRMS = 3
 
 
-def cycle_open_estimate(profile, *, today=None) -> str:
-    """One sentence naming when the student's OWN cycle is expected to open,
-    per market, or "" when the corpus cannot say.
+def _cycle_open_parts(profile, *, today=None):
+    """The forecast as `(claim, firm_count)`, or None when it cannot be made.
+
+    SPLIT OUT 2026-09-02 so the two surfaces that print it can spend different
+    amounts of room on it without either one re-deriving a date. The claim is
+    "Estimated to open United States Nov 2026 to Jan 2027"; the firm count is
+    what the provenance sentence is built from. `cycle_open_estimate` joins
+    them into the one sentence the weekly digest sends; `cycle_open_note`
+    keeps them apart, because the Picked column's header spent three of its
+    five preamble lines on the provenance half of that sentence.
+
+    The body below is `cycle_open_estimate`'s, unchanged: same query, same
+    thresholds, same claim. Only the last two lines differ, where it used to
+    join the pieces and now hands them back.
+
+    It names when the student's OWN cycle is expected to open, per market.
 
     THE POINT OF THE ITEM. `_cycle_not_open_note` above already says the
     cycle has not opened; measured on the founder's board it fires and then
@@ -843,7 +922,7 @@ def cycle_open_estimate(profile, *, today=None) -> str:
         than dragging the Hong Kong range back twelve months. When those
         rows are relabelled nothing here changes.
 
-    Returns "" — and the caller prints nothing — when the student named no
+    Returns None — and every caller prints nothing — when the student named no
     cycle, no regions, or when no market clears `CYCLE_OPEN_MIN_FIRMS`. P3:
     a thin profile and a thin corpus both get today's behaviour, which is
     silence.
@@ -863,7 +942,7 @@ def cycle_open_estimate(profile, *, today=None) -> str:
     ]
     regions = [r.lower() for r in (getattr(profile, "regions", None) or ())]
     if not cycles or not regions:
-        return ""
+        return None
     tracks = [t.lower() for t in (getattr(profile, "tracks", None) or ())]
 
     rows = FirmDate.objects.filter(
@@ -898,15 +977,56 @@ def cycle_open_estimate(profile, *, today=None) -> str:
                 else f"{lo:%b %Y} to {hi:%b %Y}")
         parts.append(f"{REGION_LABELS.get(region, region.upper())} {span}")
     if not parts:
-        return ""
+        return None
 
     # No em dash (P7). "Estimated" is a word about the DATES, so it leads the
     # clause they sit in rather than trailing as a disclaimer nobody reads.
     lead = "Estimated to open" if all_estimated else "Expected to open"
     where = parts[0] if len(parts) == 1 else " and ".join(parts)
-    return (f"{lead} {where}, from past cycles at "
-            f"{len({fd.firm_id for fd in rows})} firms. Not a firm's own "
-            f"published date.")
+    return f"{lead} {where}", len({fd.firm_id for fd in rows})
+
+
+#: The provenance half of the forecast, in one place so the digest's sentence
+#: and the column's tooltip cannot drift into two different disclaimers.
+def _cycle_open_provenance(firms: int) -> str:
+    return f"from past cycles at {firms} firms. Not a firm's own published date."
+
+
+def cycle_open_estimate(profile, *, today=None) -> str:
+    """The whole forecast as ONE sentence, or "" when the corpus cannot say.
+
+    This is the string `crm.digest._cycle_note` appends to the weekly email,
+    where there is room for the disclaimer inline and no hover to put it on.
+    Byte-for-byte what it has always been; see `_cycle_open_parts` for the
+    query, the thresholds and the evidence rules behind every word of it.
+    """
+    built = _cycle_open_parts(profile, today=today)
+    if built is None:
+        return ""
+    claim, firms = built
+    return f"{claim}, {_cycle_open_provenance(firms)}"
+
+
+def cycle_open_note(profile, *, today=None) -> dict:
+    """The same forecast, split for the Picked column: `text` on the line,
+    `why` on the hover. `{}` when there is nothing to say.
+
+    WHY THE SPLIT. The column's header printed the full sentence and it ran to
+    three italic lines inside a 320px box — "Estimated to open United States
+    Nov 2026 to Jan 2027, from past cycles at 16 firms. Not a firm's own
+    published date." Two of those lines are the answer to "where did this come
+    from", which is the definition of a tooltip on this board: a fact a
+    student ACTS on is a line, a fact about where the fact came from is a
+    hover. Nothing is dropped and nothing is softened — "Estimated" still
+    leads the visible half, so the line can never read as a published date
+    even to someone who never hovers.
+    """
+    built = _cycle_open_parts(profile, today=today)
+    if built is None:
+        return {}
+    claim, firms = built
+    provenance = _cycle_open_provenance(firms)
+    return {"text": claim, "why": provenance[0].upper() + provenance[1:]}
 
 
 def _group_picks(cards):
@@ -2426,10 +2546,11 @@ def _fact_chips(o, *, verdict=None) -> list[dict]:
     GPA 3.0".
 
     Suppression is scoped to the BLOCKING verdict on purpose. `year_ok` says
-    "Your year (2029)" and `year_likely` "Likely your year (2029)" — neither
-    repeats the window, so the fact chip is the only place a student can read
-    what the posting actually stated, and it stays. Anonymous visitors get no
-    verdict at all and are untouched.
+    "Your year" and `year_likely` "Likely your year" — neither names a year at
+    all (2026-09-02: they used to carry the READER's class year in brackets,
+    which put a year on the row twice in two formats), so the fact chip is the
+    only place a student can read what the posting actually stated, and it
+    stays. Anonymous visitors get no verdict at all and are untouched.
 
     Two more duplications, both FACT-vs-FACT rather than verdict-vs-fact, and
     the correct de-dup for each turned out to be value-dependent rather than
@@ -2719,7 +2840,18 @@ def _eligibility(o, profile):
         stated_year = int(stated)
         if stated_year == cy:
             return {"kind": "year_ok", "blocking": False,
-                    "label": f"Your year ({cy})",
+                    # NO PARENTHESISED YEAR (2026-09-02). It used to read
+                    # "Your year (2029)", and `cy` is the READER's own class
+                    # year, which is the one number on this row the reader
+                    # already knows. Meanwhile the same row prints the
+                    # posting's own window beside it — "Class of 2029" from
+                    # `.rr-cls` on this branch, "Grad 2028-2029" from the
+                    # grad chip on the branch below — so the year rendered
+                    # twice in two formats on one line while the meta wrapped
+                    # to three. The verdict keeps its job (a statement about
+                    # the reader against the posting); the figure stays where
+                    # it is a fact about the POSTING, plus this tooltip.
+                    "label": "Your year",
                     "why": f"The posting states it is for the Class of {stated_year}."}
         return {"kind": "year_out", "blocking": True,
                 "label": f"For {stated_year} grads",
@@ -2743,8 +2875,12 @@ def _eligibility(o, profile):
         if grad.get("open_high"):
             hi = max(hi, cy)
         if lo <= cy <= hi:
+            # Bare "Your year" here for the same reason as the stated branch
+            # above: the grad chip beside it prints the posting's own window,
+            # so the parenthesised class year was the second rendering of one
+            # fact on a line already wrapping to three rows.
             return {"kind": "year_ok", "blocking": False,
-                    "label": f"Your year ({cy})",
+                    "label": "Your year",
                     "why": grad.get("phrase", "")}
         label = grad.get("value") or (str(lo) if lo == hi else f"{lo}–{hi}")
         return {"kind": "year_out", "blocking": True,
@@ -2759,7 +2895,7 @@ def _eligibility(o, profile):
     # "Likely", not "Your year", and carries its reasoning in the tooltip.
     if cy and o.class_year_derived and int(o.class_year_derived) == cy:
         return {"kind": "year_likely", "blocking": False,
-                "label": f"Likely your year ({cy})",
+                "label": "Likely your year",
                 "why": derive_class_year(o.bucket or "", o.title or "",
                                          o.cohort or "")[1]}
     return None
@@ -3878,8 +4014,8 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
                 **pick_items[p["id"]],
                 "show_firm": True,
                 "pick_reasons": why_by_id.get(p["id"], []),
-                "pick_why": " · ".join(r.text for r in why_by_id.get(p["id"], [])),
-                "pick_why_title": " ".join(r.detail for r in why_by_id.get(p["id"], [])),
+                **_pick_why_line(why_by_id.get(p["id"], []),
+                                 pick_items[p["id"]].get("verdict")),
             }
             for p in picks if p["id"] in pick_items
         ]
@@ -3915,9 +4051,13 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "cycle_note": _cycle_not_open_note(profile, open_qs),
             # …and WHEN it opens, which is the question that sentence raises
             # and never answered. Read from `FirmDate`, labelled as the
-            # forecast it is, and "" whenever the corpus cannot say. See
-            # `cycle_open_estimate`.
-            "cycle_open": cycle_open_estimate(profile, today=today),
+            # forecast it is, and {} whenever the corpus cannot say.
+            #
+            # `cycle_open_note`, not `cycle_open_estimate`: the claim renders
+            # as the line and its provenance as the line's `title`. The whole
+            # sentence is still built in one place and the digest still sends
+            # it whole — see `_cycle_open_parts`.
+            "cycle_open": cycle_open_note(profile, today=today),
             # WHY THE COLUMN IS EMPTY, when it is, and only for the reason
             # the filters do not already explain. `hidden_by_filter` above
             # covers "your filters hid them"; this covers the other empty,

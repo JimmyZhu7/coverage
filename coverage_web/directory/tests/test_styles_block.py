@@ -738,3 +738,104 @@ def test_the_abbreviated_countdown_still_reads_the_full_sentence_aloud(client):
     assert '<span aria-hidden="true">5d</span>' in body
     # The ear gets the sentence the comment promised.
     assert '<span class="vh">Closes in 5 days</span>' in body
+
+
+# ---------------------------------------------------------------------------
+# WRAPPED LINES DO NOT END, OR BEGIN, WITH A SEPARATOR (2026-09-02).
+#
+# The founder's review of the shipped board: "Note the trailing pipes with
+# nothing after them on some rows." He is describing the mirror image of a bug
+# this file already fixed once. A middot `::before` on every item but the
+# first opened line two with a stray mark; moving it to a trailing
+# `border-right` on every item but the last closed that and opened this.
+#
+# Both are the same bug, and the asymmetry that settles it is that a LEADING
+# mark can be clipped and a trailing one cannot: a leading mark sits in its
+# item's own negative margin, so on the first item of a wrapped line it lands
+# outside the container's padding box and `overflow: hidden` removes it. A
+# trailing mark sits in the slack that made the line wrap, with nothing to
+# clip against.
+# ---------------------------------------------------------------------------
+
+def test_the_meta_separator_leads_its_item_and_can_be_clipped():
+    css = _feed_css()
+    rule = _rule(css, ".rr-meta > *:not(:first-child)")
+    assert "border-left" in rule, rule
+    assert "margin-left: -6px" in rule, (
+        "the rule has to sit in the item's own negative margin, or the first "
+        "item of a wrapped line draws it at x=0 where nothing can clip it")
+    assert "padding-left: 6px" in rule, "6px of air on the item's side"
+    meta = _rule_all(css, ".rr-meta")
+    assert "overflow: hidden" in meta, (
+        "the clip is what makes a leading separator safe; without it the "
+        "negative margin just draws the rule outside the line")
+    assert "column-gap: 12px" in meta, (
+        "12px of gap is what the -6/+6 pair splits in half, so a mid-line "
+        "rule sits exactly between two items")
+    # And the trailing form must not come back.
+    bodies = [b for sel, b in _rules(css)
+              if sel == ".rr-meta > *:not(:last-child)"]
+    assert not bodies, (
+        "a trailing separator is back on the meta line; it orphans at the end "
+        "of every wrapped line, which is what the founder's review caught")
+
+
+def test_the_stat_strip_divider_is_out_of_flow_so_a_wrapped_line_can_clip_it():
+    """At 375px this strip wraps to two lines, and line two used to open with
+    a hairline and nothing to its left. Same defect, same fix, different
+    component: the divider is absolutely positioned in the item's own gap so
+    the container's `overflow: hidden` removes it wherever the item starts a
+    line. `column-gap` is not applied at the start of a wrapped line, so that
+    item sits at x=0 and its divider at x=-9."""
+    css = _feed_css()
+    divider = _rule(css, ".stat-strip .ss-item:not(:first-child)::before")
+    assert "position: absolute" in divider, divider
+    assert "left: -9px" in divider, divider
+    strip = _rule(css, ".stat-strip")
+    assert "overflow: hidden" in strip, "nothing clips the divider without this"
+    assert "column-gap: 18px" in strip, strip
+    item = _rule(css, ".stat-strip .ss-item")
+    assert "position: relative" in item, (
+        "the divider is positioned against its own item, not against the strip")
+
+
+# ---------------------------------------------------------------------------
+# THE BANNER, THE STRIP AND THE FOOTNOTE (2026-09-02).
+#
+# Founder's review: the stat strip's footnote was "crammed directly beneath
+# with no breathing room". It was worse than crammed. `.scope-foot` carried
+# `margin-top: calc(var(--s3) * -1)`, a -12px pull written to cancel
+# `.stat-strip`'s own 12px bottom margin — but `.board-state .stat-strip`
+# overrides that margin to a smaller value, so the pull was larger than the
+# thing it cancelled and the two boxes overlapped. Measured at 1280px before
+# the fix: the strip ran 412..431 and the footnote's box started at 425.
+# ---------------------------------------------------------------------------
+
+def test_the_footnote_states_its_own_gap_instead_of_cancelling_someone_elses():
+    css = _feed_css()
+    foot = " ".join(_rule(css, ".scope-foot").split())
+    assert foot.startswith("margin: 0;"), (
+        "the footnote must not carry a margin of its own; the ONE declaration "
+        f"setting its distance from the strip is `.board-state .stat-strip` ({foot})")
+    assert "calc(" not in foot, (
+        "a negative margin here is a rule written against another rule, which "
+        "is how a 12px cancel of an 8px margin became a 4px overlap")
+    strip = _rule(css, ".board-state .stat-strip")
+    assert "margin-bottom: var(--s2)" in strip, strip
+
+
+def test_the_save_banner_owns_its_own_bottom_margin():
+    """`.scope-line--act` was ONE class, and `.scope-line` further down the
+    same file is also one class, so source order handed the generic rule the
+    win and this element's margin was silently whatever `.scope-line` said.
+    The values agreed, so nothing showed until one of them had to change.
+    Pinned by specificity, the same fix `.firmcol-logo.firmcol-logo--picked`
+    carries a few hundred lines up."""
+    css = _feed_css()
+    rule = _rule(css, ".scope-line.scope-line--act")
+    assert "margin: 0 0 var(--s4)" in rule, (
+        "a bordered box needs more air under it than a line of text does")
+    bare = [b for sel, b in _rules(css) if sel == ".scope-line--act"]
+    assert not bare, (
+        "the single-class form is back; `.scope-line` will out-order it and "
+        "this rule's margin will go quiet again")

@@ -36,9 +36,22 @@ walks the same URL as a plain page load.
             reader navigates by went 1 → (nothing) → role card. The class
             stays on the anchor so the visual design is untouched.{% endcomment %}
             <h2 class="firmcol-h"><a class="firmcol-name" href="{% url 'directory:firm_detail' cl.firm_slug %}">{{ cl.firm_name|smart_title }}</a></h2>
-            <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
             {% comment %}
-            THIRD LINE — cut to what a target firm's tier actually is, dropped
+            ONE META LINE, NOT TWO (2026-09-02). The category+count line and
+            the tier chip used to be two stacked rows under the name, so the
+            38px logo tile hung beside a three-row text block and centred
+            itself against the middle of it — the founder's own words for the
+            result were "the top part of these widgets look weird". A tile
+            anchoring three short lines has nothing to align TO.
+
+            So the header is a two-row grid now (see `.firmcol-head`): the
+            tile sits on row one beside the name and nothing else, and every
+            remaining word shares row two on one line. Nothing was cut —
+            category, open count and tier are all still here, separated the
+            way this line already separated its own two halves.
+            {% endcomment %}
+            {% comment %}
+            THE TIER — cut to what a target firm's tier actually is, dropped
             entirely everywhere else.
 
             "Untiered" used to render on every firm you have NOT targeted —
@@ -56,13 +69,14 @@ walks the same URL as a plain page load.
             next. See `_columns.html`'s own history for the count; nothing
             downstream reads `cl.closing_count` any more.
             {% endcomment %}
-            {% comment %}The div itself always renders, even holding nothing —
-            see `test_firmcol_head.py`: a header that sometimes carries this
-            box and sometimes omits it is the exact alignment bug that test
-            guards (an id stack's height depends on what's inside it, and
-            `align-items: flex-start` only holds every name to the same top
-            edge if every column's box is there to be measured).{% endcomment %}
+            {% comment %}The div itself always renders, and now always holds
+            at least the category+count — see `test_firmcol_head.py`. The old
+            reason for it rendering empty is retired: name and meta are two
+            fixed grid ROWS now, so a name's y no longer depends on what is
+            (or is not) below it, and a firm with no tier simply has a shorter
+            second line rather than a missing third one.{% endcomment %}
             <div class="firmcol-stats">
+              <span class="firmcol-meta">{% if cl.category %}{{ cl.category }} · {% endif %}{{ cl.open_count }} open</span>
               {% if cl.is_mine %}<span class="firmcol-tier is-mine">{% if cl.tier %}Tier {{ cl.tier }}{% else %}Untiered{% endif %}</span>{% endif %}
             </div>
           </div>

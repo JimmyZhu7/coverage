@@ -191,7 +191,12 @@ def test_the_note_fires_only_when_the_board_lacks_the_cycle():
 
     note = _cycle_not_open_note(_P("2028 Summer Internship"), qs)
     assert "2028 Summer Internship" in note
-    assert "haven't opened" in note
+    # "not open ... yet", not "haven't opened ... yet": the sentence was
+    # shortened on 2026-09-02 (it wrapped to two italic lines inside a 320px
+    # column header). Both claims it carries are still asserted here — the
+    # cycle is not open, and what the column holds instead.
+    assert "not open" in note and "yet" in note
+    assert "Closest fits" in note
     # House copy: no em dash in product prose.
     assert "—" not in note
 
@@ -234,3 +239,71 @@ def test_the_note_stays_silent_once_any_one_named_cycle_is_open():
     qs = Opportunity.objects.filter(status="open")
     note = _cycle_not_open_note(_P("2028 Summer Internship", "2027 Spring Week / Insight"), qs)
     assert note == ""
+
+
+# ---------------------------------------------------------------------------
+# THE ROW'S OWN "WHY" LINE, BUDGETED (2026-09-02).
+#
+# `.rr-why` is one line that never wraps and ellipsises at the row's edge, so
+# whatever runs past the edge is cut by the browser MID-WORD. On the founder's
+# board it read "Tier 2 · matches IB · US · For 2028-2029 grads (yours) · You
+# know so…", which is not a shorter fact, it is a rendering fault, and it was
+# the fourth line of a four-line row. `_pick_why_line` makes the cut on whole
+# reasons instead, and counts what did not fit.
+# ---------------------------------------------------------------------------
+
+def test_the_why_line_cuts_on_whole_reasons_and_counts_the_rest():
+    from directory.views import _PICK_WHY_CHARS, _pick_why_line
+
+    long_ones = [
+        Reason("Tier 1", "Alpha is a Tier 1 firm on your target list.", "tier"),
+        Reason("matches IB", "Alpha covers IB, which you are recruiting for.", "track"),
+        Reason("United States", "One of the regions on your profile.", "region"),
+        Reason("you know someone here", "You have a warm contact at Alpha.", "network"),
+    ]
+    out = _pick_why_line(long_ones)
+
+    line = out["pick_why"]
+    assert len(line) <= _PICK_WHY_CHARS + 4, line
+    # Whole reasons only: the line never ends inside one of them.
+    shown = line.split(" +")[0]
+    for part in shown.split(" · "):
+        assert any(r.text == part for r in long_ones), part
+    # And what did not fit is COUNTED, never silently dropped.
+    hidden = len(long_ones) - len(shown.split(" · "))
+    if hidden:
+        assert line.endswith(f" +{hidden}"), line
+    # The title is always every reason, whatever the line could hold.
+    for r in long_ones:
+        assert r.detail in out["pick_why_title"]
+
+
+def test_a_year_verdict_takes_the_class_reason_off_the_visible_line():
+    """The founder's example row said the same thing three times: "Your year"
+    in the verdict, "Grad 2028-2029" in the fact chips, and "For 2028-2029
+    grads (yours)" here. The first two are different facts (the reader, and
+    the posting's own window); this one is a third rendering of them, so it
+    comes off the LINE and stays in the title.
+
+    A row with no year verdict keeps it — there it is the only place the year
+    is answered at all."""
+    from directory.views import _pick_why_line
+
+    cls = Reason("For 2028-2029 grads (yours)",
+                 "Your class year is inside the posting's stated window.", "class")
+    tier = Reason("Tier 2", "Alpha is a Tier 2 firm on your target list.", "tier")
+
+    with_verdict = _pick_why_line([tier, cls], {"kind": "year_ok"})
+    assert "For 2028-2029 grads" not in with_verdict["pick_why"]
+    assert "Tier 2" in with_verdict["pick_why"]
+    assert "inside the posting" in with_verdict["pick_why_title"], (
+        "the reason is suppressed on the line, never from the record")
+
+    without = _pick_why_line([tier, cls], None)
+    assert "For 2028-2029 grads (yours)" in without["pick_why"]
+
+    # A row whose ONLY reason is the suppressed one prints nothing rather than
+    # a bare "+1" — the template's own `{% if r.pick_why %}` then hides the
+    # line, and the year is on the meta line above it either way.
+    alone = _pick_why_line([cls], {"kind": "year_ok"})
+    assert alone["pick_why"] == ""
