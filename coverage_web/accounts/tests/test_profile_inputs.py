@@ -218,11 +218,14 @@ def test_blank_affiliations_stay_blank(user):
 # ---------------------------------------------------------------------------
 
 def _assert_controls_and_ledes(body: str):
+    """Rewritten 2026-09-02: the Study Level hint was cut. Every option in
+    the select already names the level ("Undergraduate", "Master's",
+    "PhD"), so "some programmes are MBA- or PhD-only" restated what the
+    control itself already said, one line under it."""
     assert 'name="languages"' in body
     assert 'id="id_study_level"' in body
     assert 'id="id_affiliations"' in body
     assert "Languages you can work in" in body
-    assert "Some programmes are MBA- or PhD-only. This keeps them off your picks." in body
     assert "Specific ties get replies: a club, a prior employer, a hometown." in body
 
 
@@ -267,7 +270,6 @@ def test_the_onboarding_profile_step_asks_only_what_the_feed_reads(client, user)
 
     # Still asked, because the feed reads every one of them.
     assert 'id="id_study_level"' in body
-    assert "Some programmes are MBA- or PhD-only. This keeps them off your picks." in body
     for field in ('name="school"', 'name="class_year"', 'name="target_cycles"',
                   'name="regions"', 'name="tracks"'):
         assert field in body
