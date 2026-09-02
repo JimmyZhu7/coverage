@@ -6,7 +6,7 @@ public page and is now fixed.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import re
 
@@ -1518,3 +1518,389 @@ def test_the_card_asks_for_its_eligibility_verdict_once(client, monkeypatch):
                                   "languages": [], "study_level": ""})
     assert calls == [o.id]
     assert item["verdict"]["kind"] == "year_ok"
+
+
+# ---------------------------------------------------------------------------
+# ABSOLUTE FRESHNESS ON THE CARD (WS-OPP-07).
+#
+# The countdown in the deadline column is a claim about a page Coverage read
+# at SOME point, and until now the only place the product said when was the
+# drawer — which a student reaches by opening it. Measured 2026-09-01: a
+# quarter of the rows under Today's "Closing in 10 days" ribbon were counting
+# down off pages six days old, 23 of them HSBC rows whose board had been
+# throwing an SSL error since 2026-08-25.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_a_stale_row_prints_its_age_where_the_countdown_is(client):
+    """Six days old: the age is VISIBLE text, not only a tooltip."""
+    firm = Firm.objects.create(slug="hsbc-stale", name="HSBC Stale")
+    o = _opp(firm, "https://hsbc.test/stale", deadline=TODAY + timedelta(days=2))
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=6), last_checked=NOW - timedelta(days=6))
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "6d old" in body, (
+        "a row last confirmed six days ago must say so beside its countdown"
+    )
+    # Not sighted-only, same rule the provenance mark follows on this page.
+    assert "Last confirmed live 6 days ago" in body
+
+
+@pytest.mark.django_db
+def test_a_row_verified_today_prints_no_age(client):
+    """The negative half, and the reason the threshold is borrowed rather
+    than invented: 2,627 of 2,723 open campus rows were verified inside 24
+    hours on 2026-09-01, so a mark on every row would mark nothing."""
+    firm = Firm.objects.create(slug="citi-fresh-age", name="Citi Fresh Age")
+    o = _opp(firm, "https://citi.test/fresh-age", deadline=TODAY + timedelta(days=2))
+    Opportunity.objects.filter(pk=o.pk).update(last_verified=NOW, last_checked=NOW)
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "d old" not in body
+    # …but the age is still on the deadline column's own tooltip, on every
+    # row that has one. That half is unconditional.
+    assert "Coverage last confirmed this posting live today" in body
+
+
+@pytest.mark.django_db
+def test_the_visible_age_uses_the_unconfirmed_notes_own_threshold():
+    """P5. The template's condition is `r.unconfirmed`, so the "how stale is
+    too stale" number lives in exactly one place — `_UNCONFIRMED_AFTER_DAYS`,
+    itself borrowed from `health.py`'s CONSECUTIVE_FAILURES so the operator
+    alarm and the student-facing note fire on the same evidence. A second
+    comparison in the template would be a third idea of stale."""
+    from directory.views import _UNCONFIRMED_AFTER_DAYS
+
+    firm = Firm.objects.create(slug="threshold", name="Threshold")
+    o = _opp(firm, "https://threshold.test/1")
+
+    just_under = _UNCONFIRMED_AFTER_DAYS - 1
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=just_under),
+        last_checked=NOW - timedelta(days=just_under))
+    o.refresh_from_db()
+    assert _unconfirmed_note(o) == {}
+
+    Opportunity.objects.filter(pk=o.pk).update(
+        last_verified=NOW - timedelta(days=_UNCONFIRMED_AFTER_DAYS),
+        last_checked=NOW - timedelta(days=_UNCONFIRMED_AFTER_DAYS))
+    o.refresh_from_db()
+    note = _unconfirmed_note(o)
+    assert note["days"] == _UNCONFIRMED_AFTER_DAYS, (
+        "the note must carry the number as a number so a template can print "
+        "it rather than dig it out of the prose"
+    )
+
+
+# ---------------------------------------------------------------------------
+# THE DEADLINE LAYER'S OWN DOCUMENTATION (WS-OPP-15).
+#
+# Two bare numbers in a comment went stale twice: "92 of the 121" survived
+# until the board had nearly trebled (2.8x off), and the "327 of the 341"
+# that replaced it was 8% off within a day. A share of the board is not a
+# constant, so the figures now live in one dated object and the claim they
+# make is tied to the code path that produces it.
+#
+# WHY THIS IS NOT A LIVE RE-COUNT. The audit's preferred criterion was a test
+# asserting the comment's number equals the live count. That is not available
+# to a pytest: the suite runs against an empty per-worktree test database
+# (`settings/base.py`'s `TEST.NAME`), so such a test would assert 0 == 354 and
+# the only way to make it pass would be to weaken it into nothing. What is
+# available, and is what these do, is to pin the DATE and the PREDICATE — the
+# numbers may go stale, but they can never quietly start describing a
+# different question than the code asks.
+# ---------------------------------------------------------------------------
+
+def test_the_prose_read_measurement_carries_the_day_it_was_taken():
+    from directory.views import PROSE_READ_DEADLINES
+
+    measured = PROSE_READ_DEADLINES["measured_on"]
+    assert isinstance(measured, date), "the measurement must carry a real date"
+    assert measured <= TODAY, "a measurement cannot have been taken in the future"
+    assert (PROSE_READ_DEADLINES["prose_read"]
+            <= PROSE_READ_DEADLINES["dated_open_campus"]), (
+        "the prose-read subset cannot exceed the dated set it is a subset of"
+    )
+    assert PROSE_READ_DEADLINES["query"], (
+        "the measurement must name the predicate it counted, or re-taking it "
+        "is a reconstruction rather than a re-run"
+    )
+
+
+@pytest.mark.django_db
+def test_the_measurements_predicate_is_the_one_the_code_branches_on():
+    """The number claims something about `confidence < _CONFIRMED_AT` on
+    dated rows. This asserts `deadline_provenance` — the function the whole
+    marker rests on — splits on exactly that, so the comment and the code
+    cannot drift into describing different populations."""
+    from directory.views import (
+        _CONFIRMED_AT, PROSE_READ_DEADLINES, deadline_provenance,
+    )
+
+    assert "confidence < _CONFIRMED_AT" in PROSE_READ_DEADLINES["query"]
+    assert "deadline is not null" in PROSE_READ_DEADLINES["query"]
+
+    firm = Firm.objects.create(slug="prov-pred", name="Prov")
+    dated_prose = _opp(firm, "https://prov.test/1", deadline=TODAY + timedelta(days=5))
+    dated_prose.confidence = _CONFIRMED_AT - 0.4
+    dated_stated = _opp(firm, "https://prov.test/2", deadline=TODAY + timedelta(days=5))
+    dated_stated.confidence = _CONFIRMED_AT
+    undated = _opp(firm, "https://prov.test/3")
+    undated.confidence = _CONFIRMED_AT - 0.4
+
+    assert deadline_provenance(dated_prose)["label"] == "reported"
+    assert deadline_provenance(dated_stated) is None
+    assert deadline_provenance(undated) is None
+
+
+def test_the_inexact_precision_guard_is_marked_as_one():
+    """`_INEXACT_PRECISIONS` gates a rendering path with zero live rows and a
+    reader will assume it is live. It stays — the column has no vocabulary
+    constraint and a fully editable admin over it, so a `month` value is one
+    save away — but it is labelled, and this pins that the label is there
+    with the day it was checked."""
+    import inspect
+
+    from directory import views
+
+    src = inspect.getsource(views)
+    block = src.split("_INEXACT_PRECISIONS = ")[0][-2000:]
+    assert "GUARD, NOT A LIVE PATH" in block, (
+        "the zero-live-rows note has gone; a reader will assume the branch "
+        "below it is reached on today's data"
+    )
+    assert re.search(r"20\d\d-\d\d-\d\d", block), (
+        "the guard's note must carry the date its zero was measured"
+    )
+
+
+def test_the_today_ribbon_reads_one_definition_of_closing_soon():
+    """P5, enforced by absence. `crm/` must not spell the closing-soon window
+    itself: `deadline__range=(today, today + timedelta(days=9))` was the
+    second, inline copy of the arithmetic `directory.deadlines` exists to
+    own, and two copies of a window are two answers to "is this closing
+    soon". Walked over the source files rather than through `git grep`, so
+    the check works in a worktree, a shallow clone or an unpacked tarball."""
+    from pathlib import Path
+
+    crm = Path(__file__).resolve().parents[2] / "crm"
+    hits = [
+        f"{path.relative_to(crm.parent)}:{n}"
+        for path in sorted(crm.rglob("*.py"))
+        for n, line in enumerate(path.read_text().splitlines(), 1)
+        if "deadline__range" in line and not line.lstrip().startswith("#")
+    ]
+    assert hits == [], f"crm/ re-derives the closing-soon window: {hits}"
+
+
+def test_the_today_ribbons_qualifier_names_the_reported_count():
+    """The ribbon's other half of the same honesty. 96% of dated open campus
+    deadlines are Coverage's own reading of the posting's prose, so an
+    unqualified urgent number over that window is mostly reporting our own
+    reading back as the market's calendar."""
+    from pathlib import Path
+
+    tpl = (Path(__file__).resolve().parents[2]
+           / "templates" / "crm" / "week.html").read_text()
+    assert "closing_10_reported" in tpl, (
+        "the ribbon must qualify its count with how many of those dates are "
+        "our own reading of the posting's prose"
+    )
+    assert "reported" in tpl
+
+
+# ---------------------------------------------------------------------------
+# A POSTING NOBODY TOOK DOWN (WS-OPP-14).
+#
+# Two open campus rows sit past their own stated deadline and both are
+# `last_verified` today, so the firms genuinely still list them. The row must
+# NOT be closed — 11 of 17 Citi postings that stated a close date were still
+# live past it, one by eight months — so only the affordance changes.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_a_long_abandoned_row_loses_its_save_button_and_says_why(client, django_user_model):
+    """261 days past, still listed. The Save button goes; the note and the
+    outbound link stay."""
+    user = django_user_model.objects.create_user(
+        email="abandon@example.com", password="x" * 14)
+    client.force_login(user)
+
+    firm = Firm.objects.create(slug="stifel-old", name="Stifel Old")
+    o = _opp(firm, "https://stifel.test/old", deadline=TODAY - timedelta(days=261))
+    Opportunity.objects.filter(pk=o.pk).update(last_verified=NOW, last_checked=NOW)
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "Looks abandoned" in body
+    assert "track-abandoned" in body
+    assert ">\n      Save\n    </button>" not in body and "Save this role" not in body, (
+        "the product must not offer to put a posting nobody has taken down "
+        "into a student's pipeline"
+    )
+    # The link out is untouched: the firm's page is still the record.
+    assert "https://stifel.test/old" in body
+    # And nothing was closed.
+    o.refresh_from_db()
+    assert o.status == "open"
+    assert Opportunity.objects.filter(status="closed").count() == 0
+
+
+@pytest.mark.django_db
+def test_a_row_one_day_past_its_deadline_keeps_its_save_button(client, django_user_model):
+    """The case the 30-day threshold exists to protect. A stated deadline is
+    a plan, not an event: Citi labels the datum "Anticipated Posting Close
+    Date" and most postings stating one were still live past it."""
+    user = django_user_model.objects.create_user(
+        email="recent@example.com", password="x" * 14)
+    client.force_login(user)
+
+    firm = Firm.objects.create(slug="accenture-new", name="Accenture New")
+    o = _opp(firm, "https://accenture.test/new", deadline=TODAY - timedelta(days=1))
+    Opportunity.objects.filter(pk=o.pk).update(last_verified=NOW, last_checked=NOW)
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "Save this role" in body
+    assert "Looks abandoned" not in body
+
+
+@pytest.mark.django_db
+def test_the_abandoned_verdict_has_one_definition():
+    """P5. The feed card and the htmx swap that re-renders one card's control
+    both need this answer, and the day they compute their own is the day a
+    student un-saves such a row and is handed back the Save button the feed
+    had just withheld."""
+    from directory.views import _ABANDONED_AFTER_DAYS, _abandoned_note
+
+    firm = Firm.objects.create(slug="one-def", name="One Def")
+    inside = _opp(firm, "https://one-def.test/inside",
+                  deadline=TODAY - timedelta(days=_ABANDONED_AFTER_DAYS))
+    outside = _opp(firm, "https://one-def.test/outside",
+                   deadline=TODAY - timedelta(days=_ABANDONED_AFTER_DAYS + 1))
+    undated = _opp(firm, "https://one-def.test/undated")
+    future = _opp(firm, "https://one-def.test/future",
+                  deadline=TODAY + timedelta(days=5))
+
+    assert _abandoned_note(inside) == {}
+    assert _abandoned_note(outside)["days"] == _ABANDONED_AFTER_DAYS + 1
+    assert _abandoned_note(undated) == {}
+    assert _abandoned_note(future) == {}
+
+    # A row the scraper has confirmed dead already has its own honest
+    # message and must not get a second, weaker one guessing at the same
+    # thing.
+    Opportunity.objects.filter(pk=outside.pk).update(status="closed")
+    outside.refresh_from_db()
+    assert _abandoned_note(outside) == {}
+
+
+@pytest.mark.django_db
+def test_an_already_saved_abandoned_row_keeps_the_control_that_undoes_it(client, django_user_model):
+    """Withdrawing a control someone has already used would strand their own
+    row, which is a worse failure than the one this fixes."""
+    from analytics.models import UserOpportunity
+
+    user = django_user_model.objects.create_user(
+        email="saved-abandon@example.com", password="x" * 14)
+    client.force_login(user)
+
+    firm = Firm.objects.create(slug="saved-old", name="Saved Old")
+    o = _opp(firm, "https://saved-old.test/1", deadline=TODAY - timedelta(days=100))
+    UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "Remove from saved" in body
+
+
+# ---------------------------------------------------------------------------
+# HOW A FIRM ACTUALLY HIRES (WS-OPP-04).
+#
+# `Firm.recruiting_style` has been a column since the CRM half shipped and
+# reached no opportunity surface at all: 302 open campus rows at 15
+# assessment firms carried the same framing as a Citi row.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_test_gated_chip_renders_at_an_assessment_firm(client):
+    firm = Firm.objects.create(slug="sig", name="SIG",
+                               recruiting_style=Firm.RECRUITING_STYLE_ASSESSMENT)
+    _opp(firm, "https://sig.test/1")
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "Test-gated" in body
+    assert "hires by assessment" in body or "test or competition" in body
+    # It points at the firm page, where the fuller answer lives.
+    assert 'href="/firms/sig/"' in body or "/sig/" in body
+
+
+@pytest.mark.django_db
+def test_the_test_gated_chip_does_not_render_at_a_campus_firm(client):
+    firm = Firm.objects.create(slug="citi-campus", name="Citi Campus",
+                               recruiting_style=Firm.RECRUITING_STYLE_CAMPUS)
+    _opp(firm, "https://citi.test/campus")
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "Test-gated" not in body
+
+
+#: The claims no surface may make about networking at a test-gated firm.
+#: `research-st-quant.md` Q3 (Grade A) supports "the firm hires by
+#: assessment" and supports nothing stronger: it records that no mechanism
+#: from a chat into the pipeline is documented, NOT that a chat is harmful.
+#: The gap between those two sentences is the whole reason the chip is
+#: allowed to exist at all.
+_NETWORKING_OVERCLAIMS = re.compile(
+    r"networking (?:does not|doesn.t) help"
+    r"|hurts your odds"
+    r"|networking hurts"
+    r"|networking is counterproductive"
+    r"|(?:don.t|do not) (?:bother|waste)",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.django_db
+def test_the_product_never_says_networking_hurts(client, django_user_model):
+    """The limit the source itself states, checked on RENDERED COPY.
+
+    Deliberately not a `git grep` over the source, which is what the audit
+    criterion suggested and what a first pass here did: the phrases appear
+    all over this repository's comments precisely BECAUSE they are the thing
+    being forbidden, so a source grep fails on its own explanation of itself
+    and would push the reasoning out of the files that need it. What matters
+    is what a student reads, so this renders the two surfaces that can carry
+    the claim — the feed card with the chip on it, and the scorer's own
+    reason text — and reads those.
+    """
+    user = django_user_model.objects.create_user(
+        email="no-overclaim@example.com", password="x" * 14)
+    user.tracks = ["st"]
+    user.regions = ["us"]
+    user.save()
+    client.force_login(user)
+
+    firm = Firm.objects.create(slug="janestreet", name="Jane Street",
+                               tracks=["st"],
+                               recruiting_style=Firm.RECRUITING_STYLE_ASSESSMENT)
+    _opp(firm, "https://janestreet.test/1", region="us")
+
+    body = _STYLE_RE.sub("", client.get("/opportunities/").content.decode())
+    assert "Test-gated" in body, "the chip must be on the page under test"
+    hit = _NETWORKING_OVERCLAIMS.search(body)
+    assert hit is None, f"the rendered feed overclaims about networking: {hit!r}"
+
+    # The scorer's own reason text, which reaches the card, the digest email
+    # and the pick tooltip. Read straight off the axis rather than off a
+    # page, so a surface that starts rendering it later is covered too.
+    from directory.recommend import Candidate, Profile, _network_fit
+
+    profile = Profile.from_user(user, {}, warm_firms={firm.id: "warm"})
+    points, reasons = _network_fit(
+        profile,
+        Candidate(id=1, firm_id=firm.id, firm_name=firm.name,
+                  firm_slug=firm.slug, title="Quant Trader", url="https://x/1",
+                  recruiting_style="assessment"),
+    )
+    assert points == 0
+    for r in reasons:
+        assert _NETWORKING_OVERCLAIMS.search(f"{r.text} {r.detail}") is None, r

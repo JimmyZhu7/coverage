@@ -290,7 +290,8 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     # bucket_from_contract — a hint only breaks ties on neutral titles, and
     # French titles are opaque, not neutral); the title rules take over
     # where it is silent.
-    bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"))
+    bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"),
+                                   opp.title or "")
               or classify_role(opp.title or "", campus_hint=campus_hint))
     cohort = (opp.cohort or extract_cohort(opp.title or "")
               or cohort_from_provider_title(opp.raw))

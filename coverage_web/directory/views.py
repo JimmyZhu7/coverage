@@ -168,18 +168,50 @@ def confidence_marker(value):
 
 
 # Where a deadline came from. `Opportunity.confidence` is 1.0 when the
-# provider handed us the date in a structured field and 0.6 when
-# `enrich_postings` read it out of the posting's own prose — and 327 of the 341
-# dated open campus roles are the second kind (measured 2026-09-01). This said
-# "92 of the 121" until tonight, from the board as it stood when the comment
-# was written; the board has nearly trebled since and the share has gone from
-# 76% to 96%, which is a stronger case for the marker than the old number made.
-# Both are worth showing; only one of them is a quotation of a field, and a
-# page that renders them identically is claiming a certainty it does not have.
+# provider handed us the date in a structured field and below it when
+# `enrich_postings` read it out of the posting's own prose. The vast majority
+# of dated campus roles are the second kind — see `PROSE_READ_DEADLINES`
+# below for the count and the day it was taken. Both are worth showing; only
+# one of them is a quotation of a field, and a page that renders them
+# identically is claiming a certainty it does not have.
 #
 # "Reported" rather than "unconfirmed": the date IS what the posting says. The
 # word is about the reading being ours, not about doubting the firm.
 _CONFIRMED_AT = 1.0
+
+#: THE MEASUREMENT, IN ONE PLACE, WITH THE DAY IT WAS TAKEN.
+#:
+#: This used to be two bare numbers in the comment above and they went stale
+#: twice: "92 of the 121" survived until the board had nearly trebled (2.8x
+#: off), and the "327 of the 341" that replaced it was 8% off within a day.
+#: A share of the board is not a constant — it moves every time a connector
+#: runs — so a number written in prose with nothing to check it against is a
+#: claim with a half-life.
+#:
+#: Three things follow from that, and they are the whole design here.
+#: (1) The figures live in ONE object, so a reader and a future editor cannot
+#: find two copies. (2) The object carries `measured_on`, so anyone can see
+#: how old the claim is without reading git blame. (3) `query` names the
+#: exact predicate the numbers count, so re-taking the measurement is
+#: mechanical rather than a reconstruction — run that query, replace these
+#: three values, move the date.
+#:
+#: WHY NOT A TEST THAT RE-COUNTS THE LIVE BOARD. That was the preferred shape
+#: and it is not available: pytest runs against an empty per-worktree test
+#: database (`settings/base.py`'s `TEST.NAME`), so a test asserting these
+#: numbers against `Opportunity.objects` would assert 0 == 354 and the only
+#: way to make it pass would be to weaken it into meaninglessness. What a
+#: test CAN pin, and `test_feed_honesty.py` does, is that the predicate named
+#: in `query` is the predicate `deadline_provenance` actually branches on,
+#: and that the date is present and parseable — so the numbers can go stale
+#: but they can never describe a different question than the code asks.
+PROSE_READ_DEADLINES = {
+    "measured_on": date(2026, 9, 2),
+    "query": ("status='open', bucket in TARGET_BUCKETS, deadline is not null, "
+              "confidence < _CONFIRMED_AT"),
+    "dated_open_campus": 407,
+    "prose_read": 354,
+}
 
 
 def deadline_provenance(opp) -> dict | None:
@@ -197,11 +229,22 @@ def deadline_provenance(opp) -> dict | None:
 # the same date, and the reader believes the specific one — which is how a
 # `~`-prefixed estimate reaches a student as a deadline to plan around.
 #
-# `Opportunity.deadline_precision` is a bare `CharField` with no vocabulary
-# constraint and a fully editable `OpportunityAdmin` over it, so this is one
-# admin save away, exactly like the `confidence=95.0` write that
+# A GUARD, NOT A LIVE PATH — and the distinction is the point of this note.
+# Measured 2026-09-02: `Opportunity.deadline_precision` holds exactly two
+# values across the whole table, "" (15,621 rows) and "day" (624), and ZERO
+# rows carry "month" or "estimated". Everything this constant gates is
+# therefore dead on today's data, and a reader who assumes otherwise will
+# spend time reasoning about a rendering path nothing reaches.
+#
+# It stays anyway, and is not a leftover. `deadline_precision` is a bare
+# `CharField` with no vocabulary constraint and a fully editable
+# `OpportunityAdmin` over it, so a `month` value is one admin save away —
+# exactly like the `confidence=95.0` write that
 # `opportunities_confidence_in_range` exists for. `FirmDate` already carries
-# 25 `estimated` rows; the two columns mean the same thing.
+# 25 `estimated` rows through the same kind of column, so the value is not
+# hypothetical, only absent HERE. The failure it prevents is silent: without
+# it a month-level guess renders beside an exact day countdown, and the
+# reader believes the specific one.
 _INEXACT_PRECISIONS = ("month", "estimated")
 
 
@@ -730,6 +773,135 @@ def _cycle_not_open_note(profile, open_qs) -> str:
     where = " in your regions" if regions else ""
     return (f"{names} postings haven't opened{where} yet. "
             f"These are today's closest fits.")
+
+
+#: HOW MANY FIRMS HAVE TO AGREE BEFORE A MARKET'S OPEN WINDOW IS PRINTED.
+#:
+#: WHAT IT ENCODES. `cycle_open_estimate` below names a MONTH RANGE, and a
+#: range is only a range if several firms drew it. One firm's date is that
+#: firm's date, and printing it as "when your cycle opens in Hong Kong" would
+#: turn one observation into a market-wide claim — the exact move P1 forbids.
+#:
+#: WHY THREE. It is the number `research-us-ib-calendar.md §10` already
+#: settles on for the same question in the other direction: a firm with fewer
+#: than three observations shows nothing rather than a guess (Grade A
+#: negative). Borrowed rather than re-chosen, so the timeline page and this
+#: sentence hold one idea of "enough evidence to say something" instead of
+#: two. Three is also the smallest number at which a range can be wrong in
+#: only one direction — two dates always look like a clean interval even when
+#: both are outliers.
+#:
+#: WHAT WOULD CHANGE IT. A market where the firms genuinely cluster (every
+#: bulge bracket in Hong Kong opening the same September) could justify
+#: dropping to two, and a market where they scatter could justify raising it.
+#: Both are measurable from `FirmDate` the moment there are enough rows to
+#: measure: today Hong Kong has 7 qualifying firms and the US has 16, so the
+#: threshold binds nothing on the founder's board and exists for the markets
+#: the corpus has barely started on.
+CYCLE_OPEN_MIN_FIRMS = 3
+
+
+def cycle_open_estimate(profile, *, today=None) -> str:
+    """One sentence naming when the student's OWN cycle is expected to open,
+    per market, or "" when the corpus cannot say.
+
+    THE POINT OF THE ITEM. `_cycle_not_open_note` above already says the
+    cycle has not opened; measured on the founder's board it fires and then
+    stops, which leaves a student reading "2028 Summer Internship postings
+    haven't opened in your regions yet" with no answer to the only question
+    that sentence raises. `FirmDate` has held the answer the whole time: 28
+    `app_open` rows for `sa2028`, 7 in Hong Kong and 16 in the US matching
+    his tracks. This is those rows, read.
+
+    EVERY DATE HERE IS A FORECAST AND SAYS SO. `research-us-ib-calendar.md`
+    §7 (Grade A/B) is explicit that every SA 2028 date is one. So the
+    sentence carries the word "estimated" whenever every row behind it is
+    `precision="estimated"`, and where any row is firmer the wording drops to
+    "expected" rather than claiming a confirmed date — no row here is ever
+    rendered as a date the firm published.
+
+    FOUR SCOPES, EACH FOR ITS OWN REASON:
+
+      * the student's CYCLE, via `cycle_slug_for_target`, so a 2028 student
+        is never shown the 2027 calendar;
+      * their REGIONS, because the HK/US split is real and Grade A on the
+        HK leg (`research-hongkong.md §1`) — September against February;
+      * their TRACKS, because `FirmDate.track` was split out of `cycle`
+        precisely so a student's stated desks could be matched, and a `pe`
+        date is not this student's cycle. A row with a blank track is
+        cycle-wide and counts for everyone;
+      * FUTURE dates only. A date already past cannot be an answer to "when
+        does it open", and this is also what makes the sentence robust to
+        the six HK `app_close` rows still labelled `sa2028` that WS-CRM-02
+        will relabel `sa2027`: the one `app_open` row with the same defect
+        (Nomura HK, 2026-09-01, a year early) is dropped by this test rather
+        than dragging the Hong Kong range back twelve months. When those
+        rows are relabelled nothing here changes.
+
+    Returns "" — and the caller prints nothing — when the student named no
+    cycle, no regions, or when no market clears `CYCLE_OPEN_MIN_FIRMS`. P3:
+    a thin profile and a thin corpus both get today's behaviour, which is
+    silence.
+    """
+    from .models import FirmDate
+
+    today = today or timezone.localdate()
+    cycles = [
+        slug for slug in (
+            cycle_slug_for_target(*parsed)
+            for parsed in (
+                parse_target_cycle(raw)
+                for raw in getattr(profile, "target_cycles", None) or []
+            )
+            if parsed is not None
+        ) if slug
+    ]
+    regions = [r.lower() for r in (getattr(profile, "regions", None) or ())]
+    if not cycles or not regions:
+        return ""
+    tracks = [t.lower() for t in (getattr(profile, "tracks", None) or ())]
+
+    rows = FirmDate.objects.filter(
+        event_kind="app_open", cycle__in=cycles, region__in=regions,
+        date__gt=today,
+    )
+    if tracks:
+        # A cycle-wide row (blank track) speaks for every desk; a
+        # desk-scoped row speaks only for its own. Same rule the timeline
+        # page applies, and the reason the column was split out of `cycle`.
+        rows = rows.filter(Q(track="") | Q(track__in=tracks))
+
+    by_region: dict[str, list] = {}
+    for fd in rows.select_related("firm"):
+        by_region.setdefault(fd.region.lower(), []).append(fd)
+
+    parts, all_estimated = [], True
+    for region in regions:
+        found = by_region.get(region) or []
+        # Count FIRMS, not rows: Goldman files a cycle-wide US row and an
+        # `ib` one, and two rows from one firm are one firm's opinion.
+        if len({fd.firm_id for fd in found}) < CYCLE_OPEN_MIN_FIRMS:
+            continue
+        dates = sorted(fd.date for fd in found if fd.date)
+        if not dates:
+            continue
+        all_estimated = all_estimated and all(
+            (fd.precision or "") == "estimated" for fd in found
+        )
+        lo, hi = dates[0], dates[-1]
+        span = (f"{lo:%b %Y}" if (lo.year, lo.month) == (hi.year, hi.month)
+                else f"{lo:%b %Y} to {hi:%b %Y}")
+        parts.append(f"{REGION_LABELS.get(region, region.upper())} {span}")
+    if not parts:
+        return ""
+
+    # No em dash (P7). "Estimated" is a word about the DATES, so it leads the
+    # clause they sit in rather than trailing as a disclaimer nobody reads.
+    lead = "Estimated to open" if all_estimated else "Expected to open"
+    where = parts[0] if len(parts) == 1 else " and ".join(parts)
+    return (f"{lead} {where}, from past cycles at "
+            f"{len({fd.firm_id for fd in rows})} firms. Not a firm's own "
+            f"published date.")
 
 
 def _group_picks(cards):
@@ -1871,6 +2043,73 @@ _UNCONFIRMED_AFTER_DAYS = 3
 # How many rolling cards the feed shows before deferring to browse-by-firm.
 _ROLLING_FEED_CAP = 30
 
+# HOW FAR PAST ITS OWN STATED DEADLINE A STILL-LISTED POSTING GOES BEFORE THE
+# PRODUCT STOPS OFFERING TO SAVE IT.
+#
+# WHAT IT ENCODES. Not "this posting is closed" — that inference is
+# forbidden, and for a measured reason: Citi labels the datum "Anticipated
+# Posting Close Date" and 11 of 17 postings that stated one were still live
+# past it, one of them by eight months (`research-ats-lifecycle.md` unsafe
+# #1 and #2, Grade A). A stated deadline is a plan, not an event, and the
+# board still listing the row is real evidence against calling it dead. So
+# `status` stays "open", nothing is closed, and the outbound link stays: the
+# firm's own page remains the record. What changes is only the affordance —
+# the product declines to tell a student to put it in their pipeline.
+#
+# WHY 30 DAYS. It is the point where the two explanations for "past its date
+# and still up" swap places. Inside a month, "the date was approximate and
+# the firm is still reading applications" is ordinary and Citi's 11-of-17
+# is exactly that population. Past a month, the better explanation is that
+# nobody has taken the posting down — which is a fact about the firm's ATS
+# hygiene, not an invitation. Measured 2026-09-02 on the live board: 17 open
+# rows sit past their own stated deadline, 6 of them by more than 30 days,
+# and just 1 of those 6 is a campus row (Stifel, 262 days past, whose prose
+# read verifies against `raw.detail_text`). Accenture's campus row, 2 days
+# past, keeps its Save, which is the case the threshold exists to protect.
+#
+# WHAT WOULD CHANGE IT. A measurement of how often a row more than 30 days
+# past its stated date is still genuinely accepting applications. Coverage
+# cannot see that today — every Workday path returns 200 and absence from a
+# search is not proof of closure (`research-ats-lifecycle.md` unsafe #5) —
+# so the number is a judgement about which explanation is likelier, held at
+# the coarsest unit that makes the judgement, and it should move the moment
+# a firm's own reply rate past its deadline is observable.
+_ABANDONED_AFTER_DAYS = 30
+
+
+def _abandoned_note(o, *, today=None) -> dict:
+    """"The firm left this up and nobody took it down", or {}.
+
+    ONE DEFINITION (P5). Three surfaces need this answer — the feed card
+    (`_urgency_item`), the htmx swap that re-renders one card's control
+    (`_track_control`), and the tests that pin both — and the day two of them
+    computed their own day arithmetic is the day a student could un-save a
+    row and be handed back the Save button the feed had just withheld.
+
+    Deliberately NOT a status change and NOT a filter. `status` stays "open",
+    the row keeps its place in the feed (sorted last, as passed rows already
+    are) and keeps its outbound link. See `_ABANDONED_AFTER_DAYS` for why a
+    prose deadline may not close a row, and P4: the card stays and says why.
+
+    A row with no deadline, a future deadline, or a closed status gets {}: a
+    closed row already has its own honest message (`_role_drawer.html`'s
+    closed branch, `_posting_closed_note`) and does not need a second, weaker
+    one guessing at the same thing.
+    """
+    if o.deadline is None or is_posting_closed(o):
+        return {}
+    overdue = ((today or timezone.localdate()) - o.deadline).days
+    if overdue <= _ABANDONED_AFTER_DAYS:
+        return {}
+    return {
+        "label": "Looks abandoned",
+        "days": overdue,
+        "why": (f"This posting's own stated deadline passed {overdue} days "
+                f"ago and the firm still lists it. That usually means nobody "
+                f"has taken it down. Check the firm's page before spending "
+                f"time on it."),
+    }
+
 
 def _unconfirmed_note(o, *, as_of_date=None) -> dict:
     """Whether Coverage's own most recent check of this posting actually
@@ -1935,6 +2174,17 @@ def _unconfirmed_note(o, *, as_of_date=None) -> dict:
     if not check_failed and stale_days < _UNCONFIRMED_AFTER_DAYS:
         return {}
     return {
+        # The number, as a number, so a template can PRINT it rather than
+        # find it inside `why`. Until this key existed the age was rendered
+        # in exactly one place in the product — the drawer's "Read from the
+        # posting Nd ago" — which a student reaches only by opening it. The
+        # feed asserts "Closes in 8 days" over the same evidence and said
+        # nothing about how old that evidence was; measured 2026-09-01, a
+        # quarter of the rows under the "Closing in 10 days" ribbon were
+        # reading off pages six days stale. `days` is present whenever the
+        # note fires, including the check-failed branch, where it is the
+        # answer to "since when" that branch's own sentence leaves out.
+        "days": stale_days,
         "label": "Not recently confirmed live",
         "why": (("Our last check of this posting could not confirm it is "
                  "still live. ")
@@ -1961,7 +2211,25 @@ def _unconfirmed_note(o, *, as_of_date=None) -> dict:
 # chip cut in half is worse than a chip that isn't there.
 _FACT_CHIP_ORDER = ("sponsorship", "study", "language", "pay", "grad", "gpa",
                     "duration", "cover_letter", "transcript", "assessment")
-_FACT_CHIPS_MAX = 2
+# THREE, AS OF 2026-09-02, AND THE MEASUREMENT ABOVE IS WHY IT COULD MOVE.
+# The two-chip cap was correct for the line it was measured on: one nowrap
+# row, every part `flex: none`, a single `:last-child` allowed to shrink, and
+# 266px to fit chips into. A third chip did not fit and a chip cut in half is
+# worse than a chip that is not there.
+#
+# That line no longer exists. `.rr-meta` wraps (see `_rolecard.html`'s header
+# note: the truncation policy moved to one named 205px cap on `.rr-loc`), so
+# the constraint the 2 was derived from — horizontal room on one line — is
+# gone, and a third chip costs a line break rather than a cut chip.
+#
+# What the 2 was costing, measured on the live board: 128 open rows state a
+# third fact behind the cap and every one of them also states sponsorship or
+# a year of study, i.e. the hidden chip is competing with a wall. It is not
+# raised further than 3: the drawer now carries EVERY stated fact beside the
+# sentence that produced it (see `_FACT_LABELS` and `role_description`), so
+# the card's job is the decisive few and the drawer's is completeness. A
+# fourth chip would be the card trying to be the drawer.
+_FACT_CHIPS_MAX = 3
 
 # The two verdict kinds `_language_fit` issues. Neither blocks — see that
 # function for why a posting's language line is a warning at most.
@@ -2457,6 +2725,34 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
         "cohort": o.cohort,
         "class_year": o.class_year,
         "is_mine": o.firm_id in my_firm_ids,
+        # HOW THIS FIRM ACTUALLY HIRES, on the card that offers the role.
+        #
+        # `Firm.recruiting_style` has been a column since the CRM half of
+        # this shipped, and until now it reached no opportunity surface at
+        # all — it was read by `crm/coverage.py`, `crm/sourcing.py` and one
+        # line of `crm/views.py` and nowhere else. So 302 open campus rows at
+        # 15 assessment firms (SIG 77, Jump 45, IMC 39, Optiver 35, DRW 22,
+        # Virtu 19, …, measured 2026-09-02) carried the same framing as a
+        # Citi row, and a pick at one of them could say "You know someone
+        # here" as if that were the lever.
+        #
+        # WHAT THE CHIP MAY SAY, and the limit is the source's own. Jane
+        # Street's FAQ declines one-to-one coffee chats by policy and Citadel
+        # Securities' campus funnel is entirely competitions and events
+        # (`research-st-quant.md` Q3, Grade A). What NO source shows is that
+        # networking is counterproductive — only that no mechanism is
+        # documented. So the copy says the firm hires by assessment and never
+        # says networking hurts. `test_feed_honesty.py` greps for the
+        # forbidden phrasings.
+        "assessment": (
+            {"label": "Test-gated",
+             "why": ("This firm's own process is a test or competition. "
+                     "Coverage does not score your network here because "
+                     "there is no documented path from a chat to the "
+                     "pipeline. See the firm page.")}
+            if o.firm.recruiting_style == Firm.RECRUITING_STYLE_ASSESSMENT
+            else {}
+        ),
         "seen_days": seen_days,
         "is_fresh": seen_days is not None and seen_days <= _FRESH_DAYS,
         # How long THIS posting has been open, or None when that is not a
@@ -2481,6 +2777,29 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
         # {} on a clean confirmation; a label+why when our last check of this
         # URL could not reconfirm it — see `_unconfirmed_note`.
         "unconfirmed": _unconfirmed_note(o, as_of_date=today),
+        # HOW OLD THE EVIDENCE UNDER THE COUNTDOWN IS, on every row, as an
+        # absolute number of local calendar days since the last POSITIVE
+        # liveness signal (`last_verified`, not `last_checked` — see
+        # `_unconfirmed_note` for why those are different facts).
+        #
+        # Distinct from `seen_days`, which is how long Coverage has KNOWN
+        # about the posting, and from `open_run_days`, which is how long it
+        # has been open. This is the one a deadline rests on: "Closes in 8
+        # days" is a claim about a page, and this says when that page was
+        # last read. `_rolecard.html` hangs it on the deadline column's
+        # `title` for every row and prints it visibly past
+        # `_UNCONFIRMED_AFTER_DAYS`, which is the same threshold
+        # `_unconfirmed_note` uses rather than a second idea of stale (P5).
+        #
+        # Degradation is the measurement: 2,627 of 2,723 open campus rows
+        # were verified inside 24 hours on 2026-09-01, so the visible half
+        # fires on about 3% of the board and the rest gain a tooltip only.
+        # `None` when a row carries no `last_verified` at all, which is
+        # where the tooltip is simply absent rather than guessed at.
+        "verified_days": (
+            _calendar_days_ago(o.last_verified, as_of_date=today)
+            if o.last_verified else None
+        ),
     }
     # Three states, not two. "Rolling" must mean "no posted deadline" (it is
     # tested that way at my_applications, views.py's `rolling` lens above) —
@@ -2594,6 +2913,12 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
             "countdown": "Deadline passed",
             "level": "passed",
             "fuse_pct": 0,
+            # LONG past, and the board still lists it. NOT a closed row — see
+            # `_abandoned_note` and `_ABANDONED_AFTER_DAYS` for why a prose
+            # date may never close one — so this is a note and a withdrawn
+            # Save button, nothing else. `{}` on every row inside the window,
+            # which keeps the template's condition one truthiness test.
+            "abandoned": _abandoned_note(o, today=today),
         })
     return item
 
@@ -3404,8 +3729,27 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     #    campus set, so a filter never changes the ranking or promotes a
     #    weaker pick; it only hides picks the student just said they don't
     #    want to see, and the header says how many it hid.
+    # BUILT EVEN WHEN THE SCORER RETURNED NOTHING (2026-09-02). It used to be
+    # `if picks:` and nothing else, which meant the whole column vanished on
+    # a profile whose candidates all fell under `MIN_SCORE` — the one profile
+    # that most needs an explanation gets an unannotated grid of firm columns
+    # and no hint that "Picked for you" exists at all.
+    #
+    # That state has been reachable for a while and is about to become
+    # ordinary: the recommender's region and level penalties are what push a
+    # thin board under the bar, and the audit's own estimate is that the
+    # founder's rail may hold one or two rows rather than six once they land.
+    # `recommend()` already returns [] correctly and `_results.html` already
+    # has copy for an empty column; the two had simply never met.
+    #
+    # The empty column carries the same two sentences a full one does (the
+    # cycle note and the open estimate), which is what makes it an answer
+    # rather than an absence: "nothing scored high enough" plus "here is when
+    # yours opens" is a complete thought. Signed-out and empty-profile
+    # visitors are unchanged — `profile` is None for them and the branch this
+    # sits in never runs.
     pick_cluster = None
-    if picks:
+    if picks or (profile is not None and not profile.is_empty):
         # A COPY of each card, never the shared dict: this column names the
         # firm on every card (its cards come from several firms), and setting
         # that flag on the shared item would print the firm name on the firm's
@@ -3461,6 +3805,23 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             # for. Say it, once, in the header: what he is waiting for is
             # not listed YET, and what is shown is the closest fit today.
             "cycle_note": _cycle_not_open_note(profile, open_qs),
+            # …and WHEN it opens, which is the question that sentence raises
+            # and never answered. Read from `FirmDate`, labelled as the
+            # forecast it is, and "" whenever the corpus cannot say. See
+            # `cycle_open_estimate`.
+            "cycle_open": cycle_open_estimate(profile, today=today),
+            # WHY THE COLUMN IS EMPTY, when it is, and only for the reason
+            # the filters do not already explain. `hidden_by_filter` above
+            # covers "your filters hid them"; this covers the other empty,
+            # which until now rendered as no column at all: the scorer read
+            # the whole open campus board and nothing on it cleared the bar.
+            #
+            # It says the bar exists rather than naming its number: 25 is a
+            # scoring internal with no meaning to a student, and quoting it
+            # would invite exactly the "why is this 24" question the number
+            # cannot answer. What a student CAN act on is the two levers that
+            # move it, which are their own Settings.
+            "nothing_scored": not picks,
         }
 
     # The two figures the stat strip actually renders. (The old hero widget's
@@ -3690,7 +4051,18 @@ def _track_control(request, opp):
         opportunity=opp, dismissed=False
     ).first()
     return render(request, "directory/_track_control.html", {
-        "r": {"id": opp.id, "track_status": (uo.applied_status or "saved") if uo else None},
+        "r": {
+            "id": opp.id,
+            "track_status": (uo.applied_status or "saved") if uo else None,
+            # THE SWAP HAS TO KNOW THIS TOO. The partial withdraws Save on a
+            # posting the firm has left up long past its own stated deadline
+            # (see `_abandoned_note`), and this is the OTHER path that
+            # renders it: a student who un-saves such a row gets this
+            # response back, and without the flag the Save button would
+            # reappear — the one control the feed had just declined to
+            # offer, handed back by the click that cleared it.
+            "abandoned": _abandoned_note(opp),
+        },
     })
 
 
@@ -3711,6 +4083,90 @@ _FACT_LABELS = (
     ("assessment", "Assessment"),
     ("rolling", "Closing"),
 )
+
+
+def _drawer_sponsorship(o) -> dict:
+    """What this posting says about sponsoring a visa, for the drawer's
+    "What the posting states" block.
+
+    Always returns a dict — the silent case included — because silence is
+    the answer on most rows and a drawer that simply omits the line leaves
+    the reader to supply their own guess about the most decisive fact on the
+    page. `value` is the sentence; `phrase` is the evidence behind it, or ""
+    where the answer came from the firm rather than the posting and there is
+    no posting sentence to quote.
+
+    NEVER A DERIVED BADGE. `research-eligibility-language.md §6` (Grade A):
+    the stated claims are four incommensurable kinds, and Barclays appends a
+    legal right-to-work disclosure to every posting including ones that also
+    say it will sponsor. So this surfaces a sentence or says nothing was
+    said; `test_feed_honesty.py` greps the templates to keep it that way.
+    """
+    value, source = effective_sponsorship(o)
+    phrase = ((o.raw or {}).get("facts") or {}).get("sponsorship", {}).get("phrase", "")
+    if value == "no":
+        return {
+            "label": "Visa sponsorship",
+            "value": ("This firm's stated policy is not to sponsor visas in "
+                      "this market" if source == "firm" else
+                      "The posting says it cannot sponsor a visa"),
+            "phrase": "" if source == "firm" else phrase,
+        }
+    if value == "yes":
+        return {
+            "label": "Visa sponsorship",
+            "value": ("This firm's stated policy is to sponsor visas in this "
+                      "market" if source == "firm" else
+                      "The posting says sponsorship is available"),
+            "phrase": "" if source == "firm" else phrase,
+        }
+    return {
+        "label": "Visa sponsorship",
+        "value": "Not stated in this posting",
+        "phrase": "",
+    }
+
+
+def _drawer_pick_why(user, opp) -> list:
+    """The scorer's own reasons for THIS role and THIS student, or [].
+
+    Two queries for a signed-in reader (the tier map and the warmest contact
+    per firm), none for anyone else. They are the same two the Opportunities
+    page runs once for the whole board; here they run for one role, on a
+    panel the student opened deliberately, which is the cheapest place in the
+    product to ask a personal question.
+
+    `Reason` objects, not a joined string: the template prints the short text
+    and hangs the full sentence on `title`, exactly as the card does. Joining
+    here would hand the drawer a display decision the card makes differently.
+
+    [] whenever the student has stated nothing (`Profile.is_empty`) or the
+    role scores under the bar. Both are the same answer — the product has no
+    recommendation to justify — and neither is an error state.
+    """
+    from crm.models import Contact, UserFirm
+    from crm import campaigns as crm_campaigns
+    from directory.recommend import MIN_SCORE, score_candidate
+
+    if not user.is_authenticated:
+        return []
+    tier_by_firm = dict(
+        UserFirm.objects.for_user(user).values_list("firm_id", "tier")
+    )
+    warm_by_firm: dict[int, str] = {}
+    for fid, warmth in (Contact.objects.for_user(user)
+                        .filter(archived=False, firm__isnull=False,
+                                warmth__in=("replied", "chatted", "advocate"))
+                        .exclude(id__in=crm_campaigns.excluded_contact_ids(user))
+                        .values_list("firm_id", "warmth")):
+        rank = "warm" if warmth in ("chatted", "advocate") else "replied"
+        if warm_by_firm.get(fid) != "warm":
+            warm_by_firm[fid] = rank
+    profile = Profile.from_user(user, tier_by_firm, warm_firms=warm_by_firm)
+    if profile.is_empty:
+        return []
+    score, reasons = score_candidate(profile, Candidate.from_opportunity(opp))
+    return list(reasons) if score >= MIN_SCORE else []
 
 
 def role_description(request, pk):
@@ -3762,6 +4218,50 @@ def role_description(request, pk):
         "unconfirmed": _unconfirmed_note(opp),
         "facts": [{"label": label, **facts[kind]}
                   for kind, label in _FACT_LABELS if kind in facts],
+        # THE SPONSORSHIP LINE, which the card has had all along and the
+        # drawer never did. The drawer is where the student DECIDES (this
+        # file's own opening comment), and it was the one surface that could
+        # not answer the question most able to end a decision outright.
+        #
+        # `effective_sponsorship`, not `o.sponsorship`: the same resolver the
+        # card reads, which prefers the posting's own words and falls back to
+        # the firm's per-region policy only where the posting is silent — and
+        # says WHICH in the label, because a firm policy is a weaker claim
+        # about one role than the posting's own sentence.
+        #
+        # NOT A BADGE AND NOT A BOOLEAN. The stated claims are four
+        # incommensurable kinds and Barclays appends a right-to-work
+        # disclosure to every posting including ones that also say it will
+        # sponsor (`research-eligibility-language.md §6`, Grade A), so what
+        # renders is the extracted sentence with its label. Where the posting
+        # says nothing and no firm policy is on file, the drawer says so
+        # rather than leaving the reader to assume either answer.
+        "sponsorship": _drawer_sponsorship(opp),
+        # THE PERSONAL VERDICT, the same one the card carries. `None` for a
+        # signed-out reader and for a student who has stated nothing — a
+        # verdict needs both sides to have spoken (see `_eligibility`).
+        "verdict": _eligibility(opp, _eligibility_profile(request.user)),
+        # WHY COVERAGE RATES THIS ONE. The card's Picked column prints
+        # `pick_why`; the drawer that card opens printed nothing, so the
+        # student who clicked BECAUSE the product said "this one" arrived at
+        # the panel where they decide with the recommendation's reasoning
+        # left behind on the card.
+        #
+        # Recomputed rather than passed in. The card could send the string it
+        # already holds, and that would be cheaper — but it would also mean
+        # this panel renders whatever the request says it should, and the two
+        # copies could drift the moment a reason's wording changes. This is
+        # `score_candidate`, the same pure function the ranker runs, over
+        # this one role.
+        #
+        # NOT "THIS IS A PICK". Whether a role IS in the top six requires
+        # ranking the whole board, which is not a thing to do inside a
+        # single-role fetch. The bar it uses instead is `MIN_SCORE`, which is
+        # exactly the bar the ranker applies before ordering anything — so a
+        # row that shows reasons here is a row that could be a pick, and a
+        # row below the bar shows none rather than a weak justification for
+        # something the product is not recommending.
+        "pick_why": _drawer_pick_why(request.user, opp),
     })
 
 
@@ -3793,6 +4293,14 @@ def _eligible_unsaved_ids(user, rows, profile) -> list[int]:
     return sorted(
         o.id for o in rows
         if o.id not in touched
+        # A posting the feed has just declined to offer a Save button for
+        # cannot be in the offer a "Save them all" button honours. The card
+        # and the banner are two renderings of one decision (see
+        # `_abandoned_note`), and the banner is the one that acts in bulk —
+        # letting it write what the card withheld would be the product
+        # contradicting itself in the direction that costs the student the
+        # most. Measured 2026-09-02: 1 open campus row board-wide.
+        and not _abandoned_note(o)
         and (lambda v: v and v["kind"] == "year_ok")(_eligibility(o, profile))
     )
 

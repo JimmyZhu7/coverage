@@ -169,17 +169,36 @@ def test_the_picked_column_renders_shared_reasons_in_the_firmcol_why_line(db):
 def test_the_picked_column_really_does_render_a_shorter_id_stack(feed_with_both_columns):
     """The condition that made centring fail, asserted on real markup.
 
-    Not a hypothetical: with no why-chips to show, Picked's stats row is
-    present and empty while every firm column's carries at least a tier.
+    REWRITTEN 2026-09-02, and the old assertion is why. It read
+    `stats[0].strip() == ""` — Picked's stats row present and EMPTY — with a
+    failure message saying "if it now carries chips, this test is no longer
+    exercising the failure". It does now carry something: the `fc-eyebrow`
+    span ("PICKED") moved into that slot when the column stopped relying on
+    the accent wash for its identity, so the empty state the assertion
+    described is no longer reachable and the test had been failing rather
+    than guarding anything.
+
+    The INVARIANT is unchanged and is what this now pins: the Picked column's
+    id stack is shorter than a firm column's, because it carries no tier
+    pill. That is the whole reason the header needs `align-items: start`
+    rather than centring — a shorter stack centred against a taller one is
+    the misalignment this file exists for. Asserting the eyebrow's presence
+    as well keeps the row's real content named, so a future edit that empties
+    it is a failure here rather than a silent change of premise.
     """
     html = feed_with_both_columns.get("/opportunities/").content.decode()
     html = _STYLE_RE.sub("", html)
 
     stats = re.findall(r'<div class="firmcol-stats">(.*?)</div>', html, re.S)
     assert len(stats) >= 2, f"expected the Picked column and a firm one, got {len(stats)}"
-    assert stats[0].strip() == "", (
-        "the Picked column is expected to render an EMPTY stats row here — if "
-        "it now carries chips, this test is no longer exercising the failure"
+    assert "fc-eyebrow" in stats[0], (
+        "the Picked column's stats row should carry its eyebrow — that word "
+        "is what stops the column reading as a firm called 'Picked for you'"
+    )
+    assert "firmcol-tier" not in stats[0], (
+        "the Picked column has no tier, and a tier pill appearing here would "
+        "mean its id stack is no longer the shorter one this header's "
+        "`align-items: start` exists for"
     )
     assert "firmcol-tier" in stats[1], "a firm column should carry its tier pill"
     assert ":empty" not in _feed_css(), (

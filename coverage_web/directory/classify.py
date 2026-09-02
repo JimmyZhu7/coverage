@@ -707,12 +707,40 @@ _INSIGHT = _rx(
     # "Meet the Business", "Meet our Analysts", "Meet our recruiters" — an
     # imperative verb where a job title would carry a noun.
     r"\bmeet\s+(?:our|the)\b",
+    # "Meet and Greet our Traders: Structuring, Corporates and Exotics
+    # Trading" (Morgan Stanley, live) puts the conjunction between the verb
+    # and its object, so `meet\s+(our|the)` cannot see it and the row fell
+    # through every positive rule to `other`. "Meet and greet" is a fixed
+    # phrase for an event and titles no job on any board in the catalog.
+    r"\bmeet\s+(?:and|&)\s+greet\b",
+    # A hackathon is a recruiting event wearing a competition's name, and the
+    # word titles no job — the sibling `_EARLY_ID` list already carries
+    # "trading/case/quant ... challenge" for exactly this shape but is
+    # checked after the entry-level rule, which is too late here: `_ENTRY`'s
+    # bare "campus" was promoting "EU Campus - Aarhus Hackathon" to a
+    # full-time hire. Unqualified because, unlike "challenge" or
+    # "competition", "hackathon" has no antitrust-practice or product-name
+    # homograph on these boards.
+    r"\bhackathons?\b",
 )
 
 # Explicit internship signals. \b keeps "intern" off "Internal"/"International".
 _INTERNSHIP = _rx(
     r"\bintern(?:ship)?s?\b",
     r"\bsummer\s+analyst\b",
+    # THE YEAR IN THE MIDDLE. `summer\s+analyst` is adjacency-only, and Bank
+    # of America writes the same programme with its intake year between the
+    # two words: "Corporate Audit, Summer 2027 Analyst - Chester", "Global
+    # Operations Operations Analyst Summer 2027 - London". Measured
+    # 2026-09-02: 11 open BofA rows in both spellings were filed
+    # `entry_level` — a FULL-TIME graduate hire — by the campus-board
+    # fallback matching the bare word "Analyst", which is the worst possible
+    # miss for a sophomore reading the board. Both orders, because the live
+    # board carries both. The year is anchored to 20\d\d rather than \d{4}
+    # so a desk number ("Analyst Summer 4021") cannot match.
+    r"\bsummer\s+20\d\d\s+analyst\b",
+    r"\banalyst\s+summer\s+20\d\d\b",
+    r"\bintern\s+summer\s+20\d\d\b",
     r"\bsummer\s+associate\b",
     r"\bwinter\s+analyst\b",
     # Virtu's "Women's Winternship" — a winter internship spelled as one
@@ -784,7 +812,6 @@ _ENTRY = _rx(
     # Year range matches `_YEAR` below; inlined because _YEAR is defined
     # later in the module and this list is built at import time.
     r"\bclass\s+of\s+20(?:2[4-9]|3[0-5])\b",
-    r"\bcampus\b",
     r"\bentry[\s-]?level\b",
     r"\bfull[\s-]?time\s+analyst\b",
     r"\banalyst\s+(?:development\s+)?(?:programme|program)\b",
@@ -798,6 +825,36 @@ _ENTRY = _rx(
     "校园招聘", "校招",             # Chinese campus recruitment (CICC/Beisen boards)
     "应届",                        # fresh graduate
     "管培生", "管理培训生",         # management trainee
+)
+
+# "CAMPUS" ALONE IS NOT A HIRE. The bare word used to sit in `_ENTRY` above,
+# which made it a full-time-graduate signal on its own — and the word is the
+# firm's own name for the CHANNEL, not for the thing being offered on it. It
+# is equally at home on an event ("2026 Fall Campus Showcase"), a talent
+# pool ("2027 EU Campus Programme Talent Community") and an internal HR job
+# ("Campus Sourcer", "Campus Talent Associate"), and the plan's own example
+# is "EU Campus - Aarhus Hackathon" arriving as an entry-level job.
+#
+# So "campus" now has to co-occur with a word that names a ROLE OR A HIRING
+# LEVEL. The list below is deliberately about the thing being hired, not
+# about the audience: "programme", "talent" and "career" are all campus-event
+# words as often as they are hiring words and would let the four rows above
+# straight back through.
+#
+# Measured 2026-09-02 on the live board: 24 open rows carried a bare
+# "campus" in an `entry_level` title. 19 keep the bucket (every "Campus X
+# (Full-Time)" at Jump and Five Rings, plus SocGen's "Research Associate
+# (Campus)"); 5 leave it — the Fall Campus Showcase, the Aarhus hackathon,
+# the EU Campus talent community, "Campus Sourcer" and "From Campus to
+# Career: Interview Tips that Work". Two of those five land in `insight` on
+# their own event words and three in `other`, which is where an HR job and a
+# talent pool belong. Nothing that names a real campus hire moved.
+_ENTRY_CAMPUS = re.compile(
+    r"\bcampus\b(?=.*\b(?:analysts?|associates?|full[\s-]?time|graduates?"
+    r"|hires?|traders?|engineers?|researchers?|scientists?|developers?)\b)"
+    r"|\b(?:analysts?|associates?|full[\s-]?time|graduates?|hires?|traders?"
+    r"|engineers?|researchers?|scientists?|developers?)\b(?=.*\bcampus\b)",
+    re.IGNORECASE,
 )
 
 # US early-identification programmes, whose vocabulary overlaps with real job
@@ -880,7 +937,8 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
     1. insight events            ("Pre-Internship" must beat the intern rule)
     2. explicit internships
     3. experienced/HR veto       -> other
-    4. full-time campus signals  -> entry_level
+    4. full-time campus signals  -> entry_level, including "campus" only
+       where it co-occurs with a role or level word (see `_ENTRY_CAMPUS`)
     5. US early-ID programmes    -> insight
     6. affinity events           -> insight
     7. campus-board fallback: a neutral Analyst/Associate/Student title on a
@@ -895,6 +953,15 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
     sits behind both vetoes AND behind the entry-level rule — which is what
     keeps "US Graduate Leadership Program" an entry-level hire rather than an
     event. Moving step 5 earlier would break that; see `_EARLY_ID`.
+
+    STEP 1 BEFORE STEP 2 IS THE CONTRACT, not an accident of ordering, and
+    the new event words (`meet and greet`, `hackathon`) inherit it: an
+    information session ABOUT a summer analyst programme is the session, not
+    the internship, so `_INSIGHT` is allowed to outrank `_INTERNSHIP`. What
+    the ordering must never do is let a merely SUGGESTIVE word demote a real
+    internship, which is why every word in `_INSIGHT` is one that titles no
+    job on these boards and every ambiguous one lives in `_EARLY_ID` behind
+    step 4 instead. `test_stress_classify.py` pins both halves.
     """
     t = title or ""
     if _INSIGHT.search(t):
@@ -903,7 +970,7 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
         return INTERNSHIP
     if _SENIOR.search(t):
         return OTHER
-    if _ENTRY.search(t):
+    if _ENTRY.search(t) or _ENTRY_CAMPUS.search(t):
         return ENTRY_LEVEL
     if _EARLY_ID.search(t):
         return INSIGHT
@@ -1099,7 +1166,15 @@ _CAMPUS_CONTRACT_KEYS = (
 )
 
 
-def bucket_from_contract(contract_type: str | None) -> str:
+#: A title that names a GRADUATE programme in its own words, in the three
+#: spellings the live catalog carries. `graduate` is the English one;
+#: 管培生 / 管理培训生 are the Chinese "management trainee", which is a
+#: full-time graduate hire everywhere it appears on these boards (the same
+#: two strings `_ENTRY` already treats that way).
+_TITLE_GRADUATE = _rx(r"\bgraduates?\b", "管培生", "管理培训生")
+
+
+def bucket_from_contract(contract_type: str | None, title: str = "") -> str:
     """The bucket a provider's own filing decides, or "" when it decides
     nothing.
 
@@ -1112,11 +1187,34 @@ def bucket_from_contract(contract_type: str | None) -> str:
     programmes are entry-level hires, every other campus filing is an
     internship-family programme. Blank or unrecognised filings decide
     nothing and fall through to the title rules unchanged.
+
+    THE TITLE BREAKS THE TIE THE FILING CANNOT. A provider's contract-type
+    vocabulary is coarser than its own titles: Crédit Agricole files
+    "Graduate Trainee in CIB Coverage 企业金融部管培生-北京" — a
+    management-trainee programme, i.e. a full-time graduate hire — under the
+    single value "Internship/Trainee", because that ONE value covers both
+    kinds and the firm has nowhere else to put it. Reading "trainee" and
+    stopping there filed the row as an internship, which is the wrong bucket,
+    the wrong facet count and the wrong cycle for the student reading it.
+
+    So where the filing is one of the ambiguous ones, the title is asked
+    whether it says "graduate" in its own words, and that answer wins. The
+    guard is the ordering: an EXPLICIT internship title outranks it, because
+    "Intern - EY-Parthenon - M&A Lead Advisory (graduate)" (live, EY) uses
+    the word to mean the intern is a graduate student, not that the role is
+    a graduate hire. Same precedence the title rules already use — step 2
+    before step 4 in `classify_role` — stated once more here so the two
+    paths cannot disagree about one row.
+
+    `title` defaults to "" so a caller that has only the filing (and every
+    existing test) behaves exactly as before.
     """
     t = (contract_type or "").lower()
     if not t or not any(k in t for k in _CAMPUS_CONTRACT_KEYS):
         return ""
     if "graduate" in t:
+        return "entry_level"
+    if _TITLE_GRADUATE.search(title or "") and not _INTERNSHIP.search(title or ""):
         return "entry_level"
     return "internship"
 

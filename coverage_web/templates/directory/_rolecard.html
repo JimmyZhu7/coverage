@@ -50,7 +50,24 @@ only reintroduce the clipping bug this file's history is full of.
   meta line below: the dash alone would be an invented fact, and the words
   are what a screen reader and a stylesheet-less render get.
   {% endcomment %}
-  <span class="rr-due">
+  {% comment %}
+  HOW OLD THE EVIDENCE IS, on the column that asserts the date.
+
+  The countdown in this column is a claim about a page Coverage read at some
+  point; until now the only place the product said WHEN it read it was the
+  drawer, which a student reaches by opening it. Measured 2026-09-01, a
+  quarter of the rows under Today's "Closing in 10 days" ribbon were counting
+  down off pages six days old, and 23 of them were HSBC rows whose board had
+  been throwing an SSL error since 2026-08-25.
+
+  So: the age rides on THIS column's own `title`, on every row that has one,
+  and becomes visible text on the ~3% of rows the `unconfirmed` note fires
+  for. The title is on the outer span rather than the figure inside it
+  because the figure already carries the `reported` provenance tooltip and a
+  nested `title` wins on hover — two different facts, two different hover
+  targets, neither swallowing the other.
+  {% endcomment %}
+  <span class="rr-due"{% if r.verified_days is not None %} title="Coverage last confirmed this posting live {% if r.verified_days == 0 %}today{% elif r.verified_days == 1 %}1 day ago{% else %}{{ r.verified_days }} days ago{% endif %}"{% endif %}>
     {% if r.dated %}
       {% comment %}
       The abbreviation is deliberate (views.py: "Closes in 12 days" does not
@@ -80,6 +97,24 @@ only reintroduce the clipping bug this file's history is full of.
     {% else %}
       <span class="rr-due-n rr-due-none" aria-hidden="true">&mdash;</span>
     {% endif %}
+    {% comment %}
+    THE AGE, IN WORDS, on the rows where it changes the answer. The condition
+    is `r.unconfirmed`, not a second day comparison written here: that dict is
+    `views._unconfirmed_note`, which owns the "how stale is too stale"
+    threshold (`_UNCONFIRMED_AFTER_DAYS`, borrowed from `health.py`'s own
+    CONSECUTIVE_FAILURES so the operator alarm and the student-facing note
+    fire on the same evidence). One definition, two renderings.
+
+    ON EVERY COLUMN, not just Picked. The `reported` word above prints only
+    in the Picked column because it would otherwise appear on 790 rows and
+    stop distinguishing anything; this one prints on about 90 board-wide, so
+    scarcity is doing the same job here without a scope rule.
+
+    `unconfirmed.days` is absent from no firing branch, but the `{% if %}`
+    guards it anyway: a check-failed row with no elapsed days would otherwise
+    render "d" on its own.
+    {% endcomment %}
+    {% if r.unconfirmed and r.unconfirmed.days %}<span class="rr-due-age" title="{{ r.unconfirmed.why }}"><span aria-hidden="true">{{ r.unconfirmed.days }}d old</span><span class="vh">Last confirmed live {{ r.unconfirmed.days }} days ago</span></span>{% endif %}
   </span>
 
   <div class="rr-main">
@@ -116,6 +151,26 @@ only reintroduce the clipping bug this file's history is full of.
       {% endcomment %}
       {% if r.show_firm %}<span class="rr-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
       {% if r.verdict %}<span class="rr-vd vd-{{ r.verdict.kind }}" title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>{% endif %}
+      {% comment %}
+      HOW THIS FIRM HIRES. Directly after the verdict and before the
+      posting's own facts, because it is the same KIND of fact as the
+      verdict — a statement about the reader's route in, not about the
+      posting — and it changes what the rest of the row is worth reading
+      for. On a Jane Street row, "you know someone here" is not the lever;
+      the assessment is.
+
+      A LINK, not a chip, and that is the honesty part: the tooltip states
+      the limit ("Coverage does not score your network here") and the firm
+      page is where the fuller answer lives. The wording says the firm hires
+      by assessment and stops there. It never says networking hurts — no
+      source shows that, only that no mechanism is documented
+      (`research-st-quant.md` Q3), and the difference between those two
+      claims is the whole reason this chip is allowed to exist.
+
+      Fires on 302 open campus rows at 15 firms and on none of the founder's
+      own board, where every firm in play is `campus`.
+      {% endcomment %}
+      {% if r.assessment %}<a class="rr-assess" href="{% url 'directory:firm_detail' r.firm_slug %}" title="{{ r.assessment.why }}">{{ r.assessment.label }}</a>{% endif %}
       {% for f in r.facts %}<span class="rr-fact {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
       {% comment %}
       THE LOCATION ALWAYS CARRIES A `title`. It is the one part of the meta

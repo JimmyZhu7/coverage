@@ -1852,6 +1852,28 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .df-v { font-size: var(--fs-s); font-weight: var(--w-bold); color: var(--ink); }
 .df-why { grid-column: 2; font-size: var(--fs-xs); color: var(--ink-3);
   font-style: italic; overflow-wrap: anywhere; }
+/* THE ONE ROW ABOUT THE READER. Every other line in this block quotes the
+   posting; the eligibility verdict is what the posting's words mean for THIS
+   student, so it carries the same three tints the card's `.rr-vd` uses and
+   for the same reasons — the blocking answers muted rather than red (they
+   end the decision, they are not an alarm), the positive ones in the ok
+   tint, and language advisory in amber because it never blocks. Restated
+   here rather than shared with `.rr-vd` because the two live in different
+   stylesheets on different surfaces; the VOCABULARY (`vd-<kind>`) is shared,
+   which is the part that must not drift. */
+.df-v.vd-year_ok, .df-v.vd-year_likely { color: var(--ok); }
+.df-v.vd-year_out, .df-v.vd-visa_out { color: var(--ink-3); }
+.df-v.vd-language_ok { color: var(--ok); }
+.df-v.vd-language_warn, .df-v.vd-visa_firm_no { color: var(--stale-t); }
+
+/* WHY COVERAGE RATES THIS ONE. One quiet line under the header, in the
+   meta line's own size and colour — the same one-line-not-pills call
+   `_rolecard.html`'s `.rr-why` and the Picked column header both make, so
+   the same reasoning reads the same way on all three surfaces. Ellipsised
+   at the drawer's edge with every full sentence in the `title`. */
+.drawer-why { margin: var(--s2) 0 0; font-size: var(--fs-xs);
+  color: var(--ink-3); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; cursor: help; }
 
 /* 68ch, because a 680px drawer of unbroken 3,800-character prose is
    unreadable at full width and this text arrives with its paragraphs
