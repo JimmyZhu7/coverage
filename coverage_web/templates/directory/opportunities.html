@@ -272,6 +272,22 @@
     {% if has_filters %}<a class="filters-clear" href="{% url 'opportunities' %}">Clear</a>{% endif %}
   </form>
 
+  {% comment %}
+  THE RESULT COUNT'S LIVE REGION. Outside `#cov-results`, and that placement
+  is the whole point: a live region announces CHANGES to its own contents, so
+  it has to survive the change. The stat strip's headline figure carried
+  `role="status"` inside the swap target, where every filter keystroke
+  destroyed the node and built a new one — a sighted user watched the count
+  move and a screen-reader user heard nothing at all.
+
+  Empty on first render (there is no change to announce when a page loads;
+  the strip itself is the answer, and it is read in document order).
+  `_filter_counts.html` fills this out of band on every swap, alongside the
+  facet counts, so the sentence and the numbers on screen come from one
+  render and cannot disagree.
+  {% endcomment %}
+  <span class="vh" id="cov-live" aria-live="polite" aria-atomic="true"></span>
+
   <div id="cov-results">
     {% include "directory/_results.html" %}
   </div>

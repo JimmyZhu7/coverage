@@ -59,8 +59,35 @@ last and unmissable — this drawer is for deciding, not for applying.
 {% endif %}
 
 {% if fetched %}
+  {% comment %}
+  FOLDED PAST ~600 CHARACTERS. `facts.paragraphs()` splits on the posting's
+  own section headings and most scrapes have none, so the median drawer
+  opened onto one wall of prose — 2,741 characters in two blocks, 651px of
+  solid text, with the apply link and the provenance note pushed under it.
+  This drawer is for deciding, and the deciding happens in the first screen.
+
+  The threshold is measured on the rendered text, not guessed at per block:
+  `blocks|join` is the whole description, so three short paragraphs that add
+  up to 400 characters get no fold and one 3,800-character paragraph does.
+  600 is the audit's number and it is roughly the 11.5em the clamp shows at
+  this width, so the fold appears exactly when something is actually hidden.
+
+  Nothing is cut. The clamp is CSS (see `_drawer.html`, which is the one
+  file all three pages that draw this drawer include): the full text is in
+  the DOM for find-in-page and for a screen reader, and where `:has()` is
+  missing the whole thing simply renders as it did before.
+  {% endcomment %}
   <div class="drawer-body">
-    {% for block in blocks %}<p>{{ block|linebreaksbr }}</p>{% endfor %}
+    {% if blocks|join:" "|length > 600 %}
+      <div class="drawer-prose">
+        {% for block in blocks %}<p>{{ block|linebreaksbr }}</p>{% endfor %}
+      </div>
+      <details class="drawer-fold">
+        <summary><span class="df-more">Read all</span><span class="df-less">Show less</span></summary>
+      </details>
+    {% else %}
+      {% for block in blocks %}<p>{{ block|linebreaksbr }}</p>{% endfor %}
+    {% endif %}
     <p class="drawer-note">Read from the posting{% if checked_ago %} {{ checked_ago }} ago{% endif %}. The firm's page is the record.</p>
   </div>
 {% else %}

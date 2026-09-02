@@ -26,11 +26,20 @@ the same reason.
 {% endcomment %}
 <div class="board-state">
 <div class="stat-strip">
-  {% comment %}`role="status"` on this ONE figure, not the whole strip. The
-  results below swap silently for a screen-reader user, so the headline count
-  has to re-announce itself; making the whole strip a live region would read
-  four numbers back on every keystroke in Search.{% endcomment %}
-  <span class="ss-item" role="status"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Role{{ total|pluralize }}</span>
+  {% comment %}
+  THE LIVE REGION MOVED OUT (2026-09-01). This span carried `role="status"`
+  so the headline count would re-announce itself after a silent swap, and it
+  could never have done that: `#cov-results` is swapped with `innerHTML`, so
+  this node — the one holding the role — is destroyed and rebuilt along with
+  the number inside it, and a live region that is replaced rather than
+  updated announces nothing. It is `#cov-live` in `opportunities.html` now,
+  outside the swap target, filled out of band by `_filter_counts.html`.
+
+  Not left here as well: two live regions holding one fact is how a screen
+  reader ends up reading the count twice, and one definition per fact is the
+  rule this file already follows for `total` vs `all_cluster_count`.
+  {% endcomment %}
+  <span class="ss-item"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num" style="--i:0">{{ total }}</b> Open Role{{ total|pluralize }}</span>
   {% comment %}`all_cluster_count`, never `clusters|length`. `clusters` is the
   12-column lazy-load slice, so counting it told a student the whole covered
   universe was twelve firms deep while the feed kept scrolling past seventy.
@@ -44,6 +53,36 @@ the same reason.
   labelled "This Week" was the bug this replaced.{% endcomment %}
   {% if dash.fresh_count %}<span class="ss-item"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
 </div>
+{% comment %}
+THE RECONCILIATION. The segmented control above says "All Campus (2723)" and
+this strip says "2596 Open Roles". Both are true and they count different
+things — the segment counts the BOARD, the strip counts THIS RENDER after
+repeat listings fold and after "Eligible only" hides — but until this line
+existed nothing on the page said so, and two numbers about one board
+disagreeing by 127 an inch apart means at least one of them reads as wrong.
+filter-bar-redesign.md §3, principle 2: counts are a promise.
+
+`board_count - hidden_dupes - hidden_fit == total` exactly (see `board_count`
+in views.py, and the test that pins the identity), so this line accounts for
+the WHOLE difference, never part of it. The guard is the two subtrahends
+rather than the difference itself, so a future third cut that widened the gap
+would show no footnote at all instead of a footnote that half-explains it —
+silence over a partial account.
+
+NO LINK, deliberately. Every other hide on this page states its count at the
+control that causes it and offers that control as the reversal; the duplicate
+fold has no control, because the "Show repeat listings" checkbox was cut on
+request (2026-08-28) as a genuine narrowing rather than a relocation — see
+`_scope.html`'s note. `?dupes=1` still works as a URL fallback and is still
+unadvertised. Linking it here would both reverse that decision and build a
+one-way door: with the fold off there is no difference left for this line to
+explain, so the line that offered the way in would not be there to offer the
+way back. The fit hide DOES have its control, the "Eligible only" checkbox
+one click above, so it is named and not linked either.
+{% endcomment %}
+{% if hidden_dupes or hidden_fit %}
+  <p class="scope-line scope-foot">{{ board_count }} on the board{% if hidden_dupes %}<span class="scope-sep">·</span>{{ hidden_dupes }} folded as repeat listing{{ hidden_dupes|pluralize }}{% endif %}{% if hidden_fit %}<span class="scope-sep">·</span>{{ hidden_fit }} hidden by Eligible only{% endif %}</p>
+{% endif %}
 </div>
 
 {% comment %}
@@ -108,7 +147,33 @@ exactly the moment it had something to say.
             _rolecard.html); this line and those lines partition the
             scorer's reasons between them, nothing printed twice.
             {% endcomment %}
+            {% comment %}
+            THE EYEBROW, IN THE TIER SLOT. Three things were meant to say
+            "this column is not a firm": the accent top edge, the star tile,
+            and the accent border. On a board where every firm is one of the
+            student's own targets the firm columns wear that same accent
+            border (all 12 of the founder's do), so two of the three signals
+            are shared with the columns they were supposed to distinguish
+            this one from and the star is left carrying it alone — one tile
+            against twelve tiles. A word cannot be confused with a tint.
+
+            IN THIS LINE, not on a line of its own above the name. Measured:
+            an eyebrow above the name made this header 141px against every
+            firm column's 126, so the Picked column's first role row started
+            15px below the row it visually belongs to — the exact defect
+            `.firmcol-head`'s own comment records and pins a min-height for.
+            This slot costs no line and is the better parallel anyway: it is
+            where a firm column says "TIER 1", in the same mono uppercase
+            voice, so the two headers answer the same question in the same
+            place. `.firmcol-why` ellipsises around it exactly as it does
+            around a tier pill.
+
+            `aria-hidden`: the heading above already says "Picked for you",
+            and a screen reader announcing "PICKED, Picked for you" is the
+            same fact twice. This is a visual signal for a visual ambiguity.
+            {% endcomment %}
             <div class="firmcol-stats">
+              <span class="fc-eyebrow" aria-hidden="true">Picked</span>
               {% if pick_cluster.reasons %}<span class="firmcol-why" title="{% for r in pick_cluster.reasons %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_cluster.reasons %}{% if forloop.first %}<strong>{{ r.text }}</strong>{% else %}<span class="fc-stat">{{ r.text }}</span>{% endif %}{% endfor %}</span>{% endif %}
             </div>
             {% comment %}The early-cycle student's reframe: their stored

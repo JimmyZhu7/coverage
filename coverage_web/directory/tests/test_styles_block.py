@@ -68,11 +68,19 @@ def test_the_feeds_core_layout_rules_survive_rendering():
 
     `.rolecard` was the canary before the 2026-08-30 row redesign retired
     it; `.rolerow` is the rule that replaced it and lives in the same late
-    part of the file, so it keeps the same canary job."""
+    part of the file, so it keeps the same canary job.
+
+    `.fuse-passed` was one of the four until 2026-09-01, when the whole fuse
+    block was deleted as dead (no template has emitted `.fuse-fill` since
+    the row redesign). `.rolling-dot` replaces it: same position in the file,
+    a couple of lines below where the fuse used to sit, so the early-break
+    canary still fires from the same place. Swapped rather than dropped —
+    four canaries spread down the file is the point, and three would leave
+    the top third of the block unwatched."""
     blocks = _style_blocks("/opportunities/")
     assert blocks, "the feed should render its own <style> block"
     css = "\n".join(blocks)
-    for selector in (".rolerow {", ".firmcols", ".fuse-passed", ".recbar"):
+    for selector in (".rolerow {", ".firmcols", ".rolling-dot", ".recbar"):
         assert selector in css, f"{selector} missing from the feed's rendered CSS"
 
 

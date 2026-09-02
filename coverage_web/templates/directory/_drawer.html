@@ -10,6 +10,72 @@ better one.
 
 Native <dialog>: the browser owns the focus trap, Escape, and the top layer.
 {% endcomment %}
+{% comment %}
+TWO RULES THAT BELONG TO THIS COMPONENT AND HAVE NOWHERE ELSE TO LIVE.
+
+The drawer's own styles sit in static/css/coverage.css for a stated reason:
+the drawer is drawn by the feed, the firm page AND My Applications, and a
+component defined in one page's inline styles is a component the other two
+silently lose (that is the bug that left My Applications with chips and no
+way to read the posting behind them). This partial is the one file all three
+pages include, so it is the only place other than that stylesheet where a
+rule reaches all three. The two below are here rather than in
+`directory/_styles.html` for exactly that reason — My Applications does not
+include `_styles.html`, so putting `.meta-read` there would have squared the
+button on two pages out of three and left the third a pill.
+{% endcomment %}
+<style>
+  /* THE READ BUTTON IS A CONTROL, SO IT IS 10px. `.meta-read` is defined at
+     coverage.css L1767 with `border-radius: 999px`, and coverage.css's own
+     `.btn` rule (L1089-1093) states the law it was breaking: "Status chips
+     keep the pill; controls don't." Read opens a dialog. It was the last
+     999px control on a board whose filter bar, Save, Undo and bulk-save
+     button were all squared to `--r-ctl` in the same pass. Overridden here
+     rather than edited there because coverage.css belongs to another
+     workstream this round; fold this rule into L1767 when that lands. */
+  .meta-read { border-radius: var(--r-ctl); }
+
+  /* THE 3,800-CHARACTER PARAGRAPH, FOLDED.
+
+     `facts.paragraphs()` splits a description on its own section headings,
+     and most scraped postings have none — so the median drawer opened onto
+     one unbroken wall of prose (2,741 characters in two blocks on the
+     founder's first row, 651px of solid text) with the apply link and the
+     provenance note pushed under it. A student opens this to DECIDE, and
+     the first 600 characters is where the deciding happens.
+
+     A CSS clamp, not a template cut. Cutting at 600 characters would need a
+     new filter and would put a hard "…" in the middle of a sentence; the
+     clamp folds at a line boundary, keeps the whole text in the DOM (so
+     find-in-page and a screen reader still reach all of it), and degrades
+     to today's behaviour — the full text, no fold — anywhere `:has()` is
+     missing. `_role_drawer.html` renders the fold only when the text is
+     long enough to need one, so a short posting is untouched.
+
+     The `<details>` sits AFTER the prose and clamps it with `:has()`,
+     because a `<summary>` must be the first child of its own element and
+     the control belongs under the text it reveals. */
+  .drawer-prose { position: relative; }
+  .drawer-body:has(> .drawer-fold:not([open])) > .drawer-prose {
+    max-height: 11.5em; overflow: hidden; }
+  /* The fade is what says "cut", not "ended". Painted rather than masked so
+     it lands on the drawer's own surface in both themes. */
+  .drawer-body:has(> .drawer-fold:not([open])) > .drawer-prose::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3.2em;
+    background: linear-gradient(transparent, var(--surface)); pointer-events: none; }
+  .drawer-fold > summary { list-style: none; display: inline-flex;
+    align-items: center; gap: var(--s1); cursor: pointer;
+    color: var(--accent-ink); font-size: var(--fs-xs); font-weight: var(--w-med);
+    border: 1px solid var(--accent-line); border-radius: var(--r-ctl);
+    background: var(--accent-soft); padding: var(--s1) 12px;
+    transition: border-color var(--t-fast); }
+  .drawer-fold > summary::-webkit-details-marker { display: none; }
+  .drawer-fold > summary:hover { border-color: var(--accent); }
+  .drawer-fold > summary:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 2px; }
+  .drawer-fold:not([open]) .df-less, .drawer-fold[open] .df-more { display: none; }
+  @media (pointer: coarse) { .drawer-fold > summary { min-height: 44px; } }
+</style>
 <dialog class="drawer" id="role-drawer" aria-label="Posting">
   <button type="button" class="drawer-x" data-drawer-close aria-label="Close">{% include "_icon.html" with name="close" %}</button>
   <div id="role-drawer-body"></div>
@@ -24,8 +90,34 @@ Native <dialog>: the browser owns the focus trap, Escape, and the top layer.
     var dlg = document.getElementById("role-drawer");
     var body = document.getElementById("role-drawer-body");
     if (!dlg) return;
+    // WHERE THE READER CAME FROM. A native <dialog> gives us the focus trap
+    // and Escape for free, but NOT the return trip: measured on the feed,
+    // Escape left document.activeElement on <body>, so a keyboard user who
+    // read one posting and closed it was returned to the top of a 649-row
+    // page and had to tab back down to where they had been. The browser
+    // does restore focus for a dialog it opened via `showModal` on an
+    // element still in the DOM in some engines and not others, and on this
+    // page the opener is frequently REPLACED between open and close (a Save
+    // or a "Not for me" swaps the row while the drawer is up) — so it is
+    // remembered here and restored defensively.
+    var opener = null;
+    function restore() {
+      var el = opener;
+      opener = null;
+      // Gone from the document (its row was swapped while the drawer was
+      // open): fall back to the button for the same role if the swap put a
+      // new one there, and to nothing at all if it did not. Focusing a
+      // detached node silently moves focus to <body>, which is the bug.
+      if (el && !el.isConnected && el.dataset && el.dataset.roleId) {
+        el = document.querySelector(
+          '[data-role-read][data-role-id="' + el.dataset.roleId + '"]');
+      }
+      if (el && el.isConnected) el.focus({ preventScroll: false });
+    }
     document.body.addEventListener("click", function (e) {
-      if (e.target.closest("[data-role-read]")) {
+      var read = e.target.closest("[data-role-read]");
+      if (read) {
+        opener = read;
         body.innerHTML = '<p class="drawer-loading">Opening…</p>';
         dlg.showModal();
       } else if (e.target.closest("[data-drawer-close]")) {
@@ -35,7 +127,9 @@ Native <dialog>: the browser owns the focus trap, Escape, and the top layer.
     // Backdrop click closes; native <dialog> only closes on Escape.
     dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
     // Emptied on close so the next open cannot flash the previous posting.
-    dlg.addEventListener("close", function () { body.innerHTML = ""; });
+    // Escape, the close button and a backdrop click all land here, so this is
+    // the one place the return trip has to be made.
+    dlg.addEventListener("close", function () { body.innerHTML = ""; restore(); });
 
     // ?read=<id> — the Cmd-K palette landing here with a role in mind. The
     // search result narrows the page to that title AND names the role, so the

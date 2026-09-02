@@ -313,8 +313,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     background: var(--accent-soft); border: 1px solid var(--accent-line);
     border-left: 3px solid var(--accent); border-radius: 10px;
     color: var(--ink-2); }
+  /* `--r-ctl`, not the 999px this carried. coverage.css's `.btn` states the
+     rule this board was the last page ignoring (L1089-1093): a thing you
+     PRESS is 10px, a thing that merely REPORTS state keeps the pill. "Save
+     them all" is a write, and it sat under a filter bar squared for exactly
+     this reason. Same edit on `.track-btn`, `.rcd-undo` and `.meta-read`
+     (the last one in `_drawer.html`, beside its own component). */
   .scope-act { border: 1px solid var(--accent-line); background: var(--accent-soft);
-    color: var(--accent-ink); border-radius: 999px; padding: var(--s1) 14px;
+    color: var(--accent-ink); border-radius: var(--r-ctl); padding: var(--s1) 14px;
     font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast); }
   .scope-act:hover { border-color: var(--accent); }
@@ -637,12 +643,26 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     font-size: var(--fs-m); font-weight: var(--w-bold); color: var(--ink);
     letter-spacing: -0.01em; }
   .stat-strip .ss-warn b { color: var(--stale-t); }
-  /* Numbers pop in on load; the whole strip counts up via the .dash-num hook. */
-  @keyframes ss-pop { 0% { transform: scale(0.6); opacity: 0; }
-    60% { transform: scale(1.08); } 100% { transform: scale(1); opacity: 1; } }
+  /* The strip's figures arrive, they do not COUNT UP. `ss-pop` used to scale
+     each digit 0.6 -> 1.08 -> 1 over 620ms, and a number growing on load is
+     the one motion this product cannot afford: it reads as the figure
+     resolving, so for half a second "2,596 Open Roles" is a smaller number
+     rendered at a smaller size, and the reader cannot tell a render from a
+     count. Motion conveys CHANGE; nothing here changed, the page merely
+     loaded. The settle is now opacity and colour alone — the figure is at
+     its final size and its final value from the first frame it is legible,
+     and the stagger still reads left to right. */
+  @keyframes ss-settle { from { opacity: 0; color: var(--ink-3); }
+    to { opacity: 1; color: var(--ink); } }
   .stat-strip b.dash-num { display: inline-block;
-    animation: ss-pop 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: ss-settle 380ms ease-out both;
     animation-delay: calc(var(--i, 0) * 90ms); }
+  /* `.ss-warn` states its own colour; letting the settle land on `--ink`
+     would repaint the warning tier neutral at the end of the animation. */
+  .stat-strip .ss-warn b.dash-num {
+    animation-name: ss-settle-warn; }
+  @keyframes ss-settle-warn { from { opacity: 0; color: var(--ink-3); }
+    to { opacity: 1; color: var(--stale-t); } }
   @media (prefers-reduced-motion: reduce) {
     .stat-strip b.dash-num { animation: none; } }
 
@@ -664,17 +684,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      qualifies. The rule is gone rather than left orphaned so nobody
      reintroduces the duplicate by reaching for a class that still styles. */
 
-  /* The fuse: a depleting countdown bar that "burns down" on load. */
-  .fuse-fill { display: block; height: 100%; width: var(--fuse); border-radius: 999px;
-    transform-origin: left; animation: fuse-burn 900ms cubic-bezier(0.4, 0, 0.2, 1) both; }
-  @keyframes fuse-burn { from { width: 100%; } to { width: var(--fuse); } }
-  .fuse-today .fuse-fill { background: var(--danger); }
-  .fuse-soon  .fuse-fill { background: #c1652f; }
-  .fuse-upcoming .fuse-fill { background: var(--accent); }
-  /* A passed deadline (fuse_pct=0, see views.py's _urgency_item) has no
-     colour rule of its own otherwise: .fuse-fill has no default background,
-     so the bar would render fully burnt AND invisible. Muted, not red — a
-     dead deadline is not an active alarm.
+  /* THE FUSE IS GONE. `.fuse-fill`, `.fuse-burn`, the four level colours,
+     `.fuse-passed` and `pulse-red` styled the depleting countdown bar that
+     the 2026-08-30 row redesign retired along with `.rolecard`. Verified
+     dead before deleting: `git grep 'fuse-fill\|fuse-today\|fuse-soon\|
+     fuse-upcoming\|fuse-passed\|urg-today .fuse\|pulse-red'` across every
+     template returns nothing that RENDERS one — `core/home.html` has its own
+     `.v-fuse-fill` for the landing mock, which is a different rule in a
+     different file. Eight rules and two keyframes for markup no page emits,
+     including the only hardcoded light-mode colour left in this block
+     (`#c1652f`, the light `--w-chatted-bar`, which would have painted a
+     light-mode bar on a dark board had anything drawn it).
+
+     `views.py` still computes `fuse_pct` on every urgency item and no
+     template reads it. Retiring that is a view change and belongs to
+     whoever owns that file; the CSS is deleted rather than left orphaned so
+     nobody reintroduces the bar by reaching for a class that still styles.
 
      NOTE FOR ANYONE EDITING THIS FILE: every comment inside this style block
      MUST be a CSS comment. Django's brace-hash comment syntax is SINGLE-LINE
@@ -685,24 +710,21 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      unstyled blocks while the nav still looked fine, because the nav's styles
      live in coverage.css and had already parsed. A template test now guards
      this (directory/tests/test_styles_block.py). */
-  .fuse-passed .fuse-fill { background: var(--ink-3); }
-  .urg-today .fuse-fill { animation: fuse-burn 900ms both, pulse-red 1.6s ease-in-out 1s infinite; }
-  @keyframes pulse-red { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
 
-  /* The live pulse dot, now inside the card's meta row. Slightly smaller than
-     the retired standalone tag's, so it reads as punctuation beside the word
-     "Rolling" rather than as its own element. */
+  /* The live dot beside "Rolling", inside the row's due column. Slightly
+     smaller than the retired standalone tag's, so it reads as punctuation
+     beside the word rather than as its own element.
+
+     NO RING. `.rolling-dot::after` ran `pulse-ring` forever, on every rolling
+     role: ten of them on the first viewport of the founder's board, sixty-odd
+     down a scrolled column, each one an infinite animation on a fact that
+     never changes. "Rolling" is a STATE — this posting has no deadline — not
+     an event, and coverage.css's own `.live-dot` (L2125-2137) already made
+     exactly this argument and removed its own ring. The colour is the signal
+     and the colour stays; the dot is now static, which also drops the last
+     infinite animation on this page that was not bound to a live state. */
   .rolling-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
-    flex: none; position: relative; }
-  .rolling-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%;
-    background: var(--ok); animation: pulse-ring 1.8s ease-out infinite; }
-  @keyframes pulse-ring { 0% { transform: scale(1); opacity: 0.6; }
-    100% { transform: scale(3); opacity: 0; } }
-
-  @media (prefers-reduced-motion: reduce) {
-    .rolling-dot::after, .fuse-fill { animation: none !important; }
-    .fuse-fill { width: var(--fuse); }
-  }
+    flex: none; }
 
   /* ======================================================================
      Firm columns — the Opportunities layout. One firm per card; every open
@@ -727,7 +749,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* ---- Firm-page role rows: the ledger form again. One row per role,
      role-level facts only — the page header owns the firm-level ones. ---- */
   .frow-group { margin-top: var(--s5); }
-  .frows { display: flex; flex-direction: column; gap: var(--s2); }
+  /* No gap: the rows are separated by their own hairline now, not by air.
+     See `.frow` below. */
+  .frows { display: flex; flex-direction: column; }
   /* Which markets the in-scope rows sit in — one line, only on a firm big
      enough that its groups were capped. Deliberately quieter than the scope
      sentence above it: that line is a disclosure the reader must not miss,
@@ -737,14 +761,35 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* The handoff out of a capped group. Sits under the rows it belongs to,
      indented to the row's own text column so it reads as the list's last
      line rather than as a second section heading. */
-  .frow-more { margin: var(--s2) 0 0; padding-left: var(--s4);
+  /* 2px, not `--s4`. This tracks `.frow`'s own text gutter, which moved when
+     the row lost its box (the old 16px was the padding of a card that no
+     longer exists), and the whole point of the indent is that this line
+     starts where the titles above it start. */
+  .frow-more { margin: var(--s3) 0 0; padding-left: 2px;
     font-size: var(--fs-xs); }
   .frow-more a { color: var(--accent-ink); }
+  /* THE SAME LEDGER ROW THE FEED USES. This was a bordered, rounded,
+     shadowed 10px box — a fifth panel shape on a page whose other surfaces
+     are 12px panels or hairline-only, and the one place on the site where
+     `--r-ctl` (the token whose own comment says "buttons, inputs") was
+     spent on a row. Twenty-six of them stacked read as twenty-six cards
+     about one firm, which is the same disease `.rolecard` had before the
+     2026-08-30 redesign and the same cure: the box gives way and the rule
+     between rows does the separating.
+
+     `.rolerow`'s form, not `.rolerow` itself: this row's grid is
+     title-then-deadline (the firm page has no 44px due column, because the
+     page is one firm and the deadline is the only figure), so it keeps its
+     own columns and takes the hairline, the flat ground and the hover. */
   .frow { display: grid; grid-template-columns: minmax(0, 1fr) auto;
     gap: var(--s2) var(--s5); align-items: center;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-ctl); padding: 10px var(--s4);
-    box-shadow: var(--shadow-1); }
+    background: transparent; border: 0;
+    border-top: 1px solid var(--line);
+    border-radius: 0; padding: var(--s3) 2px;
+    box-shadow: none;
+    transition: background-color var(--t-fast); }
+  .frow:first-child { border-top: 0; }
+  .frow:hover { background: var(--paper); }
   .frow-main { min-width: 0; }
   .frow-title { margin: 0; font-size: var(--fs-m); font-weight: var(--w-med);
     line-height: 1.3; }
@@ -926,7 +971,16 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* A real logo brings its own colour, so the tinted chip is dropped. White,
      not --surface: most of these marks are drawn for a white page and ship
      with transparency, so white is what makes them melt in rather than sit
-     on a tinted square. The hairline is what still reads as a tile. */
+     on a tinted square. The hairline is what still reads as a tile.
+
+     THE WHITE TILE STAYS, and only here (see the dark block at the foot of
+     this file for the monogram, which does NOT). The two cases look alike
+     and are not: a monogram is text we draw ourselves, so its tile can be
+     any colour and a light one on a dark board is simply a mistake; a
+     wordmark is a transparent PNG drawn for white paper, and putting it on
+     `--surface` in dark paints a black mark on a near-black square. A tile
+     is the honest frame for a foreign asset. It is toned down rather than
+     left at #fff — see `.firmcol-logo.has-logo` in the dark block. */
   .firmcol-logo.has-logo { background: #fff;
     box-shadow: inset 0 0 0 1px var(--line); padding: 5px; }
   /* `contain`, never `cover`: these marks are wordmarks as often as glyphs,
@@ -990,14 +1044,24 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
      `--surface` must match .firmcol's background or the cover layers will show
      as bands. */
+  /* The two SHADOW layers were `rgba(23, 23, 23, 0.10)` — the light theme's
+     ink, hardcoded. On `#1c201a` a 10% near-black is invisible, so the whole
+     affordance this comment argues for simply did not exist in dark: the
+     card straddling the bottom edge read as a clipped box again, which is
+     the bug that was reported as a layout error in the first place. Derived
+     from `--ink` now, which is near-black in light and near-white in dark,
+     so the fade is a shadow on paper and a glow on ink and both say "more
+     below". */
   .firmcol-scroll { flex: 1; min-height: 0; overflow-y: auto;
     padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s3);
     scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
     background:
       linear-gradient(var(--surface) 30%, transparent) top / 100% 28px no-repeat local,
       linear-gradient(transparent, var(--surface) 70%) bottom / 100% 28px no-repeat local,
-      linear-gradient(rgba(23, 23, 23, 0.10), transparent) top / 100% 14px no-repeat scroll,
-      linear-gradient(transparent, rgba(23, 23, 23, 0.10)) bottom / 100% 14px no-repeat scroll;
+      linear-gradient(color-mix(in srgb, var(--ink) 10%, transparent), transparent)
+        top / 100% 14px no-repeat scroll,
+      linear-gradient(transparent, color-mix(in srgb, var(--ink) 10%, transparent))
+        bottom / 100% 14px no-repeat scroll;
     background-color: var(--surface); }
   .firmcol-scroll::-webkit-scrollbar { width: 8px; }
   .firmcol-scroll::-webkit-scrollbar-thumb { background: var(--line-strong);
@@ -1040,8 +1104,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      Save and "Not for me" are opposite verbs and were zero-gap siblings, so
      the dismiss target began at exactly the pixel Save ended. */
   .track { display: inline-flex; gap: 6px; }
+  /* `--r-ctl`, not 999px — see `.scope-act` above for the rule and the rest
+     of the family. `.track-chip` below KEEPS its pill: it is a read-only
+     status ("Applied", "Interviewing"), which is exactly the thing the pill
+     shape is reserved for. */
   .track-btn { display: inline-flex; align-items: center; gap: var(--s1);
-    border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface);
     color: var(--ink-3); cursor: pointer; padding: 2px 9px 2px 7px;
     font-size: 11px; font-weight: var(--w-med); text-transform: none; letter-spacing: normal;
     transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast); }
@@ -1050,6 +1118,33 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     background: var(--accent-soft); }
   .track-btn.is-saved { color: var(--accent-ink); border-color: var(--accent-line);
     background: var(--accent-soft); }
+  /* THE ONE WRITE ON THIS PAGE, SEEN. Saving was a pure colour change: the
+     outline star filled, the border tinted, and nothing moved — so the only
+     act a student performs on the feed had no acknowledgement at all, while
+     Settings pops `chip-check` on twenty-three chips that merely LOADED.
+     This is that motion spent where it belongs, and spent the way the
+     audit's own motion rule asks: bound to a change, silent on a reload.
+
+     ON THE SVG, not the button. The button's border and ground cross-fade;
+     scaling the whole control would shove the row's meta line. The star is
+     what changed state, so the star is what moves.
+
+     A TRANSITION OFF `htmx-settling`, NOT `animation: chip-check`. Naming
+     the keyframe directly would have been shorter and would have been the
+     bug this file's audit flagged on Settings: a keyframe on
+     `.track-btn.is-saved svg` fires on every PAGE LOAD too, once per
+     already-saved row, so a reload of unchanged state would pop every star
+     on the board. htmx puts `htmx-settling` on swapped-in content for the
+     settle window and then takes it off, which is a hook that exists only
+     on the swap. The star is painted small while the class is on and
+     transitions up when it comes off — so it fires on the save and on
+     nothing else. `cubic-bezier(0.34, 1.56, 0.64, 1)` overshoots to ~1.09,
+     which is chip-check's own 0.6 -> 1.12 -> 1 shape in one curve. */
+  .track-btn svg { transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .track.htmx-settling .track-btn.is-saved svg { transform: scale(0.55); }
+  @media (prefers-reduced-motion: reduce) {
+    .track-btn svg { transition: none; }
+    .track.htmx-settling .track-btn.is-saved svg { transform: none; } }
   .track-chip { display: inline-flex; align-items: center; border-radius: 999px;
     padding: 2px 10px; font-size: 11px; font-weight: var(--w-med);
     background: var(--accent-soft); color: var(--accent-ink); }
@@ -1128,7 +1223,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      used, so this is restoring the product's own established palette, not
      inventing a new one. */
   .rr-due-n.meta-today { color: var(--danger); font-weight: var(--w-med); }
-  .rr-due-n.meta-soon { color: var(--w-chatted-bar); }
+  /* `--w-chatted-t`, the TEXT tier, not `--w-chatted-bar`. The bar token is
+     a fill colour for the warmth meter, sized for a 4px band on a surface,
+     and it was never a text value: measured live at 12px it returned 3.98:1
+     in light and 3.12:1 in dark, both under AA's 4.5. This is the "6d" on
+     every role closing inside a week — the one figure on the board that is
+     supposed to shout. Same warmth family, the tier that was built to be
+     read: 5.05:1 light, 6.24:1 dark, measured the same way. */
+  .rr-due-n.meta-soon { color: var(--w-chatted-t); }
   .rr-due-n.meta-upcoming { color: var(--accent-ink); }
   .rr-due-none { color: var(--line-strong); }
   .rr-due-rolling { display: inline-flex; align-items: center; }
@@ -1399,10 +1501,24 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      deliberately does NOT reuse .tl-row's confirmed/rumored border language.
      A solid, quieter border says "this is a count", not "this is a claim
      someone is vouching for". */
-  .cyc-obs { list-style: none; padding: 0; margin: var(--s2) 0 0; display: grid; gap: var(--s2); }
+  /* FOLDED INTO `.frow`'s FORM (2026-09-01). This was the site's only
+     bordered-and-rounded list row — two occurrences, one page — and the
+     rounded box was doing the job of saying "these are counts, not claims"
+     that its quieter border and its own section lede already do. It is a
+     ledger row like the roles below it now: hairline between siblings, flat
+     ground, the same 2px text gutter, so the firm page has one row shape
+     instead of three. The distinction from `.tl-row`'s confirmed/rumored
+     border language survives, and survives better: `.tl-row` is the only
+     bordered row left on the page, which is exactly the contrast the
+     original comment wanted. */
+  .cyc-obs { list-style: none; padding: 0; margin: var(--s2) 0 0;
+    display: flex; flex-direction: column; }
   .cyc-obs-row { display: flex; gap: var(--s3); align-items: baseline; flex-wrap: wrap;
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    padding: var(--s2) var(--s3); background: var(--surface); font-size: var(--fs-s); }
+    border: 0; border-top: 1px solid var(--line); border-radius: 0;
+    padding: var(--s3) 2px; background: transparent; font-size: var(--fs-s);
+    transition: background-color var(--t-fast); }
+  .cyc-obs-row:first-child { border-top: 0; }
+  .cyc-obs-row:hover { background: var(--paper); }
   .cyc-obs-region { color: var(--ink-3); font-size: var(--fs-micro);
     text-transform: uppercase; letter-spacing: 0.05em; min-width: 6rem; }
   .cyc-obs-fact { color: var(--ink-2); }
@@ -1499,6 +1615,30 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     gap: 3px; border-top: 1px dashed var(--line-strong);
     background: var(--surface); }
   .rolerow-dismissed:hover { background: var(--surface); }
+  /* THE SWAP, SEEN. A row the student rejected was replaced by its receipt
+     instantly, mid-scroll, with nothing marking the exchange — the same act
+     on Today gets a view transition where the card that leaves fades and
+     the one that moves glides. Two halves, one gesture:
+
+       - `.rolerow.htmx-swapping` is the DEPARTING row. `_track_control.html`
+         asks for it by name (`hx-swap="outerHTML swap:120ms"`), which is
+         htmx holding the old node on screen with that class for exactly
+         that long before inserting the new one. Until now nothing styled
+         it, so the 120ms was a pause, not a fade.
+       - `settle` on the arriving stub. coverage.css §15's own keyframe, the
+         one `#cov-results` fresh content already uses, so the receipt
+         arrives the same way every other swapped-in thing on this page
+         does. 160ms out, 220ms in: the exchange reads as one motion.
+
+     Bound to a real state change, so it is the kind of motion this file is
+     allowed to spend. */
+  .rolerow.htmx-swapping {
+    opacity: 0; transition: opacity 160ms ease-out; }
+  .rolerow-dismissed {
+    animation: settle 220ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
+  @media (prefers-reduced-motion: reduce) {
+    .rolerow.htmx-swapping { opacity: 1; transition: none; }
+    .rolerow-dismissed { animation: none; } }
   .rcd-said { margin: 0; font-size: var(--fs-s); font-weight: var(--w-med);
     color: var(--ink-2); }
   /* WHICH role, said out loud. A stub that only said "Not for me" would be
@@ -1509,8 +1649,9 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rcd-note { margin: 0 0 2px; font-size: var(--fs-nano); color: var(--ink-3);
     line-height: 1.35; }
+  /* `--r-ctl`, not 999px — see `.scope-act` for the rule. */
   .rcd-undo { align-self: flex-start; border: 1px solid var(--accent-line);
-    background: var(--paper); color: var(--accent-ink); border-radius: 999px;
+    background: var(--paper); color: var(--accent-ink); border-radius: var(--r-ctl);
     padding: var(--s1) 14px; font: inherit; font-size: var(--fs-xs);
     font-weight: var(--w-med); cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast); }
@@ -1618,5 +1759,101 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     .role-mini { flex: 0 1 auto; min-width: 0; overflow: hidden;
       text-overflow: ellipsis; }
   }
+
+  /* ======================================================================
+     THE COUNT FOOTNOTE — why the segment says 2,723 and the strip says
+     2,596.
+
+     filter-bar-redesign.md §3, principle 2: counts are a promise. Two
+     numbers about one board sat eight pixels apart and disagreed by 127
+     with nothing on the page explaining it, so at least one of them read
+     as wrong. They are both right and they count different things: the
+     SEGMENT counts the board (every open campus requisition, the shared
+     facet every visitor sees), the STRIP counts this render (after repeat
+     listings fold and after "Eligible only" hides, both of which depend on
+     who is asking). Folding before counting the segments would have made
+     them agree and broken the facets: `fold_duplicates` needs materialised
+     rows and a per-user tie-break, which is exactly what views.py's own
+     note says must never reach a shared count. So the page says the
+     arithmetic out loud instead.
+
+     Quiet, one line, in the scope block's own voice — it is a footnote to
+     a number, not a warning. Same `.scope-line` family the firm page uses
+     for its own "what this scope is not showing" sentence, which is the
+     same kind of claim. */
+  .scope-foot { margin: calc(var(--s3) * -1) 0 var(--s3); font-size: var(--fs-xs);
+    color: var(--ink-3); }
+  /* Spacing only. The separator keeps `.scope-sep`'s own `--ink-3`: pushing
+     it to `--line-strong` measured 1.89:1 on dark, which put a NEW row in
+     the audit's low-contrast table on the same page whose 3.12:1 failure
+     this pass went there to remove. A middot is decorative and AA does not
+     bind it, and that is a reason not to bother making it fainter, not a
+     licence to. */
+  .scope-foot .scope-sep { margin: 0 6px; }
+
+  /* ======================================================================
+     "PICKED" — the word that says this column is not a firm.
+
+     Three things were supposed to say it: the accent top edge, the star
+     tile, and the accent border. On the founder's own board all twelve firm
+     columns are `.is-mine`, so they wear the same accent border, and the
+     star is the only signal left carrying real weight. A word cannot be
+     confused with a tint.
+
+     It sits IN `.firmcol-stats`, in the slot a firm column spends on its
+     tier — not on a line of its own above the name. That was the first cut
+     and it measured 141px of header against every neighbour's 126, pushing
+     this column's first role row 15px below the row it belongs to: the
+     exact misalignment `.firmcol-head` above pins a min-height to prevent.
+     Mono, uppercase and accent, the same voice as `.firmcol-tier.is-mine`
+     beside it, so the two headers answer the same question in the same
+     place. `flex: none` keeps `.firmcol-why` ellipsising around it rather
+     than squeezing it, exactly as it does around a tier pill. */
+  .fc-eyebrow { flex: none; font-family: var(--font-mono);
+    font-size: var(--fs-nano); font-weight: var(--w-bold);
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--accent-ink); line-height: 1.2; }
+
+  /* ======================================================================
+     DARK — the tiles that were painted in light-mode literals.
+
+     Both blocks, both directions: the media query sets the default and
+     `[data-theme]` overrides it either way, the same shape coverage.css's
+     own palette uses (a student reading at midnight in a light-mode OS is
+     a real person, not a configuration error). Every other rule in this
+     file is already token-driven and needs nothing here.
+     ====================================================================== */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .firmcol-logo:not(.has-logo):not(.firmcol-logo--picked) {
+      /* The monogram tile was `hsl(--hue 52% 90%)` — a fixed 90% lightness,
+         which is a pastel square glowing off a `#1c201a` board, thirteen of
+         them across one row. The hue is the signal and the hue stays; the
+         tile is now derived from the surface it sits on, so it reads as a
+         tinted recess rather than a light chip. Text lightness rises to
+         clear AA against the darker tile (measured 7.4:1 at hue 210,
+         6.9:1 at the worst hue in the wheel, against 4.5 required). */
+      background: color-mix(in srgb, var(--surface) 85%,
+                            hsl(var(--hue, 210) 52% 50%));
+      color: hsl(var(--hue, 210) 45% 78%);
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 70%,
+                                            hsl(var(--hue, 210) 40% 50%)); }
+    :root:not([data-theme="light"]) .firmcol-logo.has-logo {
+      /* The tile stays light because the marks inside it are transparent
+         PNGs drawn for white paper (see the light rule's own note), but
+         `#fff` at full strength is a lamp on a dark board. Toned toward the
+         surface: still light enough to carry a black wordmark, no longer
+         the brightest thing on the page. */
+      background: color-mix(in srgb, var(--surface) 15%, white);
+      box-shadow: inset 0 0 0 1px var(--line); }
+  }
+  :root[data-theme="dark"] .firmcol-logo:not(.has-logo):not(.firmcol-logo--picked) {
+    background: color-mix(in srgb, var(--surface) 85%,
+                          hsl(var(--hue, 210) 52% 50%));
+    color: hsl(var(--hue, 210) 45% 78%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--surface) 70%,
+                                          hsl(var(--hue, 210) 40% 50%)); }
+  :root[data-theme="dark"] .firmcol-logo.has-logo {
+    background: color-mix(in srgb, var(--surface) 15%, white);
+    box-shadow: inset 0 0 0 1px var(--line); }
 
 </style>

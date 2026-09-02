@@ -2796,6 +2796,28 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         for v in FEED_SEGMENT_VALUES
     ]
 
+    # THE NUMBER THE CHECKED SEGMENT SHOWS, named so the page can reconcile it
+    # with the stat strip's `total` further down instead of leaving a student
+    # to notice that two counts eight pixels apart disagree by 127.
+    #
+    # They count different things and both are right. This one is THE BOARD:
+    # every open row that clears the shared filters, computed in SQL over
+    # `open_qs` like every other facet, identical for every visitor.
+    # `total` is THIS RENDER: the same rows after `fold_duplicates` collapses
+    # repeat requisitions and after "Eligible only" hides blocked ones — two
+    # cuts that depend on WHO IS ASKING (the fold's tie-break prefers a copy
+    # this student already tracked) and therefore must never reach a shared
+    # count. See the `dupes_shown` block for that rule stated at the fold.
+    #
+    # So the two cannot be made to agree without breaking the facets, and the
+    # gap is stated instead: `board_count - hidden_dupes - hidden_fit == total`
+    # is an exact identity, pinned by
+    # test_board_surface.py::test_the_board_count_and_the_strip_total_reconcile,
+    # and `_results.html` prints whichever of the two subtrahends is non-zero.
+    # Measured on the founder's live board when this shipped: 2723 on the
+    # board, 127 folded, 0 hidden by fit, 2596 in the strip.
+    board_count = role_count.get(effective_role, 0)
+
     # THE CONDITIONAL FIFTH SEGMENT — deep-link honesty, and a real bug guard,
     # now for `other` alone. `all` graduated to a normal segment above, so
     # gating this on the full `ROLE_OPTIN` tuple would draw it twice — once as
@@ -3393,6 +3415,10 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         "cols_next": cols_next,
         "cols_qs": _qs_without(request, "cols"),
         "total": total,
+        # The checked segment's own number, so the strip can footnote the
+        # difference between it and `total`. See `board_count` above for why
+        # the two are not the same number and must not be made one.
+        "board_count": board_count,
         # Recommendation bar. `picks` empty + `has_profile` true is the honest
         # "nothing clears the bar" state; `has_profile` false is the
         # signed-out / empty-survey state. The template needs to tell those
