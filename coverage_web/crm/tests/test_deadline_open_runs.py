@@ -158,14 +158,23 @@ def test_a_duration_never_becomes_a_row_of_its_own():
 
 def test_the_row_still_carries_its_countdown_unchanged():
     """The trailing fact is additive. Everything the card said before it must
-    still be there and still say the same thing."""
+    still be there and still say the same thing.
+
+    "in 3d", not "3d", since 2026-09-02, and this file is the reason. Rule 1
+    above spends a paragraph on why an elapsed openness and a deadline have
+    no axis in common — and then the card printed both as a bare "Nd" an inch
+    apart, so the argument was won in the docstring and lost on the screen.
+    The countdown now states its direction; `days` is untouched, which is
+    what "unchanged" in this test's name has always meant. The rail-wide rule
+    lives in `crm/tests/test_rail_copy_2026_09_02.py`.
+    """
     user = _user()
     firm = _firm()
     _date(firm, in_days=3)
     _watched_runs(firm, [22, 9, 3])
 
     row = _next_deadlines(user, timezone.localdate())[0]
-    assert row["when"] == "3d"
+    assert row["when"] == "in 3d"
     assert row["days"] == 3
     assert row["urgent"] is True
     assert row["open_run"] == {"count": 3, "longest_days": 22}
