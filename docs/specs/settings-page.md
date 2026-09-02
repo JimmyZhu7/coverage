@@ -106,11 +106,16 @@ today. Belongs beside the other engine knobs in Cadence.
 9. **"Your Data" counts are slightly dishonest** (SHOULD) — "Contacts: 137" counts archived
    rows, while the Network page shows 112. Say "137 (25 archived)" and link the archived
    list (`/app/contacts/archived/` exists and is good).
-10. **Notification preferences are correctly absent — keep it that way for now.** The
-    Monday digest (build-plan §7 M4) is **not built**: `digest_sent/digest_opened` exist
-    only as reserved event names; outbound email is configured for password resets only.
-    Shipping a digest toggle before the digest would be the inverse over-claim. The day the
-    digest ships, a Notifications control + unsubscribe link ship **with it** (see LATER).
+10. **Notification preferences — corrected 2026-09-02.** This item used to read "the
+    Monday digest is **not built**: `digest_sent/digest_opened` exist only as reserved
+    event names". That stopped being true: `crm/management/commands/send_weekly_digest.py`,
+    `templates/crm/emails/weekly_digest.{html,txt}`, `User.weekly_digest_opt_out` and the
+    `digest_unsubscribe` route all exist, and `render.yaml` runs the cron. The condition
+    this item set for shipping a control is therefore met, and the control is the open
+    item: the digest sends and the only way to stop it is the unsubscribe link in the
+    email, so Settings should carry the toggle that `weekly_digest_opt_out` already
+    backs. What is still genuinely absent is a sending domain — outbound mail is
+    configured for password resets only — so nothing has actually gone out.
 11. **Delete page misses the backup caveat** (SHOULD) — build-plan §10: "state the
     backup-expiry window." The delete page says "no undo, no waiting period" but doesn't
     mention that DB backups persist briefly. One honest sentence, once the deploy target's

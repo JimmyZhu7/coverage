@@ -454,7 +454,15 @@ def test_input_order_cannot_change_output_order():
 
 
 def test_a_dated_role_outranks_a_rolling_one_at_the_same_score():
-    soon = _cand(1, firm_tracks=("ib",), region="us", deadline=date(2030, 1, 1))
+    # An OFFSET from the clock, not `date(2030, 1, 1)`. The literal meant "far
+    # future" when it was written and stops meaning that on 2030-01-01, at
+    # which point this test starts asserting that a role whose deadline has
+    # passed outranks a rolling one — a real question, answered here by
+    # accident and four years early. `audit-perf-tests.md §2` found 256 date
+    # literals across 40 test files and this is the one that was already
+    # counting down.
+    far_future = timezone.localdate() + timedelta(days=365 * 3)
+    soon = _cand(1, firm_tracks=("ib",), region="us", deadline=far_future)
     rolling = _cand(2, firm_tracks=("ib",), region="us", deadline=None)
     assert _order(JIMMY, [rolling, soon]) == [1, 2]
 

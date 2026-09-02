@@ -23,6 +23,8 @@ would leak, the assertion below is what tells them.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from django.apps import apps
 from django.contrib.auth import get_user_model
@@ -414,7 +416,8 @@ def test_every_modelform_fk_to_a_private_model_is_explicitly_rescoped(owner, int
 # enough for a human to review. This is a ratchet, not a limit: it exists so
 # that a batch of new unscoped calls has to be noticed and argued for.
 # ===========================================================================
-def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
+def _all_objects_lines():
+    """Every non-test, non-migration line that reaches the escape hatch."""
     import subprocess
     from pathlib import Path
 
@@ -423,103 +426,194 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
         ["grep", "-rn", "--include=*.py", r"all_objects\.", str(root)],
         capture_output=True, text=True,
     )
-    lines = [
+    return [
         line for line in proc.stdout.splitlines()
         if "/tests/" not in line and "/migrations/" not in line
     ]
-    # Measured at 77 lines on the audit of 2026-08-27, raised to 84 the same
-    # night after several concurrent merges (the bench/park dismissal writes
-    # in crm/today.py, the firm-tier setter in crm/views.py, and others) each
-    # added one properly-scoped call, then to 87 on 2026-08-28 for 3 more of
-    # the same shape. A handful of the count are prose mentions inside
-    # docstrings rather than calls; the grep is deliberately blunt so it
-    # cannot be evaded by formatting.
-    #
-    # Raised to 96 on 2026-08-29: merging four overnight cleanup sweeps back
-    # into main (each done in its own worktree, all branched before the
-    # night's other concurrent merges) surfaced 9 net-new call sites diffed
-    # by CONTENT against the 2026-08-28 baseline, not by line number, since
-    # unrelated edits elsewhere in the same files had shifted most of the 84
-    # to new line numbers without changing them. Every one of the 9 reads:
-    # the analytics pilot-funnel dashboard's per-user drilldown queries
-    # (`user_id__in=ids` / `user_id=subject.id`, analytics/views.py, a staff
-    # view scoped to explicit ids gathered earlier in the same function), the
-    # calendar-invite dedup split in capture/gmail.py (`user=user` on both
-    # halves of what used to be one call), and this same night's gmail_poll
-    # import ledger (`user=connection.user`, capture/management/commands/
-    # gmail_poll.py) -- none is a new unscoped read or write.
-    #
-    # Raised to 97 on 2026-09-01: the new `audit_chat_claims` management
-    # command (capture/management/commands/audit_chat_claims.py) reads
-    # CalendarEvent and Touch rows through `all_objects` because both queries
-    # run against a `contact` already pulled from `Contact.objects.for_user
-    # (user)` a few lines up, so `all_objects` here is not an unscoped
-    # cross-tenant read. Both calls carry an explicit `user=user` predicate
-    # anyway (added alongside this ratchet bump), matching every other call
-    # site's style rather than leaning on the contact FK alone.
-    #
-    # Raised to 98 on 2026-09-01 (second raise that day): the Reschedule
-    # handler in crm/today.py now moves the live chat CalendarEvent instead
-    # of logging a dateless touch, and when no live event exists it CREATES
-    # one through `all_objects` -- the same create-only exception every other
-    # writer in that module makes, because the tenant manager raises on an
-    # unscoped queryset and a create is not a query. The row carries
-    # `user=user` explicitly, and the contact it hangs off was already pulled
-    # through `Contact.objects.for_user(user)`. Not a cross-tenant read or
-    # write.
-    #
-    # Raised to 100 on 2026-09-02 for the billing/deploy fix pass. Two
-    # net-new call sites, both read against the diff:
-    #
-    #   1. `accounts/trials.py::reset_free_rescan_throttle` —
-    #      `GmailConnection.all_objects.filter(user=user)`, an explicit
-    #      `user=` predicate on a user the caller already selected
-    #      (`pro_trial_expire`'s own expired-trials queryset). It cannot use
-    #      `.objects.for_user` because the manager's read path is a request-
-    #      time contract and this runs in a cron with no request; every other
-    #      cron in this repo that touches GmailConnection does the same.
-    #   2. `billing/credits.py::_spend_clamped` —
-    #      `CreditLedger.all_objects.create(user=user, ...)`. This module IS
-    #      the trusted writer of the ledger and says so in its own docstring;
-    #      the new function is a second write on the same path `spend()`
-    #      already took, not a new kind of access.
-    #
-    # Neither is an unscoped cross-tenant read.
-    #
-    # Raised to 100 on 2026-09-01, later the same day, for the security
-    # hardening pass. Three call sites, read one at a time:
-    #
-    #   - `capture/google_revoke.py::revoke_all_for_user` and the loop in
-    #     `capture/views.py::gmail_disconnect`, both
-    #     `GmailConnection.all_objects.filter(user=...)`. Explicit predicate,
-    #     same shape as every other worker-side read of that table; they
-    #     exist because the grant now has to be handed back to Google before
-    #     the row is deleted.
-    #   - `accounts/views.py::push_subscribe`'s ownership check,
-    #     `PushSubscription.all_objects.filter(endpoint=...)`. This one is
-    #     DELIBERATELY cross-tenant and has to be: it exists to find out
-    #     whether an endpoint already belongs to somebody else so the write
-    #     can be REFUSED. It selects one column (`user_id`), compares it to
-    #     the caller's, and returns 409 without putting anything about the
-    #     other account in the response. The unscoped write it replaces is
-    #     gone: `update_or_create` now only ever runs on a row that is new or
-    #     already the caller's. Net, this line is one fewer way to touch
-    #     another tenant's row, not one more.
-    #
-    # Landed at 103 when the billing and security branches merged on
-    # 2026-09-02: 98 after the Reschedule create, plus the two billing sites
-    # and the three security sites justified above. Each of the five was
-    # written up by the branch that added it; the arithmetic is stated here
-    # because two branches independently proposed 100 from different bases,
-    # and the merged tree measures 103.
-    #
-    # A RATCHET, not a limit. The headroom is small on purpose: this is meant
-    # to fire on the next batch of unscoped calls so somebody looks at them,
-    # which is the whole justification for `all_objects` being greppable.
-    # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 103, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 103 reviewed "
-        "on 2026-09-02. Each new call site needs an explicit `user=` predicate "
-        "or a written cross-tenant justification — read the diff, then raise "
-        "this number deliberately."
+
+
+# A line that names `user=`, `user_id=` or `user__` right there is a line whose
+# scope a reader can check without opening the file. Those are not what the
+# ratchet is for.
+_SCOPED_ON_THE_SAME_LINE = re.compile(r"\buser(_id)?\s*=|\buser(_id)?__|for_user\(")
+
+
+def _unscoped_lines():
+    out = []
+    for line in _all_objects_lines():
+        # "path:lineno:code" — split off both so a path containing "user"
+        # cannot make a line look scoped.
+        _, _, rest = line.partition(":")
+        _, _, code = rest.partition(":")
+        if not _SCOPED_ON_THE_SAME_LINE.search(code):
+            out.append(line)
+    return out
+
+
+def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
+    """RE-AIMED on 2026-09-02, and the re-aim is the point.
+
+    This counted every `all_objects.` line: 77 on 2026-08-27, then 84, 87, 96,
+    97, 98, 103 — six raises in six days, each one legitimate, each one
+    preceded by somebody reading a diff to confirm that a properly scoped call
+    had been added. A ratchet that fires mostly on calls it should not care
+    about is a ratchet whose answer is always "raise it", and an assertion
+    whose answer is always the same has stopped changing decisions
+    (`audit-perf-tests.md §5`, Part 2 defect 4).
+
+    The invariant was never "few calls". It is "no call reaches across
+    tenants". A line that carries `user=` / `user_id=` / `user__` on the face
+    of it is scoped, is checkable in the grep output without opening the file,
+    and may grow freely. What has to stay small is the set of lines where the
+    scope is NOT visible, because those are the ones a human has to read.
+
+    MEASURED 2026-09-02 on the merged tree: 103 `all_objects.` lines total, of
+    which 76 carry no user predicate on the same line. The six biggest
+    carriers are capture/autopilot.py (8),
+    core/management/commands/audit_fixtures.py (5), analytics/views.py (5),
+    capture/gmail_live.py (4), crm/debrief.py (4), accounts/services.py (4).
+    Most of the remaining 76 are multi-line calls whose `user=` sits on the
+    next line: reading the whole statement rather than the line brings the
+    genuinely unscoped set down to 30, and every one of those 30 is either a
+    staff/ops read, a cron with no request, or a deliberate cross-tenant
+    ownership check that exists in order to REFUSE a write
+    (`accounts/views.py::push_subscribe`).
+
+    Ceiling 84: 76 plus about 10% headroom. Raising it still needs the diff
+    read and the justification written, exactly as before; what changed is
+    that adding a correctly scoped call no longer costs anybody that ritual.
+    """
+    lines = _unscoped_lines()
+    assert len(lines) <= 84, (
+        f"{len(lines)} `all_objects.` lines carry no user predicate, up from "
+        "the 76 reviewed on 2026-09-02 against a ceiling of 84. Each new one "
+        "needs an explicit `user=` on the line, or a written cross-tenant "
+        "justification here — read the diff, then raise this number "
+        "deliberately.\n" + "\n".join(lines[-12:])
     )
+
+
+def test_a_scoped_call_site_does_not_spend_the_ratchets_headroom():
+    """The half that makes the re-aim above real rather than cosmetic.
+
+    If this ever fails, the counter has drifted back to counting every call
+    and the six-raises-in-six-days pattern is about to resume.
+    """
+    assert len(_unscoped_lines()) < len(_all_objects_lines()), (
+        "the unscoped filter matched nothing: `all_objects.` lines carrying an "
+        "explicit user predicate are being counted against the ceiling again"
+    )
+
+
+def test_the_ratchet_still_sees_a_genuinely_unscoped_line():
+    """And the other half: the filter must not be so loose that a bare
+    cross-tenant read slips past it."""
+    assert _SCOPED_ON_THE_SAME_LINE.search(
+        "        Contact.all_objects.filter(user=user, archived=False)")
+    assert not _SCOPED_ON_THE_SAME_LINE.search(
+        "        Contact.all_objects.filter(archived=False)")
+    assert not _SCOPED_ON_THE_SAME_LINE.search(
+        "        Contact.all_objects.all()")
+
+
+# ---------------------------------------------------------------------------
+# THE CALL-SITE REVIEW LOG, kept verbatim rather than deleted with the old
+# ceiling. Every paragraph below is a call site somebody read and signed off
+# on, and this is the only record of why each `all_objects` in the tree is
+# allowed to be there. The numbers are the OLD total-lines ceiling; the
+# reasoning is what still matters.
+# ---------------------------------------------------------------------------
+# of these paragraphs is a call site somebody read and signed off on, and
+# the reasoning is the only record of why each `all_objects` in the tree is
+# allowed to be there.
+#
+# Measured at 77 lines on the audit of 2026-08-27, raised to 84 the same
+# night after several concurrent merges (the bench/park dismissal writes
+# in crm/today.py, the firm-tier setter in crm/views.py, and others) each
+# added one properly-scoped call, then to 87 on 2026-08-28 for 3 more of
+# the same shape. A handful of the count are prose mentions inside
+# docstrings rather than calls; the grep is deliberately blunt so it
+# cannot be evaded by formatting.
+#
+# Raised to 96 on 2026-08-29: merging four overnight cleanup sweeps back
+# into main (each done in its own worktree, all branched before the
+# night's other concurrent merges) surfaced 9 net-new call sites diffed
+# by CONTENT against the 2026-08-28 baseline, not by line number, since
+# unrelated edits elsewhere in the same files had shifted most of the 84
+# to new line numbers without changing them. Every one of the 9 reads:
+# the analytics pilot-funnel dashboard's per-user drilldown queries
+# (`user_id__in=ids` / `user_id=subject.id`, analytics/views.py, a staff
+# view scoped to explicit ids gathered earlier in the same function), the
+# calendar-invite dedup split in capture/gmail.py (`user=user` on both
+# halves of what used to be one call), and this same night's gmail_poll
+# import ledger (`user=connection.user`, capture/management/commands/
+# gmail_poll.py) -- none is a new unscoped read or write.
+#
+# Raised to 97 on 2026-09-01: the new `audit_chat_claims` management
+# command (capture/management/commands/audit_chat_claims.py) reads
+# CalendarEvent and Touch rows through `all_objects` because both queries
+# run against a `contact` already pulled from `Contact.objects.for_user
+# (user)` a few lines up, so `all_objects` here is not an unscoped
+# cross-tenant read. Both calls carry an explicit `user=user` predicate
+# anyway (added alongside this ratchet bump), matching every other call
+# site's style rather than leaning on the contact FK alone.
+#
+# Raised to 98 on 2026-09-01 (second raise that day): the Reschedule
+# handler in crm/today.py now moves the live chat CalendarEvent instead
+# of logging a dateless touch, and when no live event exists it CREATES
+# one through `all_objects` -- the same create-only exception every other
+# writer in that module makes, because the tenant manager raises on an
+# unscoped queryset and a create is not a query. The row carries
+# `user=user` explicitly, and the contact it hangs off was already pulled
+# through `Contact.objects.for_user(user)`. Not a cross-tenant read or
+# write.
+#
+# Raised to 100 on 2026-09-02 for the billing/deploy fix pass. Two
+# net-new call sites, both read against the diff:
+#
+#   1. `accounts/trials.py::reset_free_rescan_throttle` —
+#      `GmailConnection.all_objects.filter(user=user)`, an explicit
+#      `user=` predicate on a user the caller already selected
+#      (`pro_trial_expire`'s own expired-trials queryset). It cannot use
+#      `.objects.for_user` because the manager's read path is a request-
+#      time contract and this runs in a cron with no request; every other
+#      cron in this repo that touches GmailConnection does the same.
+#   2. `billing/credits.py::_spend_clamped` —
+#      `CreditLedger.all_objects.create(user=user, ...)`. This module IS
+#      the trusted writer of the ledger and says so in its own docstring;
+#      the new function is a second write on the same path `spend()`
+#      already took, not a new kind of access.
+#
+# Neither is an unscoped cross-tenant read.
+#
+# Raised to 100 on 2026-09-01, later the same day, for the security
+# hardening pass. Three call sites, read one at a time:
+#
+#   - `capture/google_revoke.py::revoke_all_for_user` and the loop in
+#     `capture/views.py::gmail_disconnect`, both
+#     `GmailConnection.all_objects.filter(user=...)`. Explicit predicate,
+#     same shape as every other worker-side read of that table; they
+#     exist because the grant now has to be handed back to Google before
+#     the row is deleted.
+#   - `accounts/views.py::push_subscribe`'s ownership check,
+#     `PushSubscription.all_objects.filter(endpoint=...)`. This one is
+#     DELIBERATELY cross-tenant and has to be: it exists to find out
+#     whether an endpoint already belongs to somebody else so the write
+#     can be REFUSED. It selects one column (`user_id`), compares it to
+#     the caller's, and returns 409 without putting anything about the
+#     other account in the response. The unscoped write it replaces is
+#     gone: `update_or_create` now only ever runs on a row that is new or
+#     already the caller's. Net, this line is one fewer way to touch
+#     another tenant's row, not one more.
+#
+# Landed at 103 when the billing and security branches merged on
+# 2026-09-02: 98 after the Reschedule create, plus the two billing sites
+# and the three security sites justified above. Each of the five was
+# written up by the branch that added it; the arithmetic is stated here
+# because two branches independently proposed 100 from different bases,
+# and the merged tree measures 103.
+#
+# A RATCHET, not a limit. The headroom is small on purpose: this is meant
+# to fire on the next batch of unscoped calls so somebody looks at them,
+# which is the whole justification for `all_objects` being greppable.
+# Raising the number is a legitimate response — AFTER reading the diff.

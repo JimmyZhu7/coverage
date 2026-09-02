@@ -17,6 +17,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from analytics.events import record_event
+from core.clientip import client_ip
 
 from . import stripe_gateway
 from .models import ProWaitlist
@@ -87,9 +88,10 @@ _WAITLIST_WINDOW_LIMIT = 5
 
 
 def _waitlist_throttled(request) -> bool:
-    ip = (request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
-          or request.META.get("REMOTE_ADDR", "unknown"))
-    key = f"waitlist-rate:{ip}"
+    # Same shared definition as the search throttle: `core.clientip.client_ip`
+    # reads only the hops our own proxies appended, so a forged
+    # X-Forwarded-For no longer buys a fresh window.
+    key = f"waitlist-rate:{client_ip(request)}"
     burst = cache.get_or_set(key, 0, _WAITLIST_WINDOW_SECONDS)
     if burst >= _WAITLIST_WINDOW_LIMIT:
         return True

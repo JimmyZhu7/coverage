@@ -73,8 +73,10 @@ computed live at both call sites instead, off two indexed reads.
 from __future__ import annotations
 
 import collections
+import hashlib
 from datetime import date
 
+from django.core.cache import cache
 from django.db.models import Min
 from django.db.models.functions import TruncDate
 
@@ -109,7 +111,60 @@ from .models import Opportunity
 CYCLE_OBSERVATION_MIN_SAMPLE = 3
 
 
-def onboarding_cutoffs(firm_ids=None) -> dict[int, date]:
+# A ceiling, not the invalidation mechanism. The run id in the key is what
+# actually expires an entry; this only bounds how long a stale answer can
+# survive on a deploy whose scraper has stopped, which is a state
+# `directory/health.py` reports on separately.
+_CUTOFF_CACHE_SECONDS = 60 * 60 * 6
+
+
+def _cutoff_generation() -> str:
+    """A fingerprint that changes whenever a cached cutoff could be wrong.
+
+    TWO PARTS, and the second one is not belt-and-braces:
+
+      * the newest `ScrapeRun` id — a scrape is what normally brings in the
+        postings that move a firm's minimum; and
+      * the newest `Opportunity` id — because a posting can be inserted
+        without a scrape (a fixture, a management command, a test), and a key
+        that ignored that would serve a cutoff computed before the row
+        existed. It is also what keeps this cache honest inside a test run:
+        the process-local cache outlives a rolled-back transaction, so two
+        tests asking about the same firm ids on a database with no ScrapeRun
+        would otherwise share one entry. That happened, and the failing test
+        (`directory/tests/test_open_runs.py::
+        test_scoping_the_cutoff_to_some_firms_matches_the_unscoped_answer`)
+        was right to fail.
+
+    Two indexed max lookups against a 24,078-row `TruncDate`/`Min` group-by.
+    """
+    from directory.models import ScrapeRun
+
+    run = ScrapeRun.objects.order_by("-id").values_list("id", flat=True).first()
+    opp = Opportunity.objects.order_by("-id").values_list("id", flat=True).first()
+    return f"{run or 0}.{opp or 0}"
+
+
+def _cutoff_cache_key(firm_ids) -> str:
+    """Keyed on the scrape run AND on exactly which firms were asked about.
+
+    The firm set has to be in the key: `onboarding_cutoffs([1, 2])` and
+    `onboarding_cutoffs()` return different dictionaries, and a key that
+    ignored the argument would serve a two-firm answer to a caller asking
+    about thirty. Sorted so two callers naming the same firms in different
+    orders share one entry, and hashed because a feed render names up to a
+    hundred firm ids and memcached-style backends cap a key's length.
+    """
+    if firm_ids is None:
+        scope = "all"
+    else:
+        scope = hashlib.sha1(
+            ",".join(str(i) for i in sorted(firm_ids)).encode()
+        ).hexdigest()[:16]
+    return f"onboarding-cutoffs:{_cutoff_generation()}:{scope}"
+
+
+def onboarding_cutoffs(firm_ids=None, *, fresh: bool = False) -> dict[int, date]:
     """`{firm_id: the calendar date of that firm's first-ever scraped
     posting}` — the day whose `first_seen` values mean "we started watching"
     rather than "this opened."
@@ -123,17 +178,48 @@ def onboarding_cutoffs(firm_ids=None) -> dict[int, date]:
     `firm_ids` narrows the aggregate to the firms a caller actually needs.
     Unscoped it groups all 25.8k rows in ~5 ms warm, which is affordable but
     pointless when a feed page names 30 firms and the Today rail names four.
+
+    CACHED PER SCRAPE RUN. `audit-perf-tests.md §1` defect 10 measured this as
+    a sequential scan of 24,078 rows and 4,180 buffers, 5 to 21 ms, on EVERY
+    feed render and every Today render — and the answer it computes changes
+    only when new postings arrive, which is to say only when a scrape runs.
+    The cache key carries the latest `ScrapeRun` id, so a new scrape
+    invalidates every entry at once without anything having to remember to
+    clear it.
+
+    The key also carries the newest `Opportunity` id, so a posting inserted
+    outside a scrape invalidates too — see `_cutoff_generation`.
+
+    WHAT THE KEY DOES NOT COVER, stated rather than left to be found: a
+    `first_seen` edited in place on an existing row. That moves a firm's
+    minimum without moving either id, and the stale answer survives until the
+    next insert or scrape. It is the right trade — this value is the day
+    Coverage started watching a firm, it moves once per firm ever, and the
+    alternative is the sequential scan on every page load — and a caller who
+    needs the uncached truth passes `fresh=True`.
     """
-    qs = Opportunity.objects.all()
     if firm_ids is not None:
         firm_ids = list(firm_ids)
         if not firm_ids:
             return {}
+
+    if not fresh:
+        key = _cutoff_cache_key(firm_ids)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+
+    qs = Opportunity.objects.all()
+    if firm_ids is not None:
         qs = qs.filter(firm_id__in=firm_ids)
     rows = (qs.annotate(seen_date=TruncDate("first_seen"))
               .values("firm_id")
               .annotate(cutoff=Min("seen_date")))
-    return {r["firm_id"]: r["cutoff"] for r in rows}
+    out = {r["firm_id"]: r["cutoff"] for r in rows}
+
+    if not fresh:
+        cache.set(key, out, _CUTOFF_CACHE_SECONDS)
+    return out
 
 
 def open_run_days(opp, today: date, cutoffs: dict[int, date]) -> int | None:

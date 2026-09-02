@@ -9,6 +9,7 @@ from django.shortcuts import render
 from django.views.decorators.http import require_GET
 
 from billing import credits as billing_credits
+from core.clientip import client_ip
 from directory.classify import REGION_LABELS, TARGET_BUCKETS, TRACKED_REGIONS
 from directory.models import Firm, Opportunity
 
@@ -160,9 +161,10 @@ _SEARCH_WINDOW_LIMIT = 40
 
 
 def _search_throttled(request) -> bool:
-    ip = (request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[0].strip()
-          or request.META.get("REMOTE_ADDR", "unknown"))
-    key = f"search-rate:{ip}"
+    # `core.clientip.client_ip`, not the first X-Forwarded-For hop this used
+    # to read: that hop is client-supplied and varying it handed the caller a
+    # fresh window per request (audit-security.md finding 10).
+    key = f"search-rate:{client_ip(request)}"
     burst = cache.get_or_set(key, 0, _SEARCH_WINDOW_SECONDS)
     if burst >= _SEARCH_WINDOW_LIMIT:
         return True

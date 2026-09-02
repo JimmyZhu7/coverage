@@ -24,6 +24,20 @@ dev = [
     # there" into a day of bisecting. It changes nothing unless `-n` is
     # passed — see the test section of README.md.
     "pytest-xdist==3.8.0",
+    # CVE scanning. `audit-security.md §9`: no CVE scan had ever been run
+    # against this tree, and "we would have noticed" is not a control. This is
+    # the tool, and `docs/deploy.md`'s "Dependency scanning" section is the
+    # documented command; a dependency declared but never invoked is the same
+    # as no scan at all.
+    #
+    # `pip-audit` rather than `uv-secure`: it reads the resolved environment
+    # (or `uv.lock` via `--requirement`) against the PyPA Advisory Database and
+    # OSV, needs no account, and is the tool GitHub's own advisories are keyed
+    # to. Floated rather than pinned, deliberately — a vulnerability scanner
+    # pinned to a release is a scanner that stops learning about new
+    # vulnerabilities, which is the one dependency where "reproducible" is
+    # worth less than "current".
+    "pip-audit>=2.7",
 ]
 
 # This root project is a virtual workspace anchor, not an installable package.

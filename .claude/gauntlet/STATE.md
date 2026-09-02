@@ -184,6 +184,52 @@ because it's built via string concatenation, not a static inline <svg>.
 
 ## Open leads (verified-adjacent, uncapped or low; fair game next round)
 
+**Re-triaged 2026-09-02** (previous triage 2026-08-16, seventeen days and
+several merges earlier — `todo-mined.md §4`, plan row B-12/H-07). The gauntlet
+loop stopped running after round 13 and the 2026-09-01 product plan took over
+as the place work is tracked, so this list is no longer a queue: it is a set of
+leads that either has an owner in that plan or does not, and this line says
+which. Every lead below carries one of three marks.
+
+  - **[plan: X]** — the lead is real and the named plan item owns it. Do not
+    re-report it here; report it against that item.
+  - **[decision: D-n]** — real, and blocked on a founder decision in section 4
+    of the plan. Nobody may act on it before the decision.
+  - **[struck]** — with the reason. A struck lead is not a lead that was fixed
+    quietly; each says what actually happened to it.
+
+The mapping, in the order the leads appear:
+
+| lead | mark |
+|---|---|
+| oracle-jpm-opp6788-dead-behind-open | [plan: WS-OPP-07] the drawer's freshness and caution copy |
+| gs-cohort-fold-hides-2027-postings | [decision: D-7] the fix exists only on an unmerged branch |
+| sig-sponsorship-fact-lost-in-fold-tiebreak | [decision: D-7] same branch, same blocker |
+| reverify-write-mode-backfill-pending | [decision: D-8] a founder-run `--apply` |
+| today-deadlines-rail-counts-openings | [plan: WS-UI-11 / WS-CRM] still live: `_OPENING_EVENTS` and `_firm_date_kind` exist in `crm/calendar_views.py` and nowhere else, so `crm/today.py`'s rail still has no way to tell an opening from a deadline. The lead's own prescription (hoist both into `crm/utils.py`, which now exists) is still the fix. |
+| firm-eyebrow-two-market-seed | [plan: WS-OPP-05] the region vocabulary; the eyebrow's claim is a data question, not a copy one |
+| contact-history-manual-override-debug-note | [plan: WS-CRM] `scrub_manual_override_notes` is on main and still wired to nothing, which is what the lead already said |
+| settings-corp-strat-track-structurally-unreachable | [decision: D-3] retiring `corp-strat` is the decision that resolves it |
+| network-open-count-drifts-from-opportunities-and-firm-detail | [plan: WS-UI-02] the count seam, which is the single-definition fix this needs (P5) |
+| no-deadline-three-phrasings | [plan: WS-UI-11] the silent no-date dash, one string across every surface |
+| touch-floor-stopped-at-the-card | [plan: WS-UI-08] mobile navigation and tap targets |
+| eligibility-lens-dies-at-the-seam | [plan: WS-OPP-06] the eligibility sentence and its null states |
+| region-facet-count-overstates-results | [plan: WS-OPP-17 / WS-UI-02] pre-fold facet counts against a post-fold headline: the same count seam |
+| push-toggle-13px-target | [struck] the push channel is dark (0 subscriptions, VAPID unconfigured) and do-not-build entry 47 holds notifications until the digest is proven. Re-open it the day the toggle does something. |
+| hsbc-sitemap-title-location | [decision: D-8] the `--apply` half; the code half merged |
+| landing-monogram-contrast | [plan: WS-UI] the fixed-lightness hue picker is the stated mechanism |
+| Avatar fallback font-size exact-micro match | [struck] round 11, low, cosmetic, and no plan item wants it. If it still matters it will be re-found by the next design pass. |
+| cycle-date-confidence-stated-twice | [plan: WS-CRM-09] the cycle bands own how confidence is stated |
+| Calendar "Remove" control tap target | [plan: WS-UI-08] tap targets |
+| HSBC Sheffield insight programme renders twice | [plan: WS-OPP-02] the fold and the board guard; the lead's own "investigate, don't assume" still stands |
+| transcript-phrase-is-application-form-chrome | [plan: WS-OPP-06] a fact chip sourced from form chrome rather than the posting is a provenance defect (P1) |
+| stale-display-type-tokens | [plan: WS-UI] `--fs-hero` has zero live usages; it goes with the token pass |
+| nav-peephole-on-phone | [plan: WS-UI-08] mobile navigation, which is the item this lead describes |
+
+Two struck, twenty-one owned. Nothing here was closed by a commit since
+2026-08-16 that this triage could verify: the leads that look closed are
+closed on branches D-7 has not decided about, which is the same thing as open.
+
 - oracle-jpm-opp6788-dead-behind-open, still broken (high): the
   "unconfirmed" mark (commit cbecbf1, on main) doesn't fire — live GET
   /opportunities/6788/read/ renders the apply link with zero caution, and

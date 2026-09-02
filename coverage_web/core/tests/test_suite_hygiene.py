@@ -187,6 +187,69 @@ def test_this_very_test_run_applied_the_slow_marker(request, client):
 
 
 # ---------------------------------------------------------------------------
+# The database this run is actually using
+# ---------------------------------------------------------------------------
+
+def looks_like_a_test_database(name: str) -> bool:
+    """Whether `name` is a database a suite may safely destroy.
+
+    Deliberately a plain string rule rather than a comparison against
+    settings, which would be tautological: the question is whether the name
+    the settings produced is a test name at all.
+    """
+    return "test" in (name or "").lower()
+
+
+@pytest.mark.django_db
+def test_this_run_is_not_writing_to_a_real_database():
+    """The half of the 2026-09-01 lesson that a test can actually hold.
+
+    THAT NIGHT: stale test databases left behind by runs killed at a usage
+    limit produced 5,453 errors on a tree that was in fact fine, and the tell
+    was a suite that "finished" in under three minutes because it never paid
+    to build a database. The obvious guard — assert every migration on disk is
+    applied — turns out not to fire in the common case, and it is worth
+    writing down why rather than shipping a check that looks reassuring:
+    pytest-django runs `migrate` even under `--reuse-db`, so a half-migrated
+    leftover heals itself before the first test runs. Verified by hand:
+    deleting a row from `django_migrations` and re-running put it straight
+    back.
+
+    WHAT REMAINS WORTH ASSERTING is the failure that does NOT announce itself
+    with five thousand errors: a run connected to a real database rather than
+    a test one. E2 has every agent write a settings module on PYTHONPATH that
+    overrides `DATABASES["default"]["TEST"]["NAME"]`, and a typo there — the
+    key nested one level wrong, `NAME` instead of `TEST.NAME` — points the
+    suite at development data. That run does not error. It goes green, and it
+    writes.
+    """
+    from django.db import connection
+
+    name = connection.settings_dict["NAME"]
+    assert looks_like_a_test_database(name), (
+        f"this run is connected to {name!r}, which is not a test database. "
+        f"Every test after this one is about to write to real rows. Check "
+        f"DATABASES['default']['TEST']['NAME'] in the settings module on "
+        f"PYTHONPATH."
+    )
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("test_coverage", True),
+    ("test_coverage_ops2", True),
+    ("test_coverage_gw3", True),
+    ("coverage", False),
+    ("coverage_prod", False),
+    ("", False),
+    (None, False),
+])
+def test_the_database_name_rule_says_what_it_means(name, expected):
+    """Proof the guard above can fail, without pointing a live run at a real
+    database to demonstrate it."""
+    assert looks_like_a_test_database(name) is expected
+
+
+# ---------------------------------------------------------------------------
 # File handles
 # ---------------------------------------------------------------------------
 

@@ -296,6 +296,25 @@ MIDDLEWARE = [
 ]
 
 # ---------------------------------------------------------------------------
+# How many proxies sit between the internet and this process.
+#
+# Read by `core.clientip.client_ip`, which the two burst throttles key on.
+# `X-Forwarded-For`'s leftmost hop is client-supplied text that nothing
+# overwrites, so the throttles used to be defeatable by varying the header
+# (`audit-security.md` finding 10). The rightmost entries are the ones our own
+# proxies appended, and this number says how many of them to skip past.
+#
+# 0 means "no trusted proxy, ignore the header entirely" and is the only safe
+# default: it is right for runserver, right for the test client, and right for
+# any deploy that has not said otherwise. A deploy behind a single TLS-
+# terminating edge (Render) sets TRUSTED_PROXY_HOPS=1 in its environment once
+# that edge is confirmed to append rather than pass through. Set it to the
+# real count or leave it alone: a count larger than the number of proxies
+# actually in front of Django is reading client-supplied text again.
+# ---------------------------------------------------------------------------
+TRUSTED_PROXY_HOPS = env.int("TRUSTED_PROXY_HOPS", default=0)
+
+# ---------------------------------------------------------------------------
 # Content-Security-Policy (CSPMiddleware above).
 #
 # Audited against what the app actually loads, not copied from a template:
@@ -309,13 +328,21 @@ MIDDLEWARE = [
 # checked needs rather than a defensive widening:
 #   - `img-src` adds `data:` — a few templates inline a `data:image/...`
 #     source (e.g. accounts/_welcome_head.html, core/pricing.html).
-#   - `style-src` adds `'unsafe-inline'` — Coverage has ~20 templates using
-#     an inline `style="..."` attribute and no nonce plumbing for style-src-
-#     attr (unlike script-src below). Style injection is a real but much
-#     lower-severity class than script injection (no code execution), and
-#     nonce-ing every inline style attribute across that many templates is
-#     out of scope for this pass; tracked as a follow-up tightening, not
-#     silently accepted forever.
+#   - `style-src` adds `'unsafe-inline'`. DECIDED, 2026-09-01, and left as
+#     it is: a nonce cannot fix this one. CSP nonces apply to `<style>`
+#     ELEMENTS; they do not apply to inline `style="..."` ATTRIBUTES, which
+#     are governed by `style-src-attr` and have no nonce mechanism in the
+#     spec at all. Coverage has 156 such attributes across 22 templates, 43
+#     of them interpolating a template variable (a width, a colour, a
+#     transform the kinetic layer reads), so the only route to dropping
+#     'unsafe-inline' is deleting every one of them in favour of a class or a
+#     custom property — a rewrite of the `csel` and `.kin-*` layers, not a
+#     settings change. `audit-security.md` finding 12 grades this Low on its
+#     own terms: style injection has no code execution, `script-src` is
+#     nonce-only, `object-src` is 'none' and `base-uri` is 'self', so the
+#     escalation paths that make style injection interesting are already
+#     shut. Revisit if and when those attributes go; do not revisit by
+#     adding a nonce, because that will silently do nothing.
 #   - `form-action` adds Google's OAuth authorize origin. The original audit
 #     only checked resource-loading origins (script/style/img/font) and
 #     missed this one because it isn't a resource load: `_auth_providers.html`
@@ -733,12 +760,26 @@ SOCIALACCOUNT_PROVIDERS = {
     },
 }
 
+# Placeholder client ids that mean "nobody has filled this in yet".
+#
+# `.env.example` ships `changeme` and `render.yaml` declares the OAuth vars
+# with no value, so a first deploy or a fresh checkout that copies the example
+# file has a client_id that is non-empty and useless. Non-empty was the whole
+# test below, so the sign-in page rendered a live Google button that took the
+# student to Google's `invalid_client` error page — a dead end that looks like
+# Coverage is broken (`audit-security.md` finding 17). A placeholder is not a
+# credential; treat it as unset.
+SOCIAL_CLIENT_ID_PLACEHOLDERS = frozenset(
+    {"changeme", "change-me", "your-client-id", "xxx", "todo"}
+)
+
 # Which social providers to surface on the auth pages. A provider only renders
-# a button when its client_id is set, so an unconfigured provider is simply
-# absent rather than a button that dead-ends.
+# a button when its client_id is set to something real, so an unconfigured
+# provider is simply absent rather than a button that dead-ends.
 ENABLED_SOCIAL_PROVIDERS = [
     p for p in ("google", "apple", "microsoft", "linkedin_oauth2")
-    if SOCIALACCOUNT_PROVIDERS.get(p, {}).get("APP", {}).get("client_id")
+    if (SOCIALACCOUNT_PROVIDERS.get(p, {}).get("APP", {}).get("client_id") or "")
+    .strip().lower() not in SOCIAL_CLIENT_ID_PLACEHOLDERS | {""}
 ]
 
 # ---------------------------------------------------------------------------
@@ -773,11 +814,24 @@ GMAIL_LIVE_PUBSUB_TOPIC = env("GMAIL_LIVE_PUBSUB_TOPIC", default="")
 # means "deploy Coverage" becomes a precondition. Pull means
 # `gmail_pubsub_listen` can run against this project long before that.
 GMAIL_LIVE_PUBSUB_SUBSCRIPTION = env("GMAIL_LIVE_PUBSUB_SUBSCRIPTION", default="")
-# Fernet key encrypting `GmailConnection.refresh_token_encrypted` at rest.
-# Generate once with `Fernet.generate_key()` and never rotate it casually —
-# rotating without re-encrypting every row first makes every stored refresh
-# token unreadable, which reads to a user as "Coverage silently disconnected
-# my Gmail."
+# Fernet key(s) encrypting `GmailConnection.refresh_token_encrypted` at rest.
+#
+# ONE VALUE, OR A COMMA-SEPARATED LIST, NEWEST FIRST. A single key behaves
+# exactly as it always has. A list is a rotation in progress: the first key
+# encrypts everything written from now on, and every key in the list can
+# decrypt, so old ciphertext keeps working while
+# `manage.py rotate_gmail_tokens` re-encrypts it. When the command reports
+# every row re-encrypted, drop the trailing keys and the list is one value
+# again.
+#
+# WHY THIS EXISTS (audit-security.md finding 9). There was one static key and
+# no rotation path, so rotating meant a re-encrypt script that did not exist —
+# and changing the key without one makes every stored refresh token
+# unreadable, which reads to a student as "Coverage silently disconnected my
+# Gmail." The failure mode was at least honest (`InvalidToken` raises loudly
+# rather than treating one user as revoked), so this is a prospective fix, not
+# a live incident. The list is the whole mechanism; there is no second copy of
+# the key anywhere.
 GMAIL_LIVE_TOKEN_KEY = env("GMAIL_LIVE_TOKEN_KEY", default="")
 # Requested at connect time, and the narrowest scope that can do the job:
 # `gmail.metadata` cannot read an `.ics` attachment, and reading invites is
