@@ -10,17 +10,19 @@ link searches THIS firm") should be assertable without a database row.
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 
 from crm import sourcing
 from crm.models import UserFirm
 from directory.classify import TRACK_LABELS
-from directory.models import Firm
+from directory.models import Firm, FirmDate
 
 User = get_user_model()
 
@@ -234,6 +236,73 @@ def test_a_gap_card_carries_its_who_to_find_panel(client):
     assert 'target="_blank"' in body
     # The firm name is encoded in the href, ampersand and all.
     assert "Rothschild%20%26%20Co" in body or "Rothschild+%26+Co" in body
+
+
+@pytest.mark.django_db
+def test_an_ordinary_firms_panel_states_its_disclosure_once(client):
+    """The panel had two note slots and they resolved to the same sentence.
+    `sourcing_note` is the page-level `DISCLOSURE`, `g.sourcing_note` is
+    `panel_note(firm)`, and `panel_note` returns `DISCLOSURE` for every firm
+    that is not assessment-gated — so an opened panel printed "Suggestions,
+    not a list of people. Each one opens a LinkedIn search." twice, one line
+    under the other, on five of the six rows the demo board renders.
+
+    Rendered once now. Nothing is lost: the paragraph above the rows still
+    carries it, and the per-card slot still prints when it has something the
+    paragraph does not, which is what the next test pins.
+    """
+    user = User.objects.create_user(email="src-once@example.com", password="x")
+    user.tracks = ["ib"]
+    user.save(update_fields=["tracks"])
+    firm = Firm.objects.create(slug="lazard", name="Lazard")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+
+    panels = re.findall(r'<div class="src-panel">(.*?)</div>', body, re.S)
+    assert panels, "the firm rendered no sourcing panel"
+    assert panels[0].count(sourcing.DISCLOSURE) == 1, (
+        "the disclosure is printed twice in one panel again — the per-card "
+        "note slot is repeating the page-level one."
+    )
+
+
+@pytest.mark.django_db
+def test_an_assessment_firms_panel_still_says_the_thing_only_it_says(client):
+    """The per-card slot exists for exactly one case: a firm whose own FAQ
+    declines the coffee chat gets a note saying so and pointing at Apply.
+    That note is not the disclosure, so it still prints, and the disclosure
+    prints above it. Two lines, two facts.
+    """
+    user = User.objects.create_user(email="src-assess@example.com", password="x")
+    user.tracks = ["st"]
+    user.save(update_fields=["tracks"])
+    firm = Firm.objects.create(
+        slug="jane-street", name="Jane Street", recruiting_style="assessment",
+        tracks=["st"],
+    )
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    # `track_fit` zeroes an assessment firm's gap points, so the only way one
+    # reaches this strip at all is on the additive deadline bonus — see the
+    # `exposure <= 0` branch in `coverage.rank_gaps`. A confirmed, day-precise
+    # close is what puts this row on the board to be asserted against.
+    FirmDate.objects.create(
+        firm=firm, event_kind="app_close", region="us",
+        date=timezone.localdate() + timedelta(days=10),
+        confidence=1.0, precision="day",
+    )
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+
+    panels = re.findall(r'<div class="src-panel">(.*?)</div>', body, re.S)
+    assert panels, "the firm rendered no sourcing panel"
+    assert sourcing.ASSESSMENT_NOTE in panels[0], (
+        "the assessment note went with the duplicate; a test-gated firm now "
+        "prompts for a chat its own FAQ declines."
+    )
+    assert panels[0].count(sourcing.DISCLOSURE) == 1
 
 
 @pytest.mark.django_db

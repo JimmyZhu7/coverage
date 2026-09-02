@@ -209,7 +209,20 @@
               <div class="src-panel">
                 <p class="src-note">{{ sourcing_note }}</p>
                 <ul class="src-list">
-                  {% if g.sourcing_note %}
+                  {% comment %}
+                  Only when it SAYS something the line above does not. Both
+                  slots resolved to `sourcing.DISCLOSURE` for every firm that
+                  is not assessment-gated, so an opened panel printed
+                  "Suggestions, not a list of people. Each one opens a
+                  LinkedIn search." twice, one line under the other, on five
+                  of the six rows the demo board renders. `panel_note()`
+                  returns DISCLOSURE for an ordinary firm and the assessment
+                  note for a test-gated one; the second is the only case the
+                  per-card line was added for, and it is the only case that
+                  still prints. Neither fact is lost: the disclosure is the
+                  paragraph above, and the assessment note is this row.
+                  {% endcomment %}
+                  {% if g.sourcing_note and g.sourcing_note != sourcing_note %}
                     <li class="src-note">{{ g.sourcing_note }}</li>
                   {% endif %}
                   {% for s in g.sourcing %}
@@ -764,6 +777,17 @@
                 <span class="scrub-count" data-group-count>{{ section.cards|length }}</span>
               </span>
             </summary>
+            {% comment %}
+            The cap and the scrollbar live on this wrapper, not on the grid
+            itself (2026-09-02). The grid sizes its rows with `1fr` so every
+            card in it comes out one height, and `1fr` needs the grid's own
+            height to be content-sized to do that: with `max-height: 416px`
+            still on the grid, the browser had a definite box to divide and
+            handed each row 416/3 = 128px instead, which clipped the foot
+            off every card whose firm line ran to two lines. One element
+            holds the cap, the other holds the tracks.
+            {% endcomment %}
+            <div class="contact-scroll">
             <div class="contact-grid">
             {% for card in section.cards %}
               <div class="contact-card kin-reveal" style="--i:{{ forloop.counter0 }}"
@@ -892,6 +916,7 @@
                 </div>
               </div>
             {% endfor %}
+          </div>
           </div>
           <p class="net-none" data-group-empty hidden>No matches in this group.</p>
           </details>
