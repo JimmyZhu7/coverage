@@ -13,9 +13,11 @@ and the ring is gone.
 Gone, not merely paused: held still at its first keyframe the ring is a 14px
 circle drawn around an 8px dot, which reads as a target rather than a marker.
 
-The `kin-pulse-ring` keyframes stay defined — the Today board's `.lane-dot`
-is a separate component that still uses them, and deleting the keyframes
-would silently break it.
+`kin-pulse-ring` itself is gone as of 2026-09-02. It survived the live dot
+only because Today's `.lane-dot` still ran it, and that dot has since been
+made static on the same argument: "critical" is the state the lane is IN,
+and motion rule M1 reserves an infinite animation for a state that is
+actually live. With no caller left, a kept-warm keyframe is dead CSS.
 """
 
 from __future__ import annotations
@@ -51,13 +53,60 @@ def test_the_live_dot_does_not_pulse(settings):
     )
 
 
-def test_the_today_boards_lane_dot_keeps_its_keyframes(settings):
-    """`.lane-dot` is a different component on a different surface and still
-    references `kin-pulse-ring`; removing the keyframes would break it."""
-    assert "@keyframes kin-pulse-ring" in _coverage_css(settings), (
-        "kin-pulse-ring was deleted along with the live dot's ring, but "
-        "crm/_styles.html's .lane-dot still animates with it — that lane "
-        "marker is now static by accident rather than by decision."
+def test_no_rule_animates_with_a_keyframe_that_is_gone(settings):
+    """Rewritten 2026-09-02. This test used to assert the OPPOSITE: that
+    `kin-pulse-ring` must stay defined, because Today's `.lane-dot` was still
+    running it. That premise expired when the lane dot was made static for
+    the same reason the live dot was, so the keyframe lost its last caller
+    and was deleted.
+
+    The invariant worth guarding was never "keep this one keyframe". It is
+    that no rule animates with a name nothing defines: a dangling reference
+    is silent, the element simply sits at its computed style, and the next
+    reader cannot tell a deliberate stillness from a broken one. So the test
+    now checks the general property across both stylesheets rather than the
+    one instance that happened to prompt it."""
+    def _without_prose(text: str) -> str:
+        """Comments discuss animation in English. `/* the animation was the
+        part asking to be believed */` is not a declaration, and scanning it
+        as one turns every sentence into a fake keyframe name."""
+        text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+        text = re.sub(r"\{%\s*comment\s*%\}.*?\{%\s*endcomment\s*%\}",
+                      " ", text, flags=re.S)
+        return text
+
+    css = _without_prose(_coverage_css(settings))
+    styles = _without_prose(
+        (settings.BASE_DIR / "templates" / "crm" / "_styles.html").read_text()
+    )
+
+    defined = set(re.findall(r"@keyframes\s+([A-Za-z0-9_-]+)", css + styles))
+    used = set()
+    for sheet in (css, styles):
+        for decl in re.findall(r"animation(?:-name)?\s*:([^;}]+)", sheet):
+            for token in re.split(r"[,\s]+", decl.strip()):
+                if re.fullmatch(r"[A-Za-z_-][A-Za-z0-9_-]*", token or ""):
+                    used.add(token)
+
+    # Words that legally appear in an `animation` shorthand and are not names.
+    keywords = {
+        "none", "infinite", "alternate", "alternate-reverse", "reverse",
+        "normal", "forwards", "backwards", "both", "running", "paused",
+        "linear", "ease", "ease-in", "ease-out", "ease-in-out", "step-start",
+        "step-end", "steps", "cubic-bezier", "var", "inherit", "initial",
+        "unset", "revert",
+    }
+    dangling = {n for n in used - defined - keywords if not n.startswith("--")}
+    assert not dangling, (
+        f"animation name(s) {sorted(dangling)} are referenced but never "
+        "defined as @keyframes. The element will sit still, silently, and "
+        "read as a deliberate decision it never was."
+    )
+
+    assert "@keyframes kin-pulse-ring" not in css, (
+        "kin-pulse-ring is back. Its last caller, Today's .lane-dot, was made "
+        "static on purpose; a keyframe kept warm for a caller that no longer "
+        "exists is dead CSS."
     )
 
 
