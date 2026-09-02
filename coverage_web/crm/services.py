@@ -112,11 +112,19 @@ def set_contact_state(
     warmth: str | None = None,
     thread_state: str | None = None,
     note: str | None = None,
+    source: str = "manual",
 ) -> dict[str, str]:
     """Manual override: set warmth and/or thread_state directly, bypassing
     the ratchet (and, uniquely, able to move `thread_state` out of the
     terminal `advocate` state). Also inserts an audit `touches` row itself
     — see `coverage_domain.pipeline.set_state`.
+
+    `source`: which door made the override, one of `Touch.SOURCE_CHOICES`
+    ("manual" default — a person, door unrecorded — plus "park_all", "bulk",
+    "undo", "unpark", "assistant"). Threaded straight through, and the reason
+    it exists is in that field's own comment: every override on the founder's
+    account said "manual", so "which tap parked these 44 people" could only
+    be answered by parsing the note's prose.
     """
     with _pipeline_connection() as conn:
         return pipeline.set_state(
@@ -126,4 +134,5 @@ def set_contact_state(
             warmth=warmth,
             thread_state=thread_state,
             note=note,
+            source=source,
         )

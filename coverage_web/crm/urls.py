@@ -113,6 +113,11 @@ urlpatterns = [
     path("contacts/merge/<str:verb>/", views.contact_merge_act,
          name="contact_merge_act"),
     path("contacts/bulk/", views.contacts_bulk, name="contacts_bulk"),
+    # The in-the-moment reversal of a bulk park, from either door — Today's
+    # "Park all" hands the ids back in the swap, the Network board's bulk bar
+    # hands them back through the session. Literal segment, ahead of the int
+    # converter below for the same reason "bulk" is.
+    path("contacts/park-undo/", views.contacts_park_undo, name="contacts_park_undo"),
     path("contacts/<int:pk>/archive/", views.contact_archive, name="contact_archive"),
     path("contacts/<int:pk>/unarchive/", views.contact_unarchive, name="contact_unarchive"),
     # Drag-and-drop tier changes from the Network board, and Settings'

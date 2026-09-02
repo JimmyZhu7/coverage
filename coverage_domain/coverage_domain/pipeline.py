@@ -104,6 +104,36 @@ moves nothing — but it is a real widening of what `apply_touch` accepts, so
 it is recorded here rather than left to be discovered in the dict. It exists
 because "inbound" and "replied to me" had been the same thing in this
 codebase, and they are not: see the kind's own comment below.
+
+A fourth deliberate change (2026-09-01) — THE EVENT-ORDER GUARD, and the one
+place this port's behavior genuinely departs from the original. The original
+ratcheted in WRITE order, which was correct for it: its only writer was a CLI
+logging something that had just happened, so write order and event order were
+the same order. Coverage's real front door is a Gmail backfill that passes
+`now=occurred_at` (median 2 days back, p90 35 days back on the founder's own
+mailbox), so a July reply can be written in late August — after a park, after
+a correction — and the write-order ratchet would let the older event overturn
+the newer decision. Measured on the founder's 306 contacts (2026-09-01):
+27 touches on 17 contacts written out of `ts` order, 4 park overrides
+overturned by an older reply written afterwards, two contacts (Nicole Park,
+Myra Fernandez) silently un-parked with no un-park row on the ledger, and one
+contact (Lily Liu) regressed from `chat_scheduled` back to `replied`.
+
+So `apply_touch` now asks one question before it moves anything: is there
+already a state-moving touch or a manual override on this contact DATED LATER
+than the touch being written? If there is, the row is still inserted — the
+ledger is the record of what happened and must stay complete — but the state
+UPDATE is skipped and the result carries `.stale = True`. The state is what
+the NEWEST event says, not what the last writer said.
+
+The comparison happens in SQL, against the live table, for exactly the reason
+the ratchet's CASE expressions do: a Python-side comparison would need both
+timestamps in Python (and the two backends hand back different types for
+`ts`), and would reopen the read-then-decide gap the CASE shape exists to
+close. A hand-logged touch (`now=None`, stamped "right now") is never older
+than anything, so it ratchets exactly as it always did; a contact with no
+override and no state-moving touch has nothing to be older than, and also
+ratchets exactly as it always did. Degradation is the previous behavior.
 """
 
 from __future__ import annotations
@@ -168,11 +198,25 @@ THREAD_STATES: tuple[str, ...] = (
 # row exists purely so the touches log has no gap at this path.
 MANUAL_OVERRIDE_KIND = "manual_override"
 
+# The kinds whose TOUCH_TRANSITIONS entry actually moves something, plus the
+# override kind. Derived from the dict rather than spelled out, so a kind
+# added to TOUCH_TRANSITIONS with a real transition is automatically part of
+# the event-order guard's "what counts as a newer decision" set — the failure
+# mode of a hand-maintained second list is that it silently stops matching the
+# first one.
+STATE_MOVING_KINDS: tuple[str, ...] = tuple(
+    kind for kind, (warmth, state) in TOUCH_TRANSITIONS.items()
+    if warmth is not None or state is not None
+)
+_ORDERING_KINDS: tuple[str, ...] = (*STATE_MOVING_KINDS, MANUAL_OVERRIDE_KIND)
+
 
 class TouchResult(dict):
     """What `apply_touch` returns: the same `{"warmth": ..., "thread_state":
-    ...}` (or empty) mapping it always has, plus one additive attribute —
-    `touch_id`, the id of the `touches` row this call just inserted.
+    ...}` (or empty) mapping it always has, plus two additive attributes —
+    `touch_id`, the id of the `touches` row this call just inserted, and
+    `stale`, True when the event-order guard recorded the touch without
+    letting it move state (see the module docstring).
 
     Subclassing `dict` rather than returning a tuple or a dataclass is the
     whole point: `TouchResult({...}) == {...}` and `bool(TouchResult({}))`
@@ -181,12 +225,14 @@ class TouchResult(dict):
     never at extra instance attributes. Every existing caller/test that
     pattern-matches the old return value keeps working unchanged; the one
     caller that needs the inserted row's id reads `.touch_id` off the same
-    object.
+    object, and a caller that wants to say "recorded, did not change state"
+    reads `.stale`.
     """
 
-    def __init__(self, mapping: dict[str, str], *, touch_id: int):
+    def __init__(self, mapping: dict[str, str], *, touch_id: int, stale: bool = False):
         super().__init__(mapping)
         self.touch_id = touch_id
+        self.stale = stale
 
 
 class ContactNotFound(LookupError):
@@ -237,6 +283,11 @@ def apply_touch(
       someone.
     - thread_state advances per TOUCH_TRANSITIONS unless it's already
       'advocate' (terminal — only set_state() changes it once there).
+    - NOTHING moves at all when a state-moving touch or a manual override
+      already on file is dated LATER than this touch's `ts` — the row is
+      inserted, `.stale` comes back True, and the contact keeps the state its
+      newest event gave it. See the module docstring's fourth change for the
+      backfill that made this necessary.
     - Returns a TouchResult: the dict of `contacts` columns that were
       changed (empty if nothing moved), e.g. {"warmth": "chatted",
       "thread_state": "chat_done"}, plus a `.touch_id` attribute carrying
@@ -278,6 +329,25 @@ def apply_touch(
         if before is None:
             raise ContactNotFound(contact_id, user_id)
 
+        # THE EVENT-ORDER GUARD (module docstring, fourth change). Asked only
+        # when this kind would move something at all — an `outreach` row moves
+        # nothing whatever its date, so there is nothing to guard and no
+        # reason to pay for the query. Counted in SQL rather than compared in
+        # Python: `ts` comes back as a `datetime` from psycopg and as an ISO
+        # string from the SQLite test shim, and the two would need different
+        # Python-side comparisons for the same question the database answers
+        # identically either way.
+        stale = False
+        if new_warmth is not None or new_state is not None:
+            placeholders = ", ".join(["%s"] * len(_ORDERING_KINDS))
+            cur.execute(
+                "SELECT COUNT(*) AS newer FROM touches "
+                f"WHERE contact_id = %s AND user_id = %s AND kind IN ({placeholders}) "
+                "AND ts > %s",
+                (contact_id, user_id, *_ORDERING_KINDS, ts),
+            )
+            stale = bool(cur.fetchone()["newer"])
+
         cur.execute(
             "INSERT INTO touches (user_id, contact_id, ts, channel, kind, note, source) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
@@ -301,6 +371,14 @@ def apply_touch(
         # (None, None)). SQLite tolerates untyped params, so this masked
         # cleanly there. `CAST(x AS text)` is valid in both engines (unlike
         # Postgres-only `::text`), keeping the SQLite test shim working.
+        # `new_warmth`/`new_state` forced to NULL when the guard fired: the
+        # UPDATE still runs, and still runs its CASE expressions against live
+        # column values, but both branches now fall through to `ELSE warmth` /
+        # `ELSE thread_state`. Keeping one statement shape rather than
+        # branching around it keeps the TOCTOU reasoning above intact — there
+        # is still exactly one write, still evaluated in the database.
+        if stale:
+            new_warmth, new_state = None, None
         cur.execute(
             "UPDATE contacts SET "
             "warmth = CASE "
@@ -335,7 +413,7 @@ def apply_touch(
         updates["warmth"] = after["warmth"]
     if after["thread_state"] != before["thread_state"]:
         updates["thread_state"] = after["thread_state"]
-    return TouchResult(updates, touch_id=touch_id)
+    return TouchResult(updates, touch_id=touch_id, stale=stale)
 
 
 def set_state(
@@ -347,6 +425,7 @@ def set_state(
     thread_state: str | None = None,
     note: str | None = None,
     now: datetime | None = None,
+    source: str = "manual",
 ) -> dict[str, str]:
     """Manual override: set warmth and/or thread_state directly, bypassing
     apply_touch's ratchet and its terminal-advocate guard entirely. Ported
@@ -367,6 +446,17 @@ def set_state(
     A no-op call (both warmth and thread_state omitted) makes no database
     change and inserts no audit touch — matching the original CLI's
     "Nothing to update" short-circuit.
+
+    `source` (default "manual", so every existing caller is byte-for-byte
+    unaffected) is written into `touches.source` on the audit row instead of
+    the hardcoded literal this used to write regardless of who called it. It
+    is the same parameter `apply_touch` has had since the audit batch, and it
+    exists here for the same reason: 179 of the founder's 179 override rows
+    said "manual" whoever made them, so "which door parked these 44 people"
+    was answerable only by regex over the human half of the note. WHICH DOOR,
+    not who typed: the Django side's `Touch.SOURCE_CHOICES` is the list of
+    values that mean anything, and this module has no FK to validate against,
+    so an unrecognized value is written as-is rather than rejected.
 
     Raises:
         ValueError: warmth not in WARMTH, or thread_state not in
@@ -412,8 +502,8 @@ def set_state(
 
         cur.execute(
             "INSERT INTO touches (user_id, contact_id, ts, channel, kind, note, source) "
-            "VALUES (%s, %s, %s, %s, %s, %s, 'manual')",
-            (user_id, contact_id, ts, None, MANUAL_OVERRIDE_KIND, audit_note),
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (user_id, contact_id, ts, None, MANUAL_OVERRIDE_KIND, audit_note, source),
         )
     except BaseException:
         conn.rollback()

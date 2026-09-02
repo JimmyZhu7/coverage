@@ -243,6 +243,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      buttons rag against a common edge down the ledger. */
   .act-quick { display: flex; flex-direction: column; gap: var(--s2);
     align-items: flex-end; }
+  /* Complete-the-card: the two optional facts a proposal can carry (role,
+     region), sitting above the Add button on the proposal card only. A
+     label/control grid rather than a stacked form — the whole point is that
+     it reads as two small blanks beside the evidence, not as a page the
+     student has to fill in before they may tap Add. */
+  .act-fill { display: grid; grid-template-columns: auto minmax(0, 1fr);
+    gap: 6px var(--s2); align-items: center; margin-top: var(--s2); }
+  .act-fill-lab { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
+  .act-fill-in { width: 100%; min-width: 0; font: inherit; font-size: var(--fs-s);
+    padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--surface); color: var(--ink); }
+  .act-fill-in:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   /* `flex: 1 1 0` split the row into equal columns regardless of what the
      labels needed, so on the four-button card (Log the chat / Reschedule /
      They replied / Compose) each got ~78px and two of them broke mid-phrase
@@ -665,6 +677,24 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .prop-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
   .prop-undo-btn[disabled] { opacity: .55; cursor: default; }
   .prop-undo-btn[disabled]:hover { border-color: var(--accent-line); background: var(--surface); }
+
+  /* The Network board's bulk-park Undo strip. Same object as `.prop-undo`
+     above, one row down the family: you just did something big, here is the
+     way back. Its own class rather than a reuse because this one is a real
+     <form> (the board redirects; there is no htmx swap to ride in) and so
+     needs the row rules applied to a form element. */
+  .park-undo { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+    margin: 0 0 var(--s4); padding: var(--s2) var(--s4) var(--s2) var(--s3);
+    background: var(--accent-soft); border: 1px solid var(--accent-line);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    color: var(--ink-2); font-size: var(--fs-s); }
+  .park-undo-said { flex: 1 1 auto; }
+  .park-undo-note { color: var(--ink-3); }
+  .park-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
+    color: var(--accent-ink); border-radius: 999px; padding: var(--s1) 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .park-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
 
   /* Autopilot's own strip, in the four states that are not "here is a
      batch to tap". Same row shape as the undo strip above (it is the same

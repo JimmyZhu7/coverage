@@ -395,7 +395,34 @@ class Touch(PrivateModel):
         # audit of "what did the assistant actually do to my CRM" can be a
         # query rather than a guess.
         ("assistant", "Assistant"),
+        # WHICH DOOR MOVED THE STATE — the four values below only ever land
+        # on a `manual_override` row, and they exist because on 2026-09-01
+        # all 179 of the founder's override rows said "manual" whoever made
+        # them. 102 were one tap on the Network board, 44 were one tap on
+        # Today, and the only way to tell them apart afterwards was a regex
+        # over the human half of the note ("Parked from the Network board
+        # (bulk)"), which is prose — rewordable, translatable, and not a
+        # column anything can group by. Extending the vocabulary rather than
+        # repurposing "manual": "manual" keeps meaning exactly what it always
+        # meant (a person, door unrecorded), and every value below is a
+        # narrowing of it, never a replacement.
+        ("park_all", "Park all (Today)"),
+        ("bulk", "Bulk action (Network board)"),
+        ("undo", "Undo of a bulk park"),
+        ("unpark", "Un-park (Parked contacts)"),
+        # `crm/management/commands/replay_states.py`: a state written not by
+        # a person and not by a message, but by replaying the contact's own
+        # ledger in event order after the write-order ratchet had left the
+        # stored state disagreeing with it. Its own value so the four rows
+        # that repair touched are never mistaken for four decisions somebody
+        # made.
+        ("replay", "State replayed from the ledger"),
     ]
+
+    # The subset of SOURCE_CHOICES above that names a bulk park door. Read by
+    # `crm.views.contacts_park_undo` to find the cohort it is allowed to
+    # reverse, and by `replay_states` to describe an override in one word.
+    BULK_PARK_SOURCES = ("park_all", "bulk")
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     contact = models.ForeignKey(Contact, on_delete=models.CASCADE, related_name="touches")

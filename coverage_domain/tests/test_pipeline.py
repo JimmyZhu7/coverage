@@ -37,6 +37,8 @@ this file passed against the SQLite backend and was skipped (not
 the actual pytest output.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 
 from coverage_domain import pipeline
@@ -344,3 +346,164 @@ def test_tenancy_set_state_wrong_user_is_not_found(conn, make_contact):
     warmth, _, kinds = _state(conn, cid)
     assert warmth == "cold"
     assert kinds == []
+
+
+# --------------------------------------------------------------------------- #
+# The event-order guard (pipeline.py's module docstring, fourth change).
+#
+# Every case below is a shape measured on the founder's live account on
+# 2026-09-01, where the Gmail backfill stamps `now=occurred_at` (p90 35 days
+# back) and the write-order ratchet let an older event overturn a newer
+# decision: 27 touches on 17 contacts written out of `ts` order, 4 park
+# overrides overturned, 2 contacts un-parked with no un-park row, 1 regressed
+# from `chat_scheduled` to `replied`.
+# --------------------------------------------------------------------------- #
+
+_JULY = datetime(2026, 7, 7, 12, 0, tzinfo=timezone.utc)
+_AUGUST = datetime(2026, 8, 10, 6, 43, tzinfo=timezone.utc)
+
+
+def test_state_moving_kinds_is_derived_from_the_transition_table():
+    """The guard's "what counts as a newer decision" set is derived, never
+    hand-listed: a kind added to TOUCH_TRANSITIONS with a real transition
+    joins it automatically, and an inert kind stays out."""
+    assert set(pipeline.STATE_MOVING_KINDS) == {
+        "reply_received", "chat", "chat_scheduled",
+    }
+    assert pipeline.MANUAL_OVERRIDE_KIND not in pipeline.STATE_MOVING_KINDS
+
+
+def test_backdated_reply_after_a_park_leaves_the_contact_parked(conn, make_contact):
+    """Nicole Park (366) and Myra Fernandez (367): parked by the Aug 10
+    board bulk park, then un-parked with no un-park row on the ledger by a
+    July reply the backfill wrote in late August. The reply is real and is
+    still recorded; the park is newer and still stands."""
+    cid = make_contact(USER)
+    pipeline.set_state(
+        conn, USER, cid, thread_state="parked",
+        note="Parked from the Network board (bulk)", now=_AUGUST,
+    )
+    result = pipeline.apply_touch(
+        conn, USER, cid, "reply_received", "email", "[gmail:t1] They replied",
+        now=_JULY, source="capture",
+    )
+    assert result == {}
+    assert result.stale is True
+    warmth, state, kinds = _state(conn, cid)
+    assert (warmth, state) == ("cold", "parked")
+    # The ledger keeps the row — the guard suppresses the state move, never
+    # the record of what happened.
+    assert kinds == [pipeline.MANUAL_OVERRIDE_KIND, "reply_received"]
+
+
+def test_backdated_reply_after_a_newer_state_moving_touch_leaves_state(conn, make_contact):
+    """Lily Liu (765): `chat_scheduled` logged Aug 25, then two replies dated
+    Aug 24 and Aug 25 written afterwards regressed her to `replied`. The
+    older replies are recorded; `chat_scheduled` survives."""
+    cid = make_contact(USER)
+    pipeline.apply_touch(
+        conn, USER, cid, "chat_scheduled", "email", None,
+        now=datetime(2026, 8, 25, 15, 10, tzinfo=timezone.utc),
+    )
+    result = pipeline.apply_touch(
+        conn, USER, cid, "reply_received", "email", None,
+        now=datetime(2026, 8, 24, 9, 0, tzinfo=timezone.utc), source="capture",
+    )
+    assert result == {}
+    assert result.stale is True
+    warmth, state, _ = _state(conn, cid)
+    assert (warmth, state) == ("replied", "chat_scheduled")
+
+
+def test_in_order_touches_still_ratchet(conn, make_contact):
+    """Degradation clause: a touch that is not older than anything on file
+    moves the ladder exactly as it always did, `.stale` False. This is the
+    hand-logged case (`now=None`) and the in-order captured case both."""
+    cid = make_contact(USER)
+    early = pipeline.apply_touch(
+        conn, USER, cid, "reply_received", "email", None, now=_JULY,
+    )
+    assert early == {"warmth": "replied", "thread_state": "replied"}
+    assert early.stale is False
+    later = pipeline.apply_touch(
+        conn, USER, cid, "chat", "coffee_chat", None, now=_AUGUST,
+    )
+    assert later == {"warmth": "chatted", "thread_state": "chat_done"}
+    assert later.stale is False
+    hand_logged = pipeline.apply_touch(conn, USER, cid, "reply_received", "email", None)
+    assert hand_logged.stale is False
+
+
+def test_guard_ignores_touches_that_never_moved_anything(conn, make_contact):
+    """An `outreach` row dated later than the reply is not a decision — it
+    moves nothing, so it must not make a later-written reply stale. Only
+    STATE_MOVING_KINDS and overrides order the ladder."""
+    cid = make_contact(USER)
+    pipeline.apply_touch(conn, USER, cid, "outreach", "email", None, now=_AUGUST)
+    result = pipeline.apply_touch(
+        conn, USER, cid, "reply_received", "email", None, now=_JULY, source="capture",
+    )
+    assert result == {"warmth": "replied", "thread_state": "replied"}
+    assert result.stale is False
+
+
+def test_an_inert_kind_is_never_stale(conn, make_contact):
+    """A `bulk_received` row moves nothing whatever its date, so the guard
+    has nothing to decide and the row lands unremarkably."""
+    cid = make_contact(USER)
+    pipeline.set_state(conn, USER, cid, thread_state="parked", now=_AUGUST)
+    result = pipeline.apply_touch(
+        conn, USER, cid, pipeline.BULK_RECEIVED_KIND, "email", None,
+        now=_JULY, source="capture",
+    )
+    assert result == {}
+    assert result.stale is False
+    _, state, kinds = _state(conn, cid)
+    assert state == "parked"
+    assert kinds == [pipeline.MANUAL_OVERRIDE_KIND, pipeline.BULK_RECEIVED_KIND]
+
+
+def test_guard_is_scoped_to_the_contact(conn, make_contact):
+    """A newer override on somebody ELSE'S row must not freeze this contact.
+    The guard's query carries the contact and tenant scopes for the same
+    reason every other query in this module does."""
+    mine = make_contact(USER)
+    other_contact = make_contact(USER)
+    pipeline.set_state(conn, USER, other_contact, thread_state="parked", now=_AUGUST)
+    result = pipeline.apply_touch(
+        conn, USER, mine, "reply_received", "email", None, now=_JULY,
+    )
+    assert result == {"warmth": "replied", "thread_state": "replied"}
+    assert result.stale is False
+
+
+def test_equal_timestamps_are_not_stale(conn, make_contact):
+    """"Predates", strictly. A touch stamped at the same instant as the
+    override is not older than it, and the ratchet still applies — the guard
+    exists to stop a July event overturning an August one, not to make
+    same-instant writes order-dependent in a second way."""
+    cid = make_contact(USER)
+    pipeline.set_state(conn, USER, cid, thread_state="parked", now=_AUGUST)
+    result = pipeline.apply_touch(
+        conn, USER, cid, "reply_received", "email", None, now=_AUGUST,
+    )
+    assert result == {"warmth": "replied", "thread_state": "replied"}
+    assert result.stale is False
+
+
+def test_set_state_records_the_door_that_made_the_override(conn, make_contact):
+    """179 of the founder's 179 override rows said `source='manual'`
+    whichever door wrote them, so "which tap parked these 44 people" was
+    answerable only by regex over prose. The default is unchanged."""
+    cid = make_contact(USER)
+    pipeline.set_state(
+        conn, USER, cid, thread_state="parked",
+        note="Parked from the Today queue (bulk)", source="park_all",
+    )
+    other = make_contact(USER)
+    pipeline.set_state(conn, USER, other, thread_state="parked")
+    cur = conn.cursor()
+    cur.execute("SELECT contact_id, source FROM touches ORDER BY id")
+    by_contact = {r["contact_id"]: r["source"] for r in cur.fetchall()}
+    assert by_contact[cid] == "park_all"
+    assert by_contact[other] == "manual"

@@ -592,6 +592,30 @@
     {% endif %}
     {% include "crm/_contact_search.html" with target="net-contacts" %}
     {% comment %}
+    THE BULK-PARK UNDO STRIP. Present only on the render right after a bulk
+    park (crm.views.contacts_bulk stores the ids under PARK_UNDO_SESSION_KEY;
+    contact_list POPS them, so a refresh is not still offering to reverse a
+    tap from ten minutes ago). Same shape and lifetime as Today's proposal
+    Undo — it exists because 98 people left the queue from this bar in one
+    tap on 2026-08-10 with nothing on screen offering a way back.
+
+    Its own <form>, above and outside `#cc-bulk-form`: nesting forms is
+    invalid HTML, and this one posts a fixed list of ids rather than the
+    grid's live selection.
+    {% endcomment %}
+    {% if park_undo %}
+      <form class="park-undo" method="post" action="{% url 'crm:contacts_park_undo' %}" role="status">
+        {% csrf_token %}
+        <input type="hidden" name="ids" value="{{ park_undo.ids }}">
+        <input type="hidden" name="where" value="network">
+        <span class="park-undo-said">
+          {% if park_undo.who %}Stopped following up with {{ park_undo.who }}.{% else %}Stopped following up with {{ park_undo.count }} contacts.{% endif %}
+          <span class="park-undo-note">They keep every touch. A reply puts anyone back; the whole group is on <a href="{% url 'crm:contact_parked' %}">Parked contacts</a>.</span>
+        </span>
+        <button type="submit" class="btn park-undo-btn">Undo</button>
+      </form>
+    {% endif %}
+    {% comment %}
     Bulk selection, moved off the removed "Contacts Needing Action" panel
     and onto the grid itself — the whole grid is one form, exactly like
     that panel's was, so a selection can span sections (a few from Replied,
@@ -854,9 +878,20 @@
     form.addEventListener("submit", function (e) {
       var verb = e.submitter && e.submitter.value;
       var n = boxes.filter(function (b) { return b.checked; }).length;
-      if (verb === "archive" && n &&
+      if (!n) return;
+      if (verb === "archive" &&
           !confirm("Archive " + n + " contact" + (n === 1 ? "" : "s") +
                    "? They keep every touch and come back in one click.")) {
+        e.preventDefault();
+      }
+      // Park asks too now. 98 contacts left the queue here in one tap on
+      // 2026-08-10 and the count first appeared in the flash afterwards.
+      // The dialog names the number and both ways back, so it describes
+      // the action rather than warning about it.
+      if (verb === "park" &&
+          !confirm("Stop following up with " + n + " contact" +
+                   (n === 1 ? "" : "s") + "? A reply puts anyone back, and " +
+                   "you can undo this straight after.")) {
         e.preventDefault();
       }
     });
