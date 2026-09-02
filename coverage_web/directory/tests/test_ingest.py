@@ -11,11 +11,12 @@ from datetime import date
 
 import pytest
 
-from coverage_connectors import FetchResult, GreenhouseBoard
+from coverage_connectors import FetchResult, GreenhouseBoard, WorkdayBoard
 from coverage_connectors.models import Opportunity as ConnOpp
+from coverage_connectors.workday import _normalize as workday_normalize
 
 from directory import ingest
-from directory.models import Firm, Opportunity, ScrapeRun
+from directory.models import Firm, Opportunity, OpportunityChange, ScrapeRun
 
 BOARD = GreenhouseBoard(firm="William Blair", token="williamblair")
 U1 = "https://boards.greenhouse.io/williamblair/jobs/1"
@@ -718,3 +719,130 @@ def test_a_complete_fetch_still_closes_what_it_dropped(monkeypatch):
 
     assert Opportunity.objects.get(url=U2).status == "closed"
     assert run.stats["closed"] == 1
+
+
+# ---------------------------------------------------------------------------
+# ...AND WHERE THE POSTING IS.
+#
+# The same rule as the block above, on the two location columns, pinned after
+# it cost 514 rows. Workday's list payload states each posting's place in
+# `locationsText`, and a tenant is free not to send the key at all: Raymond
+# James's early-careers site sends `title`, `externalPath`, `postedOn` and
+# `bulletFields`, and nothing else. Ingest read `opp.location` as "", derived
+# `normalize_region("")` -> "", and wrote both over the stored values on every
+# re-scrape — 225 of 225 open Raymond James rows went from `us` to blank in
+# one pass, with nothing in `OpportunityChange` to say it had happened.
+#
+# The fixtures below are that payload, read through the real Workday connector
+# so the shape under test is the provider's rather than one this test invented.
+# ---------------------------------------------------------------------------
+
+RJ_BOARD = WorkdayBoard(firm="Raymond James", tenant_host="raymondjames.wd1",
+                        site="RaymondJamesEarlyCareers", search_text="")
+
+#: A Raymond James posting exactly as its CxS search endpoint files it: no
+#: `locationsText` key anywhere in the job dict.
+_RJ_JOB = {
+    "title": "2027 Equity Research Associate",
+    "externalPath": "/job/Saint-Petersburg-Florida---United-States/"
+                    "XMLNAME-2027-Equity-Research-Associate_R-0012398",
+    "postedOn": "Posted 3 Days Ago",
+    "bulletFields": ["R-0012398"],
+}
+#: The same posting on a day the tenant does state its place.
+_RJ_JOB_STATED = {**_RJ_JOB,
+                  "locationsText": "Saint Petersburg Florida   United States"}
+#: What the connector's normalizer makes of that run: the double space is the
+#: field boundary Workday leaves behind for an empty slot, the single one is
+#: part of the city's own name.
+_RJ_STATED_LOCATION = "Saint Petersburg Florida, United States"
+
+
+def _workday_opp(job: dict, board=RJ_BOARD):
+    """The connector's own reading of one job dict — including its silence."""
+    return workday_normalize(job, board)
+
+
+@pytest.mark.django_db
+def test_a_workday_tenant_that_sends_no_location_keeps_the_region_it_had(monkeypatch):
+    """The Raymond James case. The first fetch states the place; the second is
+    the same tenant on a day its payload carries no `locationsText` at all. An
+    empty answer from one run is not evidence that the previous run's real
+    answer was wrong."""
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB_STATED)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    assert o.region == "us", "sanity: the stated location placed the row"
+
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    assert Opportunity.objects.get(pk=o.pk).region == "us"
+
+
+@pytest.mark.django_db
+def test_the_same_silence_does_not_blank_the_location_text(monkeypatch):
+    """`location` carried the identical unconditional overwrite. It is the
+    field the student actually reads, and the one any later repair of `region`
+    has to work back from."""
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB_STATED)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    assert o.location == _RJ_STATED_LOCATION
+
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    assert Opportunity.objects.get(pk=o.pk).location == _RJ_STATED_LOCATION
+
+
+@pytest.mark.django_db
+def test_a_payload_that_states_a_place_still_moves_the_row(monkeypatch):
+    """The other half of the contract: keeping is for SILENCE only. A posting
+    that genuinely relocates says so, and a stated place always wins."""
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB_STATED)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    moved = {**_RJ_JOB, "locationsText": "London  United Kingdom"}
+    _patch(monkeypatch, [_result([_workday_opp(moved)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    assert o.location == "London, United Kingdom"
+    assert o.region == "eu"
+
+
+@pytest.mark.django_db
+def test_a_move_between_markets_is_written_to_the_change_log(monkeypatch):
+    """Region and location were absent from `OpportunityChange`, which is why
+    the wipe stayed invisible for as long as it did. A move is now a row."""
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB_STATED)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    moved = {**_RJ_JOB, "locationsText": "London  United Kingdom"}
+    _patch(monkeypatch, [_result([_workday_opp(moved)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    region_move = OpportunityChange.objects.get(opportunity=o, field="region")
+    assert (region_move.old_value, region_move.new_value) == ("us", "eu")
+    location_move = OpportunityChange.objects.get(opportunity=o, field="location")
+    assert location_move.old_value == _RJ_STATED_LOCATION
+    assert location_move.new_value == "London, United Kingdom"
+
+
+@pytest.mark.django_db
+def test_a_silent_payload_records_no_move_at_all(monkeypatch):
+    """A kept value is not a change and must not be reported as one — a change
+    row per silent re-scrape would be a second false trail beside the one this
+    fix exists to end."""
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB_STATED)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    assert not OpportunityChange.objects.filter(
+        field__in=("region", "location")).exists()

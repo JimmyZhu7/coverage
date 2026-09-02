@@ -219,11 +219,16 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     Field mapping (connector `Opportunity` -> Django `Opportunity` column):
       firm            -> firm FK (already resolved)
       title           -> title
-      location        -> location
+      location        -> location                 fill-only on an update: a
+                                                  payload that names no place
+                                                  keeps the stored one
       url             -> url                     (the dedup key; blank url skipped upstream)
       source          -> source                  ("greenhouse"|"lever"|"workday")
       status          -> status = "open"         (present in a live fetch right now)
-      region          -> region (or "")          connector never populates region -> ""
+      region          -> region (or "")          connector never populates region,
+                                                  so it is derived from the location
+                                                  text — and, like it, fill-only on
+                                                  an update
       deadline        -> deadline (date|None)     Greenhouse's real application_deadline
                                                   when set; null for Lever/Workday and for
                                                   Greenhouse jobs with none -> stored null,
@@ -380,12 +385,36 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     # first or there is nothing to capture.
     prior_title = existing.title
     prior_deadline = existing.deadline
+    prior_location = existing.location
+    prior_region = existing.region
 
     existing.title = title
     existing.bucket = bucket
-    existing.location = location
+    # WHERE THE POSTING IS, under the same no-downgrade rule as the deadline
+    # and the sponsorship below: a payload that names no place has not moved
+    # the role to nowhere, it has said nothing.
+    #
+    # Both were assigned unconditionally until 2026-09-02, and on a tenant
+    # that omits the field entirely that is a silent wipe on every pass.
+    # Workday's list payload carries `locationsText` per posting and Raymond
+    # James's site does not send the key at all, so `opp.location` arrived ""
+    # for all 225 of its open rows, `normalize_region("")` returned "", and
+    # one re-scrape overwrote a correct `us` with blank on every one of them.
+    # Nothing in `OpportunityChange` recorded it (region and location were
+    # not among the fields it wrote), so the loss left no trace either: the
+    # rows simply stopped answering the feed's Region filter. TD and Barclays
+    # carry the same shape on the postings whose `locationsText` is absent.
+    #
+    # Fill-or-improve, never erase. A payload that DOES state a place still
+    # wins outright, so a role that genuinely moves city moves here on the
+    # next pass; only silence is refused. The stored `content_hash` is
+    # untouched by this and still hashes what the connector sent, so
+    # change-detection keeps describing the payload rather than the row.
+    if location:
+        existing.location = location
     existing.source = opp.source or ""
-    existing.region = region
+    if region:
+        existing.region = region
     existing.cohort = cohort
     existing.class_year = class_year
     existing.class_year_derived = class_year_derived
@@ -467,6 +496,22 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
         if prior_title != existing.title:
             changes.append(OpportunityChange.entry(
                 existing.pk, "title", prior_title, existing.title,
+                stage=OpportunityChange.STAGE_SCRAPE, at=now,
+            ))
+        # WHERE it is, both the free text and the market derived from it.
+        # Recorded for the same reason the title is: these move, students
+        # filter on them, and until 2026-09-02 nothing wrote them down —
+        # which is precisely why 514 rows could lose their region to a wipe
+        # nobody could see afterwards. A move recorded is a move a repair
+        # command can read back (see `repair_blanked_regions`).
+        if prior_location != existing.location:
+            changes.append(OpportunityChange.entry(
+                existing.pk, "location", prior_location, existing.location,
+                stage=OpportunityChange.STAGE_SCRAPE, at=now,
+            ))
+        if prior_region != existing.region:
+            changes.append(OpportunityChange.entry(
+                existing.pk, "region", prior_region, existing.region,
                 stage=OpportunityChange.STAGE_SCRAPE, at=now,
             ))
         if prior_deadline != existing.deadline:

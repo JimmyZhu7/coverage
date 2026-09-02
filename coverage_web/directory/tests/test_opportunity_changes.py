@@ -223,7 +223,14 @@ def test_one_move_records_one_row_not_one_per_hashed_field(monkeypatch):
     """`content_hash` covers six fields at once, so recording off the hash
     would report a deadline move every time the LOCATION moved — exactly the
     false signal a downstream alert has no way to filter. What moved is what
-    gets written."""
+    gets written.
+
+    The location IS a recorded field since 2026-09-02 (see ingest's location
+    block: a wipe nothing wrote down is a wipe nobody can find), so this move
+    now writes exactly one row — and that row says "location". The invariant
+    is unchanged: one move, one row, naming the field that actually moved.
+    Both cities are in the same market, so the derived region did not move and
+    nothing claims it did."""
     _patch(monkeypatch, [_result([_opp(U1, location="Chicago")])])
     ingest.ingest_boards([BOARD], label="greenhouse")
 
@@ -231,8 +238,10 @@ def test_one_move_records_one_row_not_one_per_hashed_field(monkeypatch):
     run = ingest.ingest_boards([BOARD], label="greenhouse")
 
     assert run.stats["updated"] == 1        # the hash did move
-    assert run.stats["changes_recorded"] == 0   # but no recorded field did
-    assert _changes(U1) == []
+    assert run.stats["changes_recorded"] == 1
+    assert [(c.field, c.old_value, c.new_value) for c in _changes(U1)] == [
+        ("location", "Chicago", "New York")]
+    assert _changes(U1, field="deadline") == []
 
 
 # ---------------------------------------------------------------------------
