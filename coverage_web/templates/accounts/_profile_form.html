@@ -7,6 +7,66 @@ htmx swap target on the settings page's in-place save.
 {% if saved %}<p class="msg success">Profile saved.</p>{% endif %}
 
 {% comment %}
+The one-time note about ties that are ALREADY SAVED in the wrong shape.
+Added 2026-09-02 alongside the Affiliations redesign below, and separate from
+it on purpose.
+
+The redesign teaches the shape of a NEW line. It cannot help a student who
+answered this field months ago, saved five résumé fragments, and has no
+reason to ever scroll back down to the box — which is exactly the founder's
+own row (five saved lines, every one of them over the word ceiling, zero
+matches across 306 contacts). So the page says it once, at the top, where
+opening Settings puts it, and links straight down to the field.
+
+WHAT IT DOES NOT DO. It does not shorten anything, propose a replacement
+string, or offer a one-click fix. The saved lines are the student's own words
+and the product's opinion about their shape is an opinion (P2, and
+`clean_affiliations`' docstring). The note points; the student edits.
+
+`form.saved_long_ties` reads the STORED row, never the submitted data, so
+this is silent during a validation-error re-render — see the method.
+
+DISMISSAL IS `localStorage`, not a column, and that is a deliberate step down
+from `accounts/trials.py::dismiss_trial_ended_notice`, which stores a
+timestamp precisely because what it acknowledges is a change to what the
+account can DO. This acknowledges a suggestion about copy. Reappearing once
+on a second device is the whole cost of being wrong, against a migration, a
+column and an endpoint for a nudge. The key carries
+`form.saved_shape_token`, so waving off one set of long ties does not also
+wave off a different one saved later.
+
+Starts `hidden` and is revealed by the enhancer at the bottom of this file.
+The other order — visible, then hidden once the script reads localStorage —
+would flash the note at a student who already dismissed it, on every load.
+The cost of this order is that a browser with JS off never sees the note at
+all, which is acceptable only because the readout under the field itself is
+server-rendered and needs no script: the no-JS student still gets told, at
+the field, exactly what this note would have said.
+{% endcomment %}
+{% if not compact and form.saved_long_ties %}
+<div class="aff-notice panel panel--inset" data-aff-notice
+     data-aff-notice-key="aff-shape:{{ user.pk }}:{{ form.saved_shape_token }}" hidden>
+  <p class="aff-notice-text">
+    {% with n=form.saved_long_ties|length %}
+      {% if n == 1 %}One of your saved ties reads as a sentence.{% else %}{{ n }} of your saved ties read as sentences.{% endif %}
+    {% endwith %}
+    Coverage looks for them word for word in a contact's own notes, so a long one matches nothing.
+  </p>
+  <div class="aff-notice-actions">
+    {% comment %}
+    Both plain `.btn`, and neither is `.btn-primary`. The accent blue inside
+    an amber advisory reads as two different alarms stacked, and the product
+    is not asking for this to be done now: it is a suggestion about copy, on
+    a page the student opened to do something else. The white pill on the
+    amber ground carries enough weight to be the thing you press.
+    {% endcomment %}
+    <a class="btn" href="#id_affiliations" data-aff-notice-go>Review Them</a>
+    <button type="button" class="btn aff-notice-x" data-aff-notice-x>Dismiss</button>
+  </div>
+</div>
+{% endif %}
+
+{% comment %}
 Profile photo. The whole block is a drop target, and the preview swaps to the
 chosen file before the form is submitted — without that, a student picks a
 photo, sees nothing change, and cannot tell whether the click registered.
@@ -226,10 +286,63 @@ the hooks an outreach draft opens with. A generic email with no specific hook
 is the number-one reason a draft goes unanswered, and specificity beats a
 binary alumni flag by a wide margin (a high-school-directory tie replies at
 85%+; a bare college affiliation at about 25%).
+
+REDESIGNED 2026-09-02, because the box was teaching the wrong shape. What it
+was: a bare textarea, one caption sentence, three résumé-line examples in the
+placeholder, and no way at all to find out whether what you typed would ever
+do anything. What the field actually does is one thing —
+`crm.relevance.specific_tie` asks whether this exact string appears,
+case-insensitively, inside a contact's own `school`/`angle`/`notes` text, and
+a hit multiplies that contact's `ev` in the queue by 1.6. So "PE deal-sourcing
+internship" is not a weaker version of "Bain"; it is a string that will never
+appear in anyone's notes, which makes it a no-op the student was never told
+about. The founder's own five saved lines produced zero affiliation matches
+across 306 contacts, measured 2026-09-02.
+
+Three changes, all of them copy and feedback rather than a new control. The
+box is still a plain textarea bound to the same field, saved by the same
+`clean_affiliations`:
+
+1. The lede names the SHAPE, not the categories.
+2. The placeholder is four proper nouns (ProfileForm.affiliations).
+3. A per-line readout under the box says, for each line, whether it reads as
+   a name. Server-rendered from `form.shape_report` so it is right on first
+   paint with no JS at all, then re-rendered live as the student types by the
+   enhancer at the bottom of this file.
+
+The readout never blocks and never edits. A long line saves exactly as typed
+(see clean_affiliations' docstring, and P2: the student's data outranks the
+product's rule). `aria-live="polite"` because the readout changes under the
+cursor while typing and a screen reader has to hear it without being yanked.
 {% endcomment %}
 <label for="id_affiliations">Affiliations</label>
-<p class="field-hint">Specific ties get replies: a club, a prior employer, a hometown. One per line, up to six.</p>
-{{ form.affiliations }}
+<p class="field-hint">Names, not sentences. A club, a firm, a school, a hometown. One per line, up to six.</p>
+<div class="aff-field" data-aff-field
+     data-aff-max="{{ form.affiliation_word_max }}"
+     data-aff-note="{{ form.affiliation_long_note }}">
+  {{ form.affiliations }}
+  <ul class="aff-lines" data-aff-lines aria-live="polite">
+    {% for row in form.shape_report %}
+      <li class="aff-line{% if row.long %} is-long{% endif %}">
+        <span class="aff-line-mark" aria-hidden="true"></span>
+        <span class="aff-line-body">
+          <span class="aff-line-text">{{ row.text }}</span>
+          {% if row.long %}<span class="aff-line-note">{{ row.words }} words. {{ row.note }}</span>{% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  </ul>
+  {% comment %}
+  The empty state, which deliberately does NOT repeat the placeholder's four
+  examples one line below the placeholder. It says the one thing nothing
+  else on the page says: the MECHANISM. Not knowing it is the whole reason a
+  student writes a résumé line here, and it is the sentence that makes the
+  lede's "names, not sentences" an instruction rather than a preference.
+  Only while the box is empty; once there are lines, the readout is what
+  belongs in this space.
+  {% endcomment %}
+  <p class="aff-empty" data-aff-empty{% if form.shape_report %} hidden{% endif %}>Coverage looks for each one word for word in a contact's own notes.</p>
+</div>
 {{ form.affiliations.errors }}
 
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
@@ -467,6 +580,141 @@ its two enhancers.
 
   function enhanceAll(root) {
     (root || document).querySelectorAll("[data-se-field]").forEach(enhance);
+  }
+  if (document.readyState !== "loading") enhanceAll();
+  else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });
+  document.body.addEventListener("htmx:afterSettle", function (e) { enhanceAll(e.target); });
+})();
+{% endscript %}
+
+{% comment %}
+Affiliations: the live readout, and the one-time note's dismissal.
+
+Same progressive-enhancement shape as the School Email widget above
+(enhance/enhanceAll, a `dataset` flag against double-binding, re-run on
+`htmx:afterSettle`) and for the same reason: both have per-node state to
+seed, and this partial is an htmx swap target, so a listener bound directly
+to a node would stack a duplicate on every in-place save.
+
+The readout is NOT re-rendered on enhance, only on `input`. The server
+already rendered exactly these rows from `ProfileForm.shape_report`, so
+redrawing them on load would be work that changes nothing and, worse, would
+fire the `aria-live` region at a student who has not typed anything. The two
+renderers agreeing on first paint is the point; this script only takes over
+once the text starts moving. Both read the ceiling and the sentence off the
+container's data attributes, which the form put there: one definition of the
+number, one of the copy.
+
+Nothing here rewrites the textarea. It reads it.
+{% endcomment %}
+{% script %}
+(function () {
+  function lines(raw) {
+    var out = [];
+    (raw || "").split(/\r?\n/).forEach(function (line) {
+      var tie = line.trim().replace(/\s+/g, " ");
+      if (tie) out.push(tie);
+    });
+    return out;
+  }
+
+  // Mirrors ProfileForm.shape_report, which is what painted the list the
+  // first time. If those two ever disagree the box starts lying the moment a
+  // key is pressed, so both count words the same crude way: split on
+  // whitespace, count what is left.
+  function row(tie, max, note) {
+    var words = tie.split(/\s+/).length;
+    var long = words > max;
+
+    var li = document.createElement("li");
+    li.className = long ? "aff-line is-long" : "aff-line";
+
+    var mark = document.createElement("span");
+    mark.className = "aff-line-mark";
+    mark.setAttribute("aria-hidden", "true");
+
+    var body = document.createElement("span");
+    body.className = "aff-line-body";
+
+    var text = document.createElement("span");
+    text.className = "aff-line-text";
+    text.textContent = tie;            // never innerHTML: this is typed text
+    body.appendChild(text);
+
+    if (long) {
+      var hint = document.createElement("span");
+      hint.className = "aff-line-note";
+      hint.textContent = words + " words. " + note;
+      body.appendChild(hint);
+    }
+    li.appendChild(mark);
+    li.appendChild(body);
+    return li;
+  }
+
+  function enhance(field) {
+    if (field.dataset.affDone) return;
+    field.dataset.affDone = "1";
+
+    var box = field.querySelector("textarea");
+    var list = field.querySelector("[data-aff-lines]");
+    var empty = field.querySelector("[data-aff-empty]");
+    var max = parseInt(field.dataset.affMax, 10) || 4;
+    var note = field.dataset.affNote || "";
+    if (!box || !list) return;
+
+    box.addEventListener("input", function () {
+      var ties = lines(box.value);
+      list.textContent = "";
+      ties.forEach(function (tie) { list.appendChild(row(tie, max, note)); });
+      if (empty) empty.hidden = ties.length > 0;
+    });
+  }
+
+  // The stored-shape note. `localStorage` throws outright in a browser set to
+  // block site data, so every touch is guarded: a student with storage locked
+  // down sees the note every time, which is the honest failure for a
+  // suggestion. It errs toward saying it again, never toward hiding it.
+  function seen(key) {
+    try { return window.localStorage.getItem(key) === "1"; } catch (e) { return false; }
+  }
+  function remember(key) {
+    try { window.localStorage.setItem(key, "1"); } catch (e) { /* nothing to do */ }
+  }
+
+  function enhanceNotice(el) {
+    if (el.dataset.affNoticeDone) return;
+    el.dataset.affNoticeDone = "1";
+
+    var key = el.dataset.affNoticeKey || "";
+    if (key && seen(key)) return;      // stays hidden, exactly as rendered
+    el.hidden = false;
+
+    var x = el.querySelector("[data-aff-notice-x]");
+    if (x) {
+      x.addEventListener("click", function () {
+        el.hidden = true;
+        if (key) remember(key);
+      });
+    }
+    // The href does the scrolling; this only puts the cursor where the note
+    // just pointed. Reading the note is not acknowledging it, so following
+    // the link deliberately does NOT dismiss: trimming the lines and saving
+    // is what makes the note go away, because the next render finds nothing
+    // long left to say (ProfileForm.saved_long_ties).
+    var go = el.querySelector("[data-aff-notice-go]");
+    if (go) {
+      go.addEventListener("click", function () {
+        var box = document.getElementById("id_affiliations");
+        if (box) box.focus({ preventScroll: true });
+      });
+    }
+  }
+
+  function enhanceAll(root) {
+    var scope = root || document;
+    scope.querySelectorAll("[data-aff-field]").forEach(enhance);
+    scope.querySelectorAll("[data-aff-notice]").forEach(enhanceNotice);
   }
   if (document.readyState !== "loading") enhanceAll();
   else document.addEventListener("DOMContentLoaded", function () { enhanceAll(); });

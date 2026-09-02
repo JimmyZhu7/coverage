@@ -17,6 +17,7 @@ checkbox.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import uuid
@@ -107,6 +108,60 @@ LANGUAGE_CHOICES: list[tuple[str, str]] = [("english", "English")] + [
 # open an email with, and a list of twelve is a résumé, not a hook.
 AFFILIATION_LIMIT = 6
 AFFILIATION_MAX_CHARS = 160
+
+# The word count past which a tie stops being a NAME and starts being a
+# sentence. Four words or fewer reads as a proper noun ("USC", "Bain &
+# Company", "Sigma Chi", "USC Marshall Investment Club"); five or more reads
+# as a line off a résumé.
+#
+# WHY FOUR, measured 2026-09-02 on the dev database (read-only). The only
+# thing this field does is feed `crm.relevance.specific_tie`, which asks one
+# question: does this exact string appear, case-insensitively, inside a
+# contact's own `school`/`angle`/`notes` text. So the ceiling is set by how
+# long that text is, not by taste.
+#   - `school` is the only one of those three keys the live queue actually
+#     carries (`crm.today._build_actions` withholds `angle` on purpose). Every
+#     non-blank `school` value on file, across every account, is ONE word.
+#   - `angle`, where a caller does pass it, runs 3 to 13 words, and its
+#     shortest values are 3.
+# A five-word phrase therefore has to appear verbatim inside text that is
+# usually shorter than the phrase itself. Four is the last width at which a
+# tie is still plausibly a substring of somebody else's line.
+#
+# This is a HINT, never a gate. `clean_affiliations` does not read it: the
+# student's data outranks the product's rule (docs/plans/2026-09-01-product-
+# plan.md, P2), so a long tie saves exactly as typed and the product says
+# what it thinks instead of editing the answer.
+AFFILIATION_WORD_SOFT_MAX = 4
+
+# The sentence the UI says about a tie that is over the line. Lives here, not
+# in the template, because the live typing readout and the server's first
+# paint have to say the same thing (P5, one definition per fact) and the
+# script reads it off a data attribute.
+AFFILIATION_LONG_NOTE = (
+    "Long ties rarely appear verbatim in someone's notes. Try the name on its own."
+)
+
+
+def affiliation_is_long(tie: str) -> bool:
+    """Whether one tie is over the soft word ceiling. See the constant."""
+    return len(str(tie or "").split()) > AFFILIATION_WORD_SOFT_MAX
+
+
+def affiliation_lines(raw: str) -> list[str]:
+    """The non-blank lines of an affiliations box, whitespace collapsed.
+
+    Deliberately NOT `clean_affiliations`: that one dedupes and refuses, and
+    this is what the reader sees while typing, where a duplicate line is a
+    half-finished thought rather than an error. Both split on the same thing,
+    which is the only part that has to agree.
+    """
+    lines: list[str] = []
+    for line in str(raw or "").splitlines():
+        tie = " ".join(line.split())
+        if tie:
+            lines.append(tie)
+    return lines
 
 # Class year (graduation year) options, anchored to the current year so the
 # list always spans last year's grads through six years out — undergrad
@@ -311,13 +366,23 @@ class ProfileForm(forms.Form):
     # short phrase the student writes, not a value picked from a list, and
     # the count is small enough (AFFILIATION_LIMIT) that lines are the
     # clearest way to show where one tie ends and the next begins.
+    #
+    # `rows` is AFFILIATION_LIMIT, not 4: at 4 the fifth and sixth saved ties
+    # were below the fold of their own box, which is how a student ends up
+    # editing a list they cannot see the end of. The cap and the height are
+    # the same number for the same reason.
+    #
+    # THE PLACEHOLDER IS FOUR PROPER NOUNS. It used to be three résumé lines
+    # ("London M&A boutique, summer intern"), which taught the wrong shape by
+    # example: the field's only consumer, `crm.relevance.specific_tie`, looks
+    # for this string verbatim in a contact's own text, and a description
+    # never appears there while a name constantly does. See
+    # AFFILIATION_WORD_SOFT_MAX for the measurement.
     affiliations = forms.CharField(
         required=False,
         widget=forms.Textarea(attrs={
-            "rows": 4,
-            "placeholder": ("Consulting club, e-board\n"
-                            "London M&A boutique, summer intern\n"
-                            "Grew up in Hong Kong"),
+            "rows": AFFILIATION_LIMIT,
+            "placeholder": "USC\nBain & Company\nChicago\nSigma Chi",
         }),
     )
     # Lives in Profile rather than a section of its own: it is a fact about the
@@ -532,10 +597,87 @@ class ProfileForm(forms.Form):
             )
         return addresses
 
+    # -- Affiliations: what the page says about the box, before it is saved --
+    #
+    # None of these three validates anything. They exist because a plain
+    # textarea gives a student no way to find out that what they typed will
+    # never match anything, and the field's whole effect is a verbatim
+    # substring search (`crm.relevance.specific_tie`). The form owns the
+    # judgement rather than the template so that the server's first paint and
+    # the live typing readout cannot disagree about what counts as long.
+
+    @property
+    def affiliation_word_max(self) -> int:
+        """The soft ceiling, for the template to hand the script. One
+        definition of the number, read in both places."""
+        return AFFILIATION_WORD_SOFT_MAX
+
+    @property
+    def affiliation_long_note(self) -> str:
+        """Likewise the sentence. See AFFILIATION_LONG_NOTE."""
+        return AFFILIATION_LONG_NOTE
+
+    def shape_report(self) -> list[dict]:
+        """One row per tie currently IN THE BOX, each with its word count and
+        whether it is over the soft ceiling.
+
+        Reads `self["affiliations"].value()`, which is the stored value on a
+        GET and the submitted one on a re-render after a validation error —
+        so the readout describes what the student is looking at, in both
+        cases. Nothing here rewrites a line; the row carries the text exactly
+        as typed and the product says what it thinks beside it.
+        """
+        rows = []
+        for tie in affiliation_lines(self["affiliations"].value()):
+            words = len(tie.split())
+            rows.append({
+                "text": tie,
+                "words": words,
+                "long": words > AFFILIATION_WORD_SOFT_MAX,
+                "note": AFFILIATION_LONG_NOTE if words > AFFILIATION_WORD_SOFT_MAX else "",
+            })
+        return rows
+
+    def saved_long_ties(self) -> list[str]:
+        """The ties ALREADY SAVED on this row that look like the wrong shape.
+
+        Deliberately `self.initial`, not the field's current value: this
+        answers "what is stored", which is what the one-time notice is about,
+        while `shape_report` answers "what is in the box". A bound form has no
+        initial of its own here — `accounts.views._bound_profile_form` seeds
+        `target_cycles` and `languages` and nothing else — so this is empty
+        during a validation-error re-render, which is correct: a student
+        mid-edit does not need to be told about the row they are editing.
+
+        NOTHING acts on this list. It is not sorted, trimmed, shortened or
+        written back. The student's data outranks the product's rule (P2);
+        the most the product may do is point at it.
+        """
+        return [t for t in affiliation_lines(self.initial.get("affiliations"))
+                if affiliation_is_long(t)]
+
+    def saved_shape_token(self) -> str:
+        """A short, stable id for the exact set of long ties the notice is
+        about, so dismissing it dismisses THAT advice and not the field.
+
+        Trimming one line and leaving another long changes the token, and the
+        notice comes back for what is left. Waving off the same set twice
+        does not."""
+        ties = self.saved_long_ties()
+        if not ties:
+            return ""
+        return hashlib.sha1("\n".join(ties).encode()).hexdigest()[:10]
+
     def clean_affiliations(self) -> list[str]:
         """One tie per line; blank lines and repeats dropped; the cap refused
         out loud rather than silently truncated. Returns a LIST — `apply_to`
-        writes it to the ArrayField."""
+        writes it to the ArrayField.
+
+        AFFILIATION_WORD_SOFT_MAX is deliberately absent from this method. A
+        long tie is a tie the product thinks will not match, not a tie the
+        student got wrong, and the difference between those two is the
+        difference between a hint and a lie. `shape_report` says so beside
+        the box; nothing here refuses it, truncates it, or edits it."""
         raw = self.cleaned_data.get("affiliations") or ""
         ties: list[str] = []
         for line in raw.splitlines():
