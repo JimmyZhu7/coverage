@@ -35,9 +35,11 @@ import calendar as calmod
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from urllib.parse import urlencode
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -642,6 +644,46 @@ def calendar_delete(request: HttpRequest, pk: int) -> HttpResponse:
                              request.POST.get("d"), today)
     CalendarEvent.objects.for_user(request.user).filter(pk=pk).delete()
     return redirect(f"/app/calendar/{_qs(view, anchor)}")
+
+
+@login_required
+@require_POST
+def calendar_token_reset(request: HttpRequest) -> HttpResponse:
+    """Mint a new ICS feed token and show the new URL once.
+
+    The feed below is authenticated by a token IN THE URL PATH, which is the
+    only thing Calendar.app and Google Calendar can carry — they fetch from
+    their own servers with no cookies of ours. That makes the token a bearer
+    credential for a read-only copy of the user's calendar, and a path
+    component lands in places a header never would: proxy access logs, the
+    calendar provider's own fetch logs, a browser's history, a screen share.
+    Until this view existed, a student who had leaked one had no way back:
+    the column was writable from a Django shell and nowhere else.
+
+    `User.save()` regenerates the token whenever the column is empty (see
+    accounts/models.py), so clearing it is the whole operation — one
+    definition of how a token is minted, not a second one here.
+
+    THE NEW URL IS RETURNED, NEVER LOGGED. It goes into a one-shot Django
+    message, which is rendered into the response for this user and then
+    consumed. Nothing on this path writes the token to a logger, and the
+    redirect target carries no query string, so it cannot reach an access
+    log either. That is the same rule the feed's own leak is about; a reset
+    view that logged what it minted would just move the problem.
+    """
+    request.user.calendar_token = None
+    # `save()` fills the empty column with a fresh `secrets.token_urlsafe(24)`
+    # before it writes, so the attribute already holds the new value here —
+    # no re-read needed.
+    request.user.save(update_fields=["calendar_token"])
+    messages.success(
+        request,
+        "New calendar link: webcal://"
+        + request.get_host()
+        + reverse("crm:calendar_ics", args=[request.user.calendar_token])
+        + ". The old link is dead. Subscribe again in your calendar app.",
+    )
+    return redirect(f"{reverse('accounts:settings')}#security")
 
 
 def calendar_ics(request: HttpRequest, token: str) -> HttpResponse:

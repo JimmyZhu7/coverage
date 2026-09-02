@@ -69,6 +69,24 @@ def test_a_blank_redis_url_counts_as_absent(load):
     assert base.CACHES["default"]["BACKEND"] == LOCMEM
 
 
+AXES_CACHE = "axes.handlers.cache.AxesCacheHandler"
+AXES_DB = "axes.handlers.database.AxesDatabaseHandler"
+
+
+def test_the_admin_lockout_counter_follows_the_same_rule(load):
+    """django-axes keeps the admin-login lockout counter in whichever store
+    AXES_HANDLER names, and it has exactly the per-worker hazard this file
+    exists for. With Redis it goes in the shared cache; without, it goes in
+    the DATABASE, not into LocMem — a slower write on a form that should see
+    single-digit legitimate POSTs a week is the right trade against three
+    workers each granting a full five attempts and forgetting them all on
+    the next deploy.
+    """
+    assert load("redis://cache.internal:6379/0").AXES_HANDLER == AXES_CACHE
+    assert load(None).AXES_HANDLER == AXES_DB
+    assert load("").AXES_HANDLER == AXES_DB
+
+
 def test_the_redis_client_the_backend_needs_is_actually_installed():
     """Django ships RedisCache but imports redis-py lazily, inside the first
     cache operation. Without the dependency declared, a deploy that sets

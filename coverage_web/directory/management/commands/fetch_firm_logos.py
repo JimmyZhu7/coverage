@@ -49,12 +49,17 @@ WHAT IT REFUSES
 - ATS and careers-vendor domains. `blackstone.wd1.myworkdayjobs.com` would
   otherwise fetch WORKDAY's logo and put it on Blackstone's card. The
   blocklist below is derived from the connector catalog's own hosts.
+- Going where it is not wanted, or pretending to be someone else. Every
+  request names Coverage (see `UA`) and is checked against the host's own
+  robots.txt first (`robots_ok`). A firm that disallows us keeps its
+  monogram, and the skip is logged rather than looking like a dead site.
 """
 
 from __future__ import annotations
 
 import hashlib
 import io
+import logging
 import os
 import re
 import subprocess
@@ -66,7 +71,10 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 from PIL import Image
 
+from core import robots as core_robots
 from directory.models import Firm
+
+logger = logging.getLogger(__name__)
 
 # Stored square, at 2x the largest place a logo renders (44px on a firm
 # cluster header), so it stays crisp on a retina display and no larger.
@@ -124,8 +132,28 @@ def candidates(firm: Firm) -> list[str]:
     return out
 
 
-UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"}
+# OUR OWN NAME, not a browser's. This read `Mozilla/5.0 ... Chrome/126` until
+# 2026-09-01. Same convention as `coverage_connectors/http.py` and
+# `enrich_postings`: a bare product token first (the part a robots.txt
+# `User-agent:` line matches on), then a contact URL, then the purpose.
+UA = {"User-Agent": "coverage-logos/0.1 "
+                    "(+https://coverage.app; firm logo fetcher)"}
+
+
+def robots_ok(url: str) -> bool:
+    """False when the host's robots.txt disallows `url` for our user-agent.
+
+    Guards all three places this command goes out: the homepage read in
+    `site_icons`, the homepage read in `page_logos`, and every candidate
+    image download in `_fetch` (the two favicon services included). Skipped
+    URLs are logged, not swallowed — a firm whose site walls us is why a
+    card still shows a monogram, and that should be readable from a run.
+    """
+    if core_robots.is_allowed(url, UA["User-Agent"]):
+        return True
+    logger.info("robots.txt disallows %s - skipped", url)
+    return False
+
 
 # Icon rels worth reading off a page, apple-touch-icon first: it exists to be
 # a home-screen tile, so it is square, padded, and composed — which is exactly
@@ -146,8 +174,11 @@ def site_icons(domain: str) -> list[str]:
     and the owner called it out. The same site's declared apple-touch-icon is
     the whole wordmark, composed, at 180px. Point72 declares 513px.
     """
+    home = f"https://{domain}/"
+    if not robots_ok(home):
+        return []
     try:
-        resp = requests.get(f"https://{domain}/", headers=UA, timeout=TIMEOUT)
+        resp = requests.get(home, headers=UA, timeout=TIMEOUT)
         html = resp.text
     except requests.RequestException:
         return []
@@ -185,6 +216,8 @@ def page_logos(domain: str) -> list[str]:
     """
     html = ""
     for host in (f"https://www.{domain}/", f"https://{domain}/"):
+        if not robots_ok(host):
+            continue
         try:
             resp = requests.get(host, headers=UA, timeout=TIMEOUT)
             if len(resp.text) > 2000:
@@ -310,6 +343,8 @@ def _svg_to_png(raw: bytes) -> bytes | None:
 
 def _fetch(url: str) -> Image.Image | None:
     """One candidate image, or None for every failure mode."""
+    if not robots_ok(url):
+        return None
     try:
         resp = requests.get(url, headers=UA, timeout=TIMEOUT)
     except requests.RequestException:

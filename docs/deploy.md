@@ -211,6 +211,27 @@ Attach your domain to the Render web service, add it to `DJANGO_ALLOWED_HOSTS`
 and `DJANGO_CSRF_TRUSTED_ORIGINS`, and update both Google redirect URIs
 (sign-in and, if connected, Gmail Live).
 
+### 5b. HSTS preload (a one-way door, so it is off)
+
+`settings/production.py` ships a seven-day HSTS max-age with
+`SECURE_HSTS_PRELOAD` off. Both halves are on purpose. A short max-age is
+the escape hatch while the domain and its certificates are still moving —
+HSTS cannot be un-said any faster than the max-age already handed out — and
+the `preload` token is a claim that the origin meets hstspreload.org's bar
+(max-age of at least a year, plus subdomains, plus an HTTP redirect). A
+seven-day header carrying `preload` advertises a qualification it does not
+have, which is what it did until 2026-09-01.
+
+Turning it on is your call, not a default, because getting off the preload
+list takes months and ships with a browser release. When you want it, in
+this order:
+
+1. Run one clean cycle on the real domain: HTTPS working, every subdomain
+   you use served over HTTPS too.
+2. Set `DJANGO_SECURE_HSTS_SECONDS=31536000` and deploy.
+3. Set `DJANGO_SECURE_HSTS_PRELOAD=true` and deploy.
+4. Submit the domain at https://hstspreload.org.
+
 ---
 
 ## Fly.io instead of Render

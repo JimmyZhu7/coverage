@@ -17,7 +17,12 @@ PLACEHOLDERS TO FILL IN BEFORE THIS IS A REAL POLICY
                              "international transfers" section
 
 OPEN QUESTIONS FOR COUNSEL / THE FOUNDER
-  - Effective date below says 19 August 2026. Update it on every publish.
+  - Effective date below says 1 September 2026. Update it on every publish.
+    The 2026-09-01 revision made the Gmail section true to the code: the
+    sync fetches messages with Gmail's `format="full"` and decodes bodies
+    and `.ics` attachments in memory, which the previous wording ("headers,
+    an .ics attachment, a short snippet") did not say, and MailFact.quote
+    stores one verbatim sentence of body text, which it said we never did.
   - Breach notification: the stated 72-hour window is a commitment, not a
     legal finding. One real gap is closed (2026-08-30): sentry-sdk is now
     a declared dependency, so settings/production.py's SENTRY_DSN check
@@ -52,7 +57,7 @@ DO NOT REWORD: the "Google API Limited Use" section
   <h1>Privacy</h1>
   <p class="lede">Exactly what Coverage stores, what it does with it, and what it never does.</p>
 
-  <p class="muted">Last updated 19 August 2026.</p>
+  <p class="muted">Last updated 1 September 2026.</p>
 
   <h2>The short version</h2>
   <ul>
@@ -78,7 +83,8 @@ DO NOT REWORD: the "Google API Limited Use" section
   <ul>
     <li><strong>A Gmail account you connect.</strong> If Gmail Live is enabled on this deployment and you complete Google's consent screen, Coverage reads your Gmail with Google's read-only scope in order to log recruiting touches automatically. Be clear about what that means: we do read your mailbox. Read the next paragraph before you connect it.</li>
   </ul>
-  <p>On the Gmail path we store a Google refresh token, encrypted at rest, plus the mailbox address and a position marker so we know where we last read. We do not store your messages. What lands in your CRM is the structured result: who the message was from, whether it was a reply or a bounce, any meeting time we found in a calendar invite, and a short piece of evidence text of up to 300 characters, which is normally the subject line or Gmail's own preview snippet. That evidence text is stored on the touch so you can see why Coverage logged what it logged.</p>
+  <p>On the Gmail path we store a Google refresh token, encrypted at rest, plus the mailbox address and a position marker so we know where we last read. Coverage reads the whole message. It asks Gmail for the full message, decodes the body and any calendar attachment, and works over that text in memory to decide what happened. None of that text is written down. What lands in your CRM is the structured result: who the message was from, whether it was a reply, a bounce or an auto-reply, the time and title of any calendar invite, and a short evidence line of up to 300 characters, which is normally the subject line or Gmail's own preview snippet. That evidence line is stored on the touch so you can see why Coverage logged what it logged.</p>
+  <p>One narrow exception, on purpose. When a message states something Coverage is going to act on, such as a person having left the firm or an address that no longer works, we keep one verbatim sentence from that message, up to 500 characters, stored next to the fact it grounds. Nothing is acted on without one: that sentence is how you check the action against what was actually said, and Coverage refuses to act when it cannot quote a reason. It is shown to you on the card, it is never copied into your notes, and it is the only body text we keep. For a delivery failure the sentence comes from the mail server's own report rather than from a person's message.</p>
   <p>One part of the Gmail path sends message text to an AI provider. When you press Scan Now, a few messages come back with no clear answer to the one question Coverage cares about: was that a real reply from a person, or an out-of-office. To settle those, and only those, Coverage sends that message's subject line and Gmail's own preview snippet to Anthropic. Never the message body, never an attachment, never the whole mailbox, and never more than 100 messages in one scan. What comes back is one of three fixed answers, and it decides whether the touch gets logged as a reply. This happens only when you press Scan Now, and not at all if no Anthropic key is configured on the deployment.</p>
   <p>You can disconnect Gmail at any time from Settings, which deletes the stored token. You can also revoke Coverage's access directly in your Google account at any time, and that revocation wins.</p>
 
@@ -117,7 +123,7 @@ DO NOT REWORD: the "Google API Limited Use" section
 
   <h2>Retention</h2>
   <p>Your CRM stays until you delete it, either row by row or by deleting your account. Nothing expires on its own while your account is open.</p>
-  <p>On the Gmail path we store no messages at all, only the structured result described above.</p>
+  <p>On the Gmail path we store no messages, only the structured result described above and the quoted sentence behind any fact Coverage acted on.</p>
   <p>When you delete your account, deletion is immediate and is a hard delete, not a flag. See below.</p>
 
   <h2>Security</h2>

@@ -174,3 +174,57 @@ def test_the_exempt_pattern_matches_the_path_django_actually_tests(monkeypatch):
     # And it must not exempt the whole site by accident.
     assert not any(p.search("app/") for p in patterns)
     assert not any(p.search("admin/login/") for p in patterns)
+
+
+# HSTS: the header must not claim something the origin has not earned.
+# ---------------------------------------------------------------------------
+def test_hsts_preload_is_off_by_default(monkeypatch):
+    """`preload` is a CLAIM, not a request: it asserts the origin meets
+    hstspreload.org's bar, which is a max-age of at least one year plus
+    subdomains plus an HTTP redirect. Production shipped it beside a
+    SEVEN-DAY max-age, so the header advertised a qualification the domain
+    could not have been granted. Getting onto that list is also a one-way
+    door — removal takes months and ships with a browser release — which
+    makes it the founder's call after a clean HTTPS deploy, not a default.
+    See docs/deploy.md §5b for the opt-in order.
+    """
+    module = _load(monkeypatch, BASE_ENV)
+    assert module.SECURE_HSTS_PRELOAD is False
+
+
+def test_the_preload_claim_can_be_turned_on_from_the_environment(monkeypatch):
+    module = _load(monkeypatch, {**BASE_ENV, "DJANGO_SECURE_HSTS_PRELOAD": "true"})
+    assert module.SECURE_HSTS_PRELOAD is True
+
+
+def test_hsts_and_subdomains_are_still_on(monkeypatch):
+    """Turning off the unearned claim must not have turned off the real
+    protection underneath it."""
+    module = _load(monkeypatch, BASE_ENV)
+    assert module.SECURE_HSTS_SECONDS >= 60 * 60 * 24 * 7
+    assert module.SECURE_HSTS_INCLUDE_SUBDOMAINS is True
+    assert module.SECURE_SSL_REDIRECT is True
+
+
+# ---------------------------------------------------------------------------
+# Email verification: a standing founder decision, written down where the
+# setting is, so the next reader does not have to rediscover the risk.
+# ---------------------------------------------------------------------------
+def test_optional_email_verification_carries_its_risk_in_writing():
+    """`ACCOUNT_EMAIL_VERIFICATION = "optional"` means an unverified account
+    is a fully working account, which allows pre-registration squatting on a
+    school address the squatter cannot read. It stays "optional" because
+    "mandatory" makes signup depend on outbound mail, and mail sending is
+    deferred paid setup — but that is a decision, and a decision nobody
+    wrote down is indistinguishable from an oversight six months later.
+    """
+    from pathlib import Path
+
+    from django.conf import settings
+
+    source = Path(settings.BASE_DIR) / "coverage_web" / "settings" / "base.py"
+    text = source.read_text()
+    before = text.split('ACCOUNT_EMAIL_VERIFICATION = "optional"', 1)[0]
+    note = before[-2000:]
+    assert "squatting" in note
+    assert "mandatory" in note

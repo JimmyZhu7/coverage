@@ -70,6 +70,10 @@ urlpatterns = [
     # Token-authenticated ICS feed — no session; calendar apps fetch from
     # their own servers. The token is the auth, so this is NOT login_required.
     path("calendar/feed/<str:token>.ics", calendar_views.calendar_ics, name="calendar_ics"),
+    # Revoke every subscription to that feed at once by minting a new token.
+    # Session-authenticated and POST-only, unlike the feed itself: this one
+    # changes something.
+    path("calendar/feed/reset/", calendar_views.calendar_token_reset, name="calendar_token_reset"),
     path("calendar/add/", calendar_views.calendar_add, name="calendar_add"),
     path("calendar/<int:pk>/delete/", calendar_views.calendar_delete, name="calendar_delete"),
     path("contacts/", views.contact_list, name="contact_list"),

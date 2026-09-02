@@ -26,10 +26,65 @@ either way.
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 
 from django.conf import settings
 
 from pywebpush import WebPushException, webpush
+
+# ---------------------------------------------------------------------------
+# The push services a real browser subscription can name.
+#
+# WHY AN ALLOWLIST AND NOT A FORMAT CHECK. `push_subscribe` stores whatever
+# `endpoint` a POST hands it, and `send_deadline_push_alerts` then makes a
+# VAPID-signed POST to that URL every day, from inside the deploy, with no
+# human in the loop. Without this an authenticated student could point the
+# nightly cron at any host reachable from the server — a cloud metadata
+# endpoint, an internal admin port, an attacker's collector — and read the
+# outcome by watching whether the row survived. That is a blind SSRF with a
+# scheduler attached, and it was reachable from an ordinary account (probed
+# 2026-09-01: `{"endpoint": "https://example.invalid/x"}` answered 201).
+#
+# A browser never invents this host. The Push API's endpoint always names
+# the browser vendor's own relay, and there are four of them:
+#   - Chrome and every Chromium browser: FCM. `android.googleapis.com` is
+#     the legacy GCM host older Chrome builds still mint against; both are
+#     Google's, both are real, so both are listed rather than guessing at a
+#     minimum Chrome version.
+#   - Firefox: Mozilla's autopush.
+#   - Safari (macOS and iOS): Apple's.
+#   - Edge on Windows: WNS, which is the one that is NOT a fixed host —
+#     it hands out a per-region subdomain (e.g. `sin.notify.windows.com`),
+#     so it is matched as a suffix. The suffix is anchored on a leading dot
+#     so `evil-notify.windows.com` and `notify.windows.com.attacker.test`
+#     both fail.
+PUSH_SERVICE_HOSTS = frozenset({
+    "fcm.googleapis.com",
+    "android.googleapis.com",
+    "updates.push.services.mozilla.com",
+    "web.push.apple.com",
+})
+PUSH_SERVICE_HOST_SUFFIXES = (".notify.windows.com",)
+
+
+def is_allowed_endpoint(endpoint: str) -> bool:
+    """True when `endpoint` names a real browser push service over HTTPS.
+
+    Scheme is checked too, and only `https` passes: an `http://` endpoint
+    would send a VAPID assertion in clear text, and no push service offers
+    one. `urlsplit().hostname` is used rather than `netloc` because it drops
+    any `user:pass@` prefix and any `:port`, which are exactly the two ways
+    a crafted URL tries to make a hostname check read the wrong substring.
+    """
+    if not endpoint:
+        return False
+    parts = urlsplit(endpoint)
+    if parts.scheme != "https":
+        return False
+    host = (parts.hostname or "").lower()
+    if host in PUSH_SERVICE_HOSTS:
+        return True
+    return any(host.endswith(suffix) for suffix in PUSH_SERVICE_HOST_SUFFIXES)
 
 
 class SubscriptionExpired(Exception):

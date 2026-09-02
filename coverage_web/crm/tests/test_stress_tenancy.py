@@ -486,12 +486,39 @@ def test_the_unscoped_escape_hatch_has_not_quietly_proliferated():
     #
     # Neither is an unscoped cross-tenant read.
     #
+    # Raised to 100 on 2026-09-01, later the same day, for the security
+    # hardening pass. Three call sites, read one at a time:
+    #
+    #   - `capture/google_revoke.py::revoke_all_for_user` and the loop in
+    #     `capture/views.py::gmail_disconnect`, both
+    #     `GmailConnection.all_objects.filter(user=...)`. Explicit predicate,
+    #     same shape as every other worker-side read of that table; they
+    #     exist because the grant now has to be handed back to Google before
+    #     the row is deleted.
+    #   - `accounts/views.py::push_subscribe`'s ownership check,
+    #     `PushSubscription.all_objects.filter(endpoint=...)`. This one is
+    #     DELIBERATELY cross-tenant and has to be: it exists to find out
+    #     whether an endpoint already belongs to somebody else so the write
+    #     can be REFUSED. It selects one column (`user_id`), compares it to
+    #     the caller's, and returns 409 without putting anything about the
+    #     other account in the response. The unscoped write it replaces is
+    #     gone: `update_or_create` now only ever runs on a row that is new or
+    #     already the caller's. Net, this line is one fewer way to touch
+    #     another tenant's row, not one more.
+    #
+    # Landed at 103 when the billing and security branches merged on
+    # 2026-09-02: 98 after the Reschedule create, plus the two billing sites
+    # and the three security sites justified above. Each of the five was
+    # written up by the branch that added it; the arithmetic is stated here
+    # because two branches independently proposed 100 from different bases,
+    # and the merged tree measures 103.
+    #
     # A RATCHET, not a limit. The headroom is small on purpose: this is meant
     # to fire on the next batch of unscoped calls so somebody looks at them,
     # which is the whole justification for `all_objects` being greppable.
     # Raising the number is a legitimate response — AFTER reading the diff.
-    assert len(lines) <= 100, (
-        f"{len(lines)} unscoped `all_objects` lines, up from the 100 reviewed "
+    assert len(lines) <= 103, (
+        f"{len(lines)} unscoped `all_objects` lines, up from the 103 reviewed "
         "on 2026-09-02. Each new call site needs an explicit `user=` predicate "
         "or a written cross-tenant justification — read the diff, then raise "
         "this number deliberately."

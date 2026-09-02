@@ -2307,6 +2307,35 @@ that don't already declare explicit htmx behaviour.
                  aria-label="Sign out on all other devices">Sign Out Others</a>
             </div>
           </div>
+
+          {% comment %}
+          The calendar feed link is a credential, so it lives here and not
+          beside the Subscribe button that hands it out. The token sits in
+          the URL path — the only place a calendar app can carry one — which
+          means it also sits in that app's fetch logs, any proxy in front of
+          this site, and the history of whatever browser it was copied from.
+          Before this row it was revocable only from a Django shell.
+
+          Reset is destructive in the way that matters (every existing
+          subscription stops updating), so it POSTs rather than following a
+          link, and the new URL comes back once in the flash above rather
+          than being printed on this page for the next person over the
+          shoulder. Rows are not normally forms on this page; this one is,
+          because a GET must not be able to revoke anything.
+          {% endcomment %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Calendar Link</span>
+              <div class="set-row-desc">Anyone with your feed link can read your calendar.
+                Reset it to cut off every subscription. You will need to subscribe again.</div>
+            </div>
+            <div class="set-row-control">
+              <form method="post" action="{% url 'crm:calendar_token_reset' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn">Reset Calendar Link</button>
+              </form>
+            </div>
+          </div>
         </div>
       </section>
 

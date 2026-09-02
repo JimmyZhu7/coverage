@@ -73,7 +73,26 @@ SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
 SECURE_HSTS_SECONDS = env.int("DJANGO_SECURE_HSTS_SECONDS", default=60 * 60 * 24 * 7)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-SECURE_HSTS_PRELOAD = True
+# PRELOAD IS OFF, AND THAT IS THE HONEST SETTING AT A SEVEN-DAY MAX-AGE.
+#
+# The `preload` token is a claim, not a request: it says this origin meets
+# hstspreload.org's bar, which is max-age >= 31536000 (one year) plus
+# includeSubDomains plus a redirect from HTTP. A seven-day header carrying
+# `preload` advertises a qualification it does not have — the list would
+# reject the submission, and any tool reading the header believes it.
+#
+# Seven days is itself deliberate (docs/deploy.md §5b): a short max-age is
+# the escape hatch while the domain and its certificates are still moving,
+# because HSTS cannot be un-said faster than the max-age already handed out.
+# Turning `preload` on is a ONE-WAY DOOR — removal from the browsers' baked-in
+# list takes months and ships with a browser release — so it is a founder
+# decision that follows a clean HTTPS deploy, not a default.
+#
+# To opt in: run one clean cycle on the real domain, set
+# DJANGO_SECURE_HSTS_SECONDS=31536000, THEN flip DJANGO_SECURE_HSTS_PRELOAD
+# to true and submit at hstspreload.org. In that order — the header has to
+# be right before the claim is made.
+SECURE_HSTS_PRELOAD = env.bool("DJANGO_SECURE_HSTS_PRELOAD", default=False)
 
 # Django 4+ requires the scheme-qualified origin(s) for CSRF on unsafe methods
 # behind an HTTPS proxy (admin login, all form POSTs). Set to your deployed
