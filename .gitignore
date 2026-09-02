@@ -89,3 +89,6 @@ scripts/seed_founder.py
 # Ignored rather than relocated: the journal is what `--revert` reads, so it has
 # to survive on the machine that wrote it. It just must never travel.
 *_undo_*.json
+
+# Legal drafts. Never tracked: this is a public repo.
+docs/liam-safe-draft-*.md
