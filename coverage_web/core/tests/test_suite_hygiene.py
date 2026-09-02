@@ -40,6 +40,22 @@ def _ini_markers() -> dict[str, str]:
             for line in _ini().get("markers", [])}
 
 
+def _conftest_markers() -> set[str]:
+    """Marker names `conftest.py` registers through `addinivalue_line`.
+
+    Parsed rather than imported: importing the conftest outside a pytest run
+    pulls in Django settings, and this test is meant to be readable without
+    that. The shape it matches is the one the file uses, an `addinivalue_line`
+    call whose first argument is "markers" and whose second is a string
+    starting `name: description`."""
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "conftest.py").read_text(encoding="utf-8")
+    return set(re.findall(
+        r'addinivalue_line\(\s*"markers",\s*"([A-Za-z_][A-Za-z0-9_]*):',
+        text,
+    ))
+
+
 def _suite_files():
     """Every test module the suite actually collects.
 
@@ -58,10 +74,18 @@ def _suite_files():
 def test_every_marker_the_suite_writes_by_hand_is_registered():
     """The ratchet. `pytest.mark.<name>` for a name pytest does not know is a
     warning, not an error, so it survives review — this is what makes it
-    visible. `outreach_blackout` is registered in `coverage_web/conftest.py`
-    rather than here because it applies to the web suite only."""
+    visible.
+
+    A marker counts as registered whether it is declared in pyproject.toml or
+    handed to pytest by `conftest.py`'s `pytest_configure`; both silence the
+    warning, which is the thing this test is actually about. The conftest half
+    was originally a single hard-coded exception for `outreach_blackout`, and
+    that hard-coding immediately cost something: `robots_live`, registered the
+    same way on the same night by a different branch, failed this test on the
+    merge even though it warns about nothing. Read the conftest instead of
+    naming its markers one at a time."""
     from_ini = set(_ini_markers())
-    registered = from_ini | {"outreach_blackout"} | {
+    registered = from_ini | _conftest_markers() | {
         # pytest's and pytest-django's own.
         "parametrize", "skip", "skipif", "xfail", "usefixtures", "filterwarnings",
         "django_db", "urls", "ignore_template_errors", "no_django_db",
