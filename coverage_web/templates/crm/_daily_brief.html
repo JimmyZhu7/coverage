@@ -32,9 +32,14 @@ feature itself is dark (no key set). Never an empty card, never an error.
     instead of just being background past the last word.
     {% endcomment %}
     {% comment %}
-    `?about=today` — the brief isn't about one role or contact, so
-    assistant.views._about_prefill gives the composer a generic opener
-    instead of a blank box, same idea as the situation cards' `role:<id>`.
+    `?about=today` — assistant.views._about_prefill reads today's DailyBrief
+    row and puts the sentence above, plus the contact whose card it led
+    with, into the composer. It used to prefill a fixed "Let's talk about
+    today's move.", which asked the advisor about a card it could not see:
+    it then re-derived the day from its own tools and answered about a
+    different day's queue than the one printed here. The link carries a KIND
+    only, never text — the opener is composed server-side from the student's
+    own row, same rule the situation cards' `role:<id>` follows.
     {% endcomment %}
     <a class="daily-brief-link btn" href="{% url 'assistant:chat' %}?about=today">Talk about it <span aria-hidden="true">→</span></a>
   </div>

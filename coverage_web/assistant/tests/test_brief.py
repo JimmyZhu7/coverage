@@ -98,11 +98,20 @@ def test_a_contact_with_no_firm_anywhere_still_says_so_honestly():
 
 
 def test_a_cached_brief_is_returned_without_calling_the_model():
+    """The row names the contact the queue is still asking about. It used to
+    name nobody, which is now a real signal rather than a fixture detail: a
+    brief with no `contact_ids` was written from an EMPTY queue (the
+    quiet-day line, or a situation-only sentence), so seeing one in front of
+    a queue that has work in it means the sentence has been overtaken. See
+    `test_a_quiet_day_line_is_replaced_once_the_first_contact_lands`."""
     user = _user()
-    DailyBrief(user=user, date=timezone.localdate(), text="Chen's idle 12 days.").save()
+    DailyBrief(
+        user=user, date=timezone.localdate(),
+        text="Chen's idle 12 days.", contact_ids=[7],
+    ).save()
     client = FakeClient(_response("should never be used"))
 
-    text = brief.get_or_build(user, [_action()], client=client)
+    text = brief.get_or_build(user, [_action(contact_id=7)], client=client)
 
     assert text == "Chen's idle 12 days."
     assert client.messages.requests == []
@@ -254,11 +263,16 @@ def test_with_no_client_and_the_api_dark_it_returns_none(monkeypatch):
 
 
 def test_a_second_call_the_same_day_does_not_call_the_model_again():
+    """The action carries a contact id, the way every real one does
+    (`crm.today._build_actions`) — without it the row banks an empty
+    `contact_ids`, which now means "written from an empty queue" and is
+    correctly stale in front of a queue with work in it. See
+    `test_a_cached_brief_is_returned_without_calling_the_model`."""
     user = _user()
     client = FakeClient(_response("Ada's Goldman deadline is Friday."))
 
-    first = brief.get_or_build(user, [_action()], client=client)
-    second = brief.get_or_build(user, [_action()], client=client)
+    first = brief.get_or_build(user, [_action(contact_id=7)], client=client)
+    second = brief.get_or_build(user, [_action(contact_id=7)], client=client)
 
     assert first == second
     assert len(client.messages.requests) == 1
@@ -778,3 +792,188 @@ def test_the_brief_system_prompt_carries_the_provenance_rule():
     system = client.messages.requests[0]["system"]
     assert "read from the posting, not published" in system
     assert "not a date the firm published" in system
+
+
+# ---------------------------------------------------------------------------
+# An empty queue is a question, not an answer. Both directions of the
+# transition have to invalidate a cached sentence.
+# ---------------------------------------------------------------------------
+def _citi_brief(user, client):
+    """This morning's real brief on the founder's account, 2026-09-01: eight
+    Citi contacts named in one sentence."""
+    ids = [1036, 1038, 1040, 1046, 1048, 1054, 1056, 1064]
+    actions = [
+        _action(f"Citi Contact {i}", "Citi", "Follow up",
+                "no reply 27 business days after your first touch",
+                contact_id=cid)
+        for i, cid in enumerate(ids)
+    ]
+    brief.get_or_build(user, actions, client=client)
+    return ids
+
+
+def test_an_empty_queue_no_longer_preserves_a_brief_about_people_just_parked(monkeypatch):
+    """FAILS BEFORE THE FIX, and it is the Anant Taparia bug returning through
+    the guard written for its sibling. `_is_stale` short-circuited to False
+    whenever `actions` was empty, so parking everyone the brief named made the
+    sentence PERMANENT for the rest of the day rather than stale.
+
+    Measured on the founder's account, 2026-09-01: the 07:53 brief named
+    contacts 1036, 1038, 1040, 1046, 1048, 1054, 1056 and 1064 and told him to
+    "follow up with all of them"; that evening he parked all eight in the
+    44-contact bulk park, the queue went to zero behind them, and the card
+    stayed on the page."""
+    # `is_pending` gates on it directly, the same reason
+    # `test_is_pending_reopens_once_a_named_contact_is_parked` forces it: a
+    # real key on the test machine must not decide this.
+    monkeypatch.setattr(brief, "is_configured", lambda: True)
+    user = _user()
+    client = FakeClient(_response("Follow up with all eight Citi contacts."))
+    ids = _citi_brief(user, client)
+
+    # The queue is empty because he parked everyone in it.
+    silenced = set(ids)
+
+    assert brief.get_cached(user, [], silenced_ids=silenced) is None
+    assert brief.is_pending(user, [], silenced_ids=silenced) is True
+
+
+def test_an_empty_queue_still_does_not_invalidate_a_still_true_brief():
+    """The Katy Chen keep-alive, unchanged and now for a stated reason rather
+    than by short-circuit. Founder's account, 2026-08-29: queue at zero, the
+    morning's brief named Katy Chen (`chat_done`, i.e. the chat HAPPENED)
+    about a Nomura deadline that had not moved, and Today threw it away for
+    nothing. Nobody the sentence named has been silenced, so it stands."""
+    user = _user()
+    client = FakeClient(_response("Confirm the chat with Katy Chen."))
+    brief.get_or_build(user, [_action("Katy Chen", "Nomura", contact_id=401)],
+                       client=client)
+
+    assert brief.get_cached(user, [], silenced_ids=set()) == (
+        "Confirm the chat with Katy Chen."
+    )
+    # And a caller with no verdict to offer still gets the permissive answer.
+    assert brief.get_cached(user, []) == "Confirm the chat with Katy Chen."
+
+
+def test_only_the_contacts_the_brief_named_can_make_it_stale():
+    """Parking somebody the sentence never mentioned is not a contradiction of
+    it. The check is the intersection, not "did anything get parked today"."""
+    user = _user()
+    client = FakeClient(_response("Confirm the chat with Katy Chen."))
+    brief.get_or_build(user, [_action("Katy Chen", "Nomura", contact_id=401)],
+                       client=client)
+
+    assert brief.get_cached(user, [], silenced_ids={999, 1000}) == (
+        "Confirm the chat with Katy Chen."
+    )
+
+
+def test_a_quiet_day_line_is_replaced_once_the_first_contact_lands(monkeypatch):
+    """FAILS BEFORE THE FIX, and it is the first thing a new student meets.
+    A row that named nobody was treated as unfalsifiable ("nothing recorded to
+    have gone missing"), but a brief with no `contact_ids` was written from an
+    EMPTY queue, so a queue standing in front of it is exactly the evidence
+    that it has been overtaken.
+
+    Measured on a five-minute-old account, 2026-09-01: "Queue's clear, nothing
+    changed overnight", the student added their first contact, and that line
+    stayed cached directly above the queue card it denies."""
+    monkeypatch.setattr(brief, "is_configured", lambda: True)
+    user = _user()
+    client = FakeClient(_response("unused"))
+    quiet = brief.get_or_build(user, [], client=client)
+    assert quiet in brief._QUIET_DAY_MESSAGES
+    assert DailyBrief.objects.for_user(user).get().contact_ids == []
+
+    first_card = [_action("Ada Lovelace", "Goldman Sachs", contact_id=12)]
+
+    assert brief.get_cached(user, first_card) is None
+    assert brief.is_pending(user, first_card) is True
+
+
+def test_a_quiet_day_line_survives_a_day_that_stays_quiet():
+    """The other side of the same rule: a clear day is still a clear day, and
+    it must not spend a second model call to say so again."""
+    user = _user()
+    client = FakeClient(_response("unused"))
+    quiet = brief.get_or_build(user, [], client=client)
+
+    assert brief.get_cached(user, []) == quiet
+    assert brief.get_or_build(user, [], client=client) == quiet
+    assert client.messages.requests == []
+
+
+def test_get_or_build_rewrites_rather_than_returns_a_brief_the_queue_disowned():
+    """`crm.views.daily_brief` is what actually replaces the sentence, and it
+    reaches `get_or_build` with the same empty queue the page had. Without the
+    verdict travelling with it, the generator would hand back the very row the
+    page just refused to render."""
+    user = _user()
+    client = FakeClient(_response("Follow up with all eight Citi contacts."))
+    ids = _citi_brief(user, client)
+    client.messages.requests.clear()
+    client.messages.response_or_exception = _response("Nothing needs you today.")
+
+    text = brief.get_or_build(user, [], silenced_ids=set(ids), client=client)
+
+    assert text in brief._QUIET_DAY_MESSAGES, text
+    assert DailyBrief.objects.for_user(user).count() == 1
+
+
+# ---------------------------------------------------------------------------
+# The brief reads the PLAN, and says which side of the cap each line is on.
+# ---------------------------------------------------------------------------
+def test_each_prompt_line_carries_the_lane_the_page_put_it_in():
+    """P4 applied to the sentence. `crm.today._cockpit_context` hands over the
+    plan plus the queued remainder, and without the marker a brief could name
+    eight people on a day the plan budgets three. The words are the page's
+    own."""
+    user = _user()
+    client = FakeClient(_response("Write to Ada."))
+    today_card = _action("Ada Lovelace", "Goldman Sachs", contact_id=1)
+    today_card["plan_lane"] = "today"
+    later_card = _action("Grace Hopper", "Citi", contact_id=2)
+    later_card["plan_lane"] = "up_next"
+
+    brief.get_or_build(user, [today_card, later_card], client=client)
+    prompt = _prompt_of(client)
+
+    assert "Ada Lovelace (Goldman Sachs)" in prompt
+    assert "[today]" in prompt and "[up next]" in prompt
+    # And the prompt explains what the markers mean, or they are noise.
+    assert "not owed today" in prompt
+
+
+def test_an_unlabelled_action_list_prints_exactly_what_it_always_did():
+    """Degrade to the old behaviour on thin data (P3): a caller with no plan
+    to describe omits the key and gets an unmarked line, with no dangling
+    explanation of markers that are not there."""
+    user = _user()
+    client = FakeClient(_response("Write to Ada."))
+
+    brief.get_or_build(user, [_action("Ada Lovelace", "Goldman Sachs",
+                                      contact_id=1)], client=client)
+    prompt = _prompt_of(client)
+
+    assert "[today]" not in prompt and "[up next]" not in prompt
+    assert "Today's queue:" in prompt
+
+
+def test_the_staleness_fingerprint_records_the_plans_order():
+    """`contact_ids` is stored in plan order, not sorted by id: it is now also
+    the record of WHICH CARD the sentence led with, which is what
+    `assistant.views._about_prefill` hands the advisor when the student clicks
+    "Talk about it". Sorting would hand it whichever contact happened to be
+    created first."""
+    user = _user()
+    client = FakeClient(_response("Write to Ada."))
+
+    brief.get_or_build(
+        user,
+        [_action("Top Card", "Goldman Sachs", contact_id=90),
+         _action("Second", "Citi", contact_id=11)],
+        client=client,
+    )
+
+    assert DailyBrief.objects.for_user(user).get().contact_ids == [90, 11]

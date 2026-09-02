@@ -1620,7 +1620,17 @@ def test_the_daily_brief_renders_on_the_full_page(client, monkeypatch, settings)
 
 def test_a_cached_brief_renders_inline_and_the_page_stops_asking(client, settings):
     """Once the row exists the page must render it directly — no second
-    request, and no model call — for the rest of the day."""
+    request, and no model call — for the rest of the day.
+
+    The row names the contact the queue is asking about. It used to name
+    nobody, which is now a real signal rather than a fixture detail: a brief
+    with no `contact_ids` was written from an EMPTY queue (the quiet-day
+    line, or a situation-only sentence), so finding one in front of a queue
+    that has work in it means the sentence has been overtaken and the page
+    is right to go and ask for a better one. See
+    `assistant.brief._is_stale` and
+    `assistant/tests/test_brief.py::test_a_quiet_day_line_is_replaced_once
+    _the_first_contact_lands`."""
     from assistant.models import DailyBrief
 
     settings.ANTHROPIC_API_KEY = "sk-test-key"
@@ -1628,7 +1638,8 @@ def test_a_cached_brief_renders_inline_and_the_page_stops_asking(client, setting
     c = _contact(user=user, name="Ada Lovelace")
     _touch(user, c, "outreach", days_ago=20)
     DailyBrief.all_objects.create(
-        user=user, date=timezone.localdate(), text="Already written today."
+        user=user, date=timezone.localdate(), text="Already written today.",
+        contact_ids=[c.id],
     )
 
     client.force_login(user)
@@ -2891,3 +2902,273 @@ def test_a_named_affiliation_lifts_a_live_card():
     assert tied["ev"] > plain["ev"], (tied["ev"], plain["ev"])
     ratio = tied["ev"] / plain["ev"] if plain["ev"] else 0
     assert abs(ratio - 1.6) < 0.05, f"expected the measured 1.6x named-tie lift, got {ratio:.2f}"
+
+
+# ---------------------------------------------------------------------------
+# What the daily brief reads. The sentence at the top of Today and the cards
+# under it were two different rankings of the same day.
+# ---------------------------------------------------------------------------
+def test_the_brief_reads_the_plans_order_not_the_engines():
+    """Measured on the demo account, 2026-09-01: the engine's list ran Jane
+    Reyes then five Morgan Stanley first-outreach strangers then Grace Huang
+    and Nick Tehle, while the plan on the same screen ran Jane Reyes, Nick
+    Tehle (ev 13.7), two Apollo advances, Grace Huang. `_actions_for_brief`
+    was the engine list, so the brief could lead with a stranger the plan was
+    deliberately holding back.
+
+    Pinned on the ORDER rather than on any one name: the plan's own head must
+    be the brief's head."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="tier-one", name="Tier One")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    # Someone who replied and is owed an answer: the plan's own top rung.
+    warm = _contact(user=user, name="Warm Human", firm=firm, warmth="replied",
+                    thread_state="replied")
+    _touch(user, warm, "reply_received", days_ago=6)
+    # Strangers the engine happens to emit ahead of them.
+    for i in range(3):
+        cold = _contact(user=user, name=f"Cold Stranger {i}", firm=firm, warmth="cold")
+        _touch(user, cold, "outreach", days_ago=10)
+
+    ctx = _cockpit_context(user)
+    brief_actions = ctx["_actions_for_brief"]
+    planned = [a for lane in ctx["lanes"] for a in lane["items"]]
+
+    assert brief_actions[:len(planned)] == planned
+    assert brief_actions[0]["contact"]["name"] == "Warm Human"
+
+
+def test_the_brief_is_told_which_cards_are_actually_todays():
+    """P4 applied to the sentence: the list handed over is the plan PLUS the
+    queued remainder, so a brief that names eight people on a day the plan
+    budgets three has to say which three. `plan_lane` is what
+    `assistant.brief._summarize_actions` prints."""
+    user = _user(weekly_touch_goal=14)
+    # ONE FIRM EACH, deliberately: eight strangers at one bank would be held
+    # by the per-firm pace cap, and `firm_paced` rows are dropped from this
+    # list rather than marked (see
+    # `test_a_firm_paced_card_never_reaches_the_brief`). What this test is
+    # about is the cards the DAILY CAP holds, which still reach the brief.
+    for i in range(8):
+        firm = Firm.objects.create(slug=f"bank-{i}", name=f"Bank {i}")
+        UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+        c = _contact(user=user, name=f"Cold Stranger {i}", firm=firm, warmth="cold")
+        _touch(user, c, "outreach", days_ago=10)
+
+    ctx = _cockpit_context(user)
+    lanes = {a["plan_lane"] for a in ctx["_actions_for_brief"]}
+    planned_ids = {a["contact"]["id"] for lane in ctx["lanes"] for a in lane["items"]}
+
+    assert lanes == {"today", "up_next"}, "both sides of the cap must be marked"
+    for a in ctx["_actions_for_brief"]:
+        expected = "today" if a["contact"]["id"] in planned_ids else "up_next"
+        assert a["plan_lane"] == expected
+
+
+def test_a_firm_paced_card_never_reaches_the_brief():
+    """`firm_paced` means the page itself says this reads better tomorrow.
+    It still renders under "Up next" with its own sentence (P4 is about the
+    page, and the page keeps it); what it must not do is be summarised as
+    work the student is being asked for today."""
+    user = _user(weekly_touch_goal=14)
+    firm = Firm.objects.create(slug="one-bank", name="One Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    # Well past FIRM_DAILY_CONTACT_CAP at one firm, so the fourth pass fires.
+    for i in range(10):
+        c = _contact(user=user, name=f"Banker {i:02d}", firm=firm, warmth="cold")
+        _touch(user, c, "outreach", days_ago=10)
+
+    ctx = _cockpit_context(user)
+    paced = [a for a in ctx["held"] if a.get("firm_paced")]
+
+    assert paced, "fixture must actually trip the per-firm pace cap"
+    brief_ids = {a["contact"]["id"] for a in ctx["_actions_for_brief"]}
+    assert not (brief_ids & {a["contact"]["id"] for a in paced})
+
+
+def test_queue_silenced_contact_ids_names_everyone_the_queue_will_not_speak_about():
+    """The second question `assistant.brief._is_stale` asks on a day the
+    queue is empty and therefore cannot answer for itself. Parked, quiet,
+    archived and snoozed: the same states `_build_actions` and
+    `_opening_keep_warms` already drop on."""
+    from crm.today import queue_silenced_contact_ids
+
+    user = _user()
+    live = _contact(user=user, name="Live One")
+    parked = _contact(user=user, name="Parked One", thread_state="parked")
+    quiet = _contact(user=user, name="Quiet One", thread_state="quiet")
+    archived = _contact(user=user, name="Archived One", archived=True)
+    snoozed = _contact(user=user, name="Snoozed One",
+                       snoozed_until=timezone.now() + timedelta(days=2))
+    # A snooze that has already run out is not a silence.
+    expired = _contact(user=user, name="Expired Snooze",
+                       snoozed_until=timezone.now() - timedelta(days=2))
+
+    silenced = queue_silenced_contact_ids(user)
+
+    assert silenced == {parked.id, quiet.id, archived.id, snoozed.id}
+    assert live.id not in silenced and expired.id not in silenced
+
+
+# ---------------------------------------------------------------------------
+# The cold lane says what its cards ARE.
+# ---------------------------------------------------------------------------
+def test_a_first_outreach_card_is_not_filed_under_follow_ups():
+    """Measured on a five-minute-old account, 2026-09-01: the first contact a
+    student ever adds produces one `first_outreach` card, and the lane
+    heading over it read "Cold follow-ups", telling somebody who has sent
+    nothing to follow up."""
+    user = _user(weekly_touch_goal=14)
+    _contact(user=user, name="Never Contacted")
+
+    lanes = {lane["key"]: lane for lane in _cockpit_context(user)["lanes"]}
+
+    assert [a["action"] for a in lanes["cold"]["items"]] == ["first_outreach"]
+    assert lanes["cold"]["label"] == "First outreach"
+
+
+def test_the_cold_lane_still_says_follow_ups_when_that_is_what_it_holds():
+    """The other side of the same rule, so the fix cannot become "never say
+    follow-up"."""
+    user = _user(weekly_touch_goal=14)
+    c = _contact(user=user, name="Sent Nothing Back")
+    _touch(user, c, "outreach", days_ago=10)
+
+    lanes = {lane["key"]: lane for lane in _cockpit_context(user)["lanes"]}
+
+    assert [a["action"] for a in lanes["cold"]["items"]] == ["follow_up"]
+    assert lanes["cold"]["label"] == "Cold follow-ups"
+
+
+def test_a_mixed_cold_lane_claims_neither():
+    """Both kinds on screen at once: the heading must not assert either."""
+    from crm.today import _lane_label
+    items = [{"action": "first_outreach"}, {"action": "follow_up"}]
+    assert _lane_label("cold", items, "Cold follow-ups") == "Cold outreach"
+    # The other two lanes hold one kind of work each and keep their labels.
+    assert _lane_label("critical", items, "Don't lose these") == "Don't lose these"
+
+
+# ---------------------------------------------------------------------------
+# Reschedule records a TIME, or it records nothing.
+# ---------------------------------------------------------------------------
+def _awaiting_chat(user, name="Youqi Chen"):
+    c = _contact(user=user, name=name, warmth="replied",
+                 thread_state="chat_scheduled")
+    _touch(user, c, "chat_scheduled", days_ago=8)
+    return c
+
+
+def test_reschedule_without_a_time_writes_nothing(client):
+    """The button used to post `kind=chat_scheduled` with no date at all. It
+    logged a touch stamped at click time, which ratchets warmth to `replied`
+    on the strength of the student pressing a button, and reset cadence
+    branch 2's clock off the new touch: a five-working-day snooze labelled
+    "Record that it moved to a new time". A reschedule with no new time is
+    not a reschedule."""
+    user = _user(weekly_touch_goal=14)
+    c = _awaiting_chat(user)
+    before = Touch.all_objects.filter(user=user, contact=c).count()
+
+    client.force_login(user)
+    resp = client.post(
+        reverse("crm:today_act", args=[c.id, "sent"]), {"kind": "chat_scheduled"}
+    )
+
+    assert resp.status_code == 400
+    assert Touch.all_objects.filter(user=user, contact=c).count() == before
+    assert not CalendarEvent.all_objects.filter(user=user, contact=c).exists()
+
+
+def test_reschedule_with_a_time_moves_the_chat_that_was_on_the_books(client):
+    """The other half of the old defect: a captured invite's `starts_at` was
+    left untouched, so the confirm-chat card came back later still asking
+    about the superseded time. The row MOVES, and the touch is stamped now
+    (a touch records something that happened; the chat is in the future)."""
+    user = _user(weekly_touch_goal=14)
+    c = _awaiting_chat(user)
+    old_start = timezone.now() + timedelta(days=1)
+    event = CalendarEvent.all_objects.create(
+        user=user, contact=c, kind=CalendarEvent.KIND_CHAT,
+        source=CalendarEvent.SOURCE_CAPTURE, title="Coffee chat",
+        starts_at=old_start, ends_at=old_start + timedelta(hours=1),
+        thread_id="t-1",
+    )
+    new_local = (timezone.localtime(timezone.now()) + timedelta(days=4)).replace(
+        hour=14, minute=30, second=0, microsecond=0
+    )
+
+    client.force_login(user)
+    resp = client.post(
+        reverse("crm:today_act", args=[c.id, "sent"]),
+        {"kind": "chat_scheduled",
+         "scheduled_at": new_local.strftime("%Y-%m-%dT%H:%M")},
+    )
+
+    assert resp.status_code == 200
+    event.refresh_from_db()
+    assert timezone.localtime(event.starts_at).replace(
+        second=0, microsecond=0
+    ) == new_local
+    assert event.ends_at is None, "the old end belonged to the old start"
+    # One row, moved, not a second one beside it.
+    assert CalendarEvent.all_objects.filter(user=user, contact=c).count() == 1
+    logged = Touch.all_objects.filter(
+        user=user, contact=c, kind="chat_scheduled"
+    ).order_by("-ts").first()
+    assert logged.ts <= timezone.now(), "a touch is never dated into the future"
+
+
+def test_reschedule_with_no_event_on_file_creates_one_at_the_stated_time(client):
+    """Most `chat_scheduled` contacts have no CalendarEvent at all: the
+    capture pipeline writes one only for a finding carrying a real .ics
+    DTSTART. The student typing a time is the first time the product knows
+    one, so it gets recorded rather than dropped."""
+    user = _user(weekly_touch_goal=14)
+    c = _awaiting_chat(user)
+    new_local = (timezone.localtime(timezone.now()) + timedelta(days=3)).replace(
+        hour=9, minute=0, second=0, microsecond=0
+    )
+
+    client.force_login(user)
+    client.post(
+        reverse("crm:today_act", args=[c.id, "sent"]),
+        {"kind": "chat_scheduled",
+         "scheduled_at": new_local.strftime("%Y-%m-%dT%H:%M")},
+    )
+
+    row = CalendarEvent.all_objects.get(user=user, contact=c)
+    assert row.kind == CalendarEvent.KIND_CHAT
+    assert timezone.localtime(row.starts_at).replace(
+        second=0, microsecond=0
+    ) == new_local
+
+
+def test_reschedule_refuses_a_time_it_cannot_parse(client):
+    """Silence beats a guess (P1): an unparseable value must not fall back to
+    "now", which is the dateless write this whole change removed."""
+    user = _user(weekly_touch_goal=14)
+    c = _awaiting_chat(user)
+
+    client.force_login(user)
+    resp = client.post(
+        reverse("crm:today_act", args=[c.id, "sent"]),
+        {"kind": "chat_scheduled", "scheduled_at": "next tuesday"},
+    )
+
+    assert resp.status_code == 400
+    assert not CalendarEvent.all_objects.filter(user=user, contact=c).exists()
+
+
+def test_the_reschedule_control_asks_for_the_time_on_the_card(client):
+    """The template half: the card must not offer a one-click reschedule
+    again. It carries a datetime input inside a form that posts the kind."""
+    user = _user(weekly_touch_goal=14)
+    c = _awaiting_chat(user)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:week")).content.decode()
+
+    assert "Reschedule" in body
+    assert 'type="datetime-local"' in body
+    assert 'name="scheduled_at"' in body

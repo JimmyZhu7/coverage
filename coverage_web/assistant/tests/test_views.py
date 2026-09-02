@@ -128,7 +128,15 @@ def test_about_contact_prefills_the_composer_with_the_contacts_own_name(signed_i
     assert "Priya Raman" in body
 
 
-def test_about_today_prefills_a_generic_opener_with_no_lookup(signed_in):
+def test_about_today_falls_back_to_a_generic_opener_when_no_brief_exists(signed_in):
+    """RENAMED AND REPOINTED (2026-09-01). This used to pin "no lookup at
+    all", which was the defect: the link prefilled a fixed sentence and the
+    advisor was asked about a card it could not see. `about=today` now reads
+    today's DailyBrief row — see
+    `test_talk_about_today_quotes_the_brief_and_names_the_card_it_led_with`.
+    What survives is the case where there is no row yet (the feature is dark,
+    or the day's brief has not generated): the composer still opens on
+    something rather than a blank box."""
     body = signed_in.get(reverse("assistant:chat") + "?about=today").content.decode()
 
     assert "today&#x27;s move" in body or "today's move" in body
@@ -225,6 +233,12 @@ def test_the_nav_offers_the_page_on_every_signed_in_screen(signed_in):
 
 
 def test_opening_a_specific_conversation_by_id_shows_its_own_thread(signed_in, user):
+    """Both conversations carry a message. They used to be bare rows, which
+    passed only because the history panel listed every conversation ever
+    minted — including the empty one `_current_conversation` creates on the
+    first GET of /talk/, which is the "New chat · Sep 1" a brand-new account
+    saw as its own past. `_conversations` now lists a chat once it has been
+    used, so a fixture that wants to appear in history has to be one."""
     older = ChatConversation(user=user, title="Older chat")
     older.save()
     newer = ChatConversation(user=user, title="Newer chat")
@@ -232,6 +246,10 @@ def test_opening_a_specific_conversation_by_id_shows_its_own_thread(signed_in, u
     ChatMessage(
         user=user, conversation=older, role="user",
         content=[{"type": "text", "text": "only in the older chat"}],
+    ).save()
+    ChatMessage(
+        user=user, conversation=newer, role="user",
+        content=[{"type": "text", "text": "only in the newer chat"}],
     ).save()
 
     body = signed_in.get(reverse("assistant:chat_conversation", args=[older.id])).content.decode()
@@ -272,8 +290,15 @@ def test_sending_replies_to_the_conversation_named_in_the_composer_not_the_newes
 
 
 def test_renaming_a_conversation_updates_its_title(signed_in, user):
+    """The new title has to come back in the re-rendered history panel, and
+    that panel now lists chats that have been used — see
+    `test_opening_a_specific_conversation_by_id_shows_its_own_thread`."""
     conversation = ChatConversation(user=user, title="Old title")
     conversation.save()
+    ChatMessage(
+        user=user, conversation=conversation, role="user",
+        content=[{"type": "text", "text": "a question"}],
+    ).save()
 
     response = signed_in.post(
         reverse("assistant:rename"), {"conversation": conversation.id, "title": "Follow-up plan"}
@@ -529,10 +554,18 @@ def test_stream_rejects_a_get(signed_in):
 
 
 def test_history_fragment_lists_conversations_and_marks_the_current_one(signed_in, user):
+    """Both rows carry a message: the panel lists chats that have been used
+    — see `test_opening_a_specific_conversation_by_id_shows_its_own_thread`
+    and `test_the_history_panel_does_not_list_a_chat_with_no_messages`."""
     older = ChatConversation(user=user, title="Older")
     older.save()
     newer = ChatConversation(user=user, title="Newer")
     newer.save()
+    for c in (older, newer):
+        ChatMessage(
+            user=user, conversation=c, role="user",
+            content=[{"type": "text", "text": "a question"}],
+        ).save()
 
     body = signed_in.get(
         reverse("assistant:history"), {"conversation": older.id}
@@ -687,10 +720,19 @@ def test_deleting_another_students_folder_404s(client, user):
 
 
 def test_the_history_fragment_groups_conversations_by_folder(signed_in, user):
+    """Both chats carry a message: the panel lists chats that have been used
+    — see `test_the_history_panel_does_not_list_a_chat_with_no_messages`."""
     folder = ChatFolder(user=user, name="BofA prep")
     folder.save()
-    ChatConversation(user=user, folder=folder, title="In the folder").save()
-    ChatConversation(user=user, title="Not in any folder").save()
+    filed = ChatConversation(user=user, folder=folder, title="In the folder")
+    filed.save()
+    unfiled = ChatConversation(user=user, title="Not in any folder")
+    unfiled.save()
+    for c in (filed, unfiled):
+        ChatMessage(
+            user=user, conversation=c, role="user",
+            content=[{"type": "text", "text": "a question"}],
+        ).save()
 
     body = signed_in.get(reverse("assistant:history")).content.decode()
 
@@ -1433,3 +1475,95 @@ def test_an_anonymous_visitor_cannot_leave_feedback(client):
 
     assert response.status_code == 302
     assert "/accounts/login/" in response["Location"]
+
+
+# ---------------------------------------------------------------------------
+# "Talk about it" carries the card it was clicked from.
+# ---------------------------------------------------------------------------
+def test_talk_about_today_quotes_the_brief_and_names_the_card_it_led_with(signed_in, user):
+    """The link used to prefill a fixed "Let's talk about today's move." — a
+    question about a card the advisor could not see. It then re-derived the
+    day from its own tools, which on 2026-09-01 returned a different picture
+    from the sentence on screen: the cached card named eight parked Citi
+    contacts and the queue named nobody.
+
+    `DailyBrief.contact_ids` is stored in the plan's own order
+    (`assistant.brief._ordered_contact_ids`), so `[0]` is the card at the
+    head of the day."""
+    from assistant.models import DailyBrief
+    from crm.models import Contact
+
+    top = Contact(user=user, name="Nick Tehle", firm_text="J.P. Morgan")
+    top.save()
+    second = Contact(user=user, name="Grace Huang", firm_text="J.P. Morgan")
+    second.save()
+    DailyBrief(
+        user=user, date=timezone.localdate(),
+        text="Re-ping **Nick Tehle** at J.P. Morgan, the app closes today.",
+        contact_ids=[top.id, second.id],
+    ).save()
+
+    body = signed_in.get(reverse("assistant:chat"), {"about": "today"}).content.decode()
+
+    assert "Re-ping Nick Tehle at J.P. Morgan, the app closes today." in body
+    assert f"contact {top.id}" in body
+    assert "Is that still the right call?" in body
+    # The markdown bold is for the card, not for a question.
+    assert "**Nick Tehle**" not in body
+
+
+def test_talk_about_today_never_names_another_students_contact(signed_in, user):
+    """`contact_ids` is a stored list of integers, and the row it points at is
+    resolved through `Contact.objects.for_user` like every other contact
+    lookup in this app. A stale or foreign id simply drops the clause."""
+    from assistant.models import DailyBrief
+
+    other = User.objects.create_user(email="about-other@example.com", password="pw12345!")
+    from crm.models import Contact
+    theirs = Contact(user=other, name="Somebody Else")
+    theirs.save()
+    DailyBrief(
+        user=user, date=timezone.localdate(),
+        text="Two things today.", contact_ids=[theirs.id],
+    ).save()
+
+    body = signed_in.get(reverse("assistant:chat"), {"about": "today"}).content.decode()
+
+    assert "Somebody Else" not in body
+    assert "Two things today." in body
+
+
+# ---------------------------------------------------------------------------
+# History lists chats that have actually been had.
+# ---------------------------------------------------------------------------
+def test_the_history_panel_does_not_list_a_chat_with_no_messages(signed_in, user):
+    """`_current_conversation` mints a ChatConversation on the first GET of
+    /talk/ so the composer has something to post to, and every one of those
+    rows was listed as history. Measured on a brand-new account, 2026-09-01: a
+    student who had sent zero messages opened Talk and was shown a past
+    conversation, "New chat", which was the empty one they were standing in.
+    """
+    body = signed_in.get(reverse("assistant:chat")).content.decode()
+
+    assert "No chats yet." in body
+    # The row was minted (the composer needs it), it is simply not history.
+    assert ChatConversation.objects.for_user(user).count() == 1
+
+
+def test_a_chat_joins_the_history_panel_as_soon_as_it_has_a_message(signed_in, user):
+    """The other side of the rule: filtering must not make a real chat
+    invisible."""
+    conversation = ChatConversation(user=user, title="Nomura prep")
+    conversation.save()
+    signed_in.get(reverse("assistant:chat"))  # the empty one, still unlisted
+
+    body = signed_in.get(reverse("assistant:history")).content.decode()
+    assert "Nomura prep" not in body
+
+    ChatMessage(
+        user=user, conversation=conversation, role="user",
+        content=[{"type": "text", "text": "who should I email"}],
+    ).save()
+
+    body = signed_in.get(reverse("assistant:history")).content.decode()
+    assert "Nomura prep" in body

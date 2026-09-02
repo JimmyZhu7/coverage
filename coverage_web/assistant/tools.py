@@ -89,10 +89,13 @@ from accounts.forms import (
 from accounts.models import WORK_AUTH
 from analytics.events import record_event
 from analytics.models import UserOpportunity
+from coverage_domain import cadence
 from coverage_domain.pipeline import CHANNELS, THREAD_STATES, TOUCH_TRANSITIONS, WARMTH
 from crm import campaigns as crm_campaigns, services
 from crm.models import CalendarEvent, Contact, Touch, UserFirm
-from crm.today import TUNABLE_CADENCE_PARAMS, _build_actions
+from crm.today import (
+    QUEUE_SILENT_THREAD_STATES, TUNABLE_CADENCE_PARAMS, _build_actions,
+)
 from crm.utils import ACTION_LABELS, CHANNEL_LABELS, TOUCH_KIND_LABELS, _calendar_days_ago
 from crm.views import _display_note
 from directory.classify import TARGET_BUCKETS, TRACKED_REGIONS
@@ -337,7 +340,12 @@ TOOL_SCHEMAS: list[dict] = [
             "ask the student which one before any write. A row flagged "
             "not_my_recruiting arrived on a bulk send the student told us was "
             "something else they do, like a club event: answer questions about "
-            "them normally, but never propose reaching out to them."
+            "them normally, but never propose reaching out to them. "
+            "`last_touch_calendar_days` counts from the last REAL interaction "
+            "and ignores the rows that are not one (a park or other state "
+            "correction, an inbound bulk send), so it matches the Today "
+            "page's own 'Last:' line. Null means no real touch on record, "
+            "not a recent one."
         ),
         "strict": True,
         "input_schema": _schema(
@@ -398,7 +406,23 @@ TOOL_SCHEMAS: list[dict] = [
                 "firm": {"type": "string", "description": "Firm name or slug."},
                 "closing_within_days": {
                     "type": "integer",
-                    "description": "Only roles with a stated deadline this many days out or sooner.",
+                    # SAYS WHAT IT RETURNS. This read "Only roles with a
+                    # stated deadline", and the filter has always been any
+                    # deadline at all: measured 2026-09-01, a 14-day window
+                    # returned 22 reported and 3 stated. Reworded rather than
+                    # narrowed, deliberately. Filtering to `stated` would cut
+                    # the window to a handful of rows and hide the only
+                    # closing signal that exists for most postings (P9: the
+                    # board cannot see what the ATS does not publish), and
+                    # the honest alternative to hiding a read date is
+                    # labelling it, which every row already does.
+                    "description": (
+                        "Only roles with a deadline this many days out or "
+                        "sooner. STATED AND REPORTED BOTH — most will be "
+                        "`reported`, i.e. Coverage's own reading of the "
+                        "posting's text. Check each row's `deadline_source` "
+                        "before repeating a date as the firm's."
+                    ),
                 },
                 "limit": {"type": "integer", "description": f"Max rows, 1-{MAX_ROWS}."},
             }
@@ -410,7 +434,11 @@ TOOL_SCHEMAS: list[dict] = [
             "One firm: the student's tier for it, its upcoming published dates, "
             "how many open roles it has on the board, and every contact the "
             "student has there ranked by warmth. The tool for 'what's my "
-            "position at X'."
+            "position at X'. `my_contacts_active` IS THE COVERAGE NUMBER: "
+            "`my_contacts_total` counts everyone on file including the "
+            "`my_contacts_parked` the student has taken out of their queue. "
+            f"`my_contacts` is capped at {MAX_ROWS} rows and includes parked "
+            "people; read each row's `thread_state` before treating one as live."
         ),
         "strict": True,
         "input_schema": _schema(
@@ -431,10 +459,17 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "get_my_firms",
         "description": (
             "Every firm the student has tiered as a target, grouped by "
-            "tier, with contact count, warmest relationship, and open role "
+            "tier, with contact counts, warmest relationship, and open role "
             "count at each. The portfolio view — get_firm answers 'what's "
             "my position at X' for one firm; this answers 'across my "
-            "targets, where am I thinnest' for all of them at once."
+            "targets, where am I thinnest' for all of them at once. "
+            "`active_count` IS THE COVERAGE NUMBER: `contact_count` is "
+            "everyone on file including the `parked_count` the student has "
+            "taken out of their queue, and a parked contact is a thread they "
+            "have stopped working, not a relationship. Use `active_count` "
+            "and `warmest_active_contact` to judge how covered a firm is; "
+            "quote `contact_count` only when the question is about the "
+            "address book rather than about coverage."
         ),
         "strict": True,
         "input_schema": _schema({}),
@@ -816,8 +851,24 @@ def _search_contacts(user, args) -> dict:
     total = qs.count()
     contacts = list(qs[:limit])
 
+    # THE LATEST REAL TOUCH, which is a different row from the latest touch.
+    # `cadence._CLOCK_SILENT_KINDS` — `manual_override` and `bulk_received` —
+    # is the engine's own answer to "what does not count as contact", and
+    # `crm.today._build_actions` skips exactly this set when it works out the
+    # "Last: ..." line on every Today card. This loop took the max over ALL
+    # kinds, so a park (which writes a `manual_override` audit row) or an
+    # inbound newsletter read back to the advisor as activity. Measured on
+    # the founder's account, 2026-09-01: 165 of 265 live contacts had a
+    # clock-silent kind as their most recent row, 44 of them parked that
+    # evening and therefore reading "last touch 0 days" while the queue
+    # correctly called them idle. Imported, not restated: one definition of
+    # "not a real touch" for the whole product (P5).
     last_touch = {}
-    for t in Touch.objects.for_user(user).filter(contact_id__in=[c.id for c in contacts]):
+    for t in (
+        Touch.objects.for_user(user)
+        .filter(contact_id__in=[c.id for c in contacts])
+        .exclude(kind__in=cadence._CLOCK_SILENT_KINDS)
+    ):
         prev = last_touch.get(t.contact_id)
         if prev is None or t.ts > prev:
             last_touch[t.contact_id] = t.ts
@@ -843,7 +894,11 @@ def _search_contacts(user, args) -> dict:
             # for the sibling field this used to be indistinguishable from
             # by name alone. `_days_since` now routes through
             # `crm.utils._calendar_days_ago`, so this and the Today page can
-            # never print a different "how long ago" for the same touch.
+            # never print a different "how long ago" for the same touch. And
+            # the touch it measures from is the latest REAL one — see the
+            # query above. None means no real touch is on record at all,
+            # which is a different fact from "a long time ago" and is left
+            # as null rather than a big number (P1).
             "last_touch_calendar_days": _days_since(last_touch.get(c.id), now=now),
             "not_my_recruiting": c.id in hidden,
         }
@@ -1062,14 +1117,21 @@ def _get_firm(user, args) -> dict:
     # advisor recommending a coffee chat with a club panelist is the exact
     # failure `crm/campaigns.py` was written for, one tool call further along.
     # `search_contacts` deliberately still returns them — see there.
-    contacts = list(
+    at_firm = (
         Contact.objects.for_user(user)
         .filter(archived=False, firm_id=firm.id)
         .exclude(id__in=crm_campaigns.excluded_contact_ids(user))
-        .order_by("name")[:MAX_ROWS]
     )
+    contacts = list(at_firm.order_by("name")[:MAX_ROWS])
     warmth_rank = {"advocate": 0, "chatted": 1, "replied": 2, "cold": 3}
     contacts.sort(key=lambda c: (warmth_rank.get(c.warmth, 9), c.name))
+    # COUNTED OFF THE DATABASE, not off the list above, which is capped at
+    # MAX_ROWS — the founder has 26 contacts at Morgan Stanley and the slice
+    # shows 25, so a count derived from it would be quietly wrong on exactly
+    # the firms where the number matters most. See `_get_my_firms` for what
+    # these two numbers are for.
+    total_here = at_firm.count()
+    parked_here = at_firm.filter(thread_state__in=QUEUE_SILENT_THREAD_STATES).count()
 
     return {
         "firm": _s(firm.name, 120),
@@ -1082,6 +1144,12 @@ def _get_firm(user, args) -> dict:
             firm_id=firm.id, status="open", bucket__in=TARGET_BUCKETS
         ).count(),
         "upcoming_dates": dates,
+        # The same three-number split `get_my_firms` carries, for the same
+        # reason: `my_contacts` includes people the student has parked, and
+        # `my_contacts_active` is the one that means coverage here.
+        "my_contacts_total": total_here,
+        "my_contacts_parked": parked_here,
+        "my_contacts_active": total_here - parked_here,
         "my_contacts": [
             {
                 "contact_id": c.id,
@@ -1135,13 +1203,36 @@ def _get_my_firms(user, _args) -> dict:
     firms = []
     for r in rows[: MAX_ROWS * 2]:
         contacts = sorted(contacts_by_firm.get(r.firm_id, []), key=lambda c: warmth_rank.get(c.warmth, 9))
+        # PARKED IS NOT COVERAGE, and `contact_count` counts it. Measured on
+        # the founder's account, 2026-09-01: 219 contacts at his tiered firms,
+        # 89 of them not parked. Nomura read 13 and had 1 live thread; Morgan
+        # Stanley 26/8, Goldman 26/10, Citi 25/9, J.P. Morgan 23/7; five firms
+        # (Macquarie, Standard Chartered, Amazon, BCG, Blackstone) were 100%
+        # parked and read as covered. This tool exists to answer "across my
+        # targets, where am I thinnest", and it was answering with dead rows.
+        #
+        # ADDED BESIDE, not folded in. `contact_count` keeps meaning exactly
+        # what it always meant — everyone on file at this firm — because
+        # silently changing a number the model has been reading all along is
+        # its own kind of lie. `active_count` is the coverage figure, and
+        # both are computed here rather than left as a subtraction for the
+        # model to do (same rule `assistant.brief._dated` holds: this product
+        # does not ask a language model to do arithmetic it can do itself).
+        parked = [c for c in contacts if c.thread_state in QUEUE_SILENT_THREAD_STATES]
+        active = [c for c in contacts if c.thread_state not in QUEUE_SILENT_THREAD_STATES]
         firms.append(
             {
                 "firm": _s(r.firm.name, 120),
                 "slug": r.firm.slug,
                 "tier": r.tier,
                 "contact_count": len(contacts),
+                "parked_count": len(parked),
+                "active_count": len(active),
                 "warmest_contact": contacts[0].warmth if contacts else None,
+                # The warmest relationship that is still RUNNING. A firm whose
+                # only `chatted` contact is parked is not a firm with a warm
+                # relationship at it, and `warmest_contact` alone said it was.
+                "warmest_active_contact": active[0].warmth if active else None,
                 "open_roles": open_counts.get(r.firm_id, 0),
             }
         )

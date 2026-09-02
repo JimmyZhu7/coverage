@@ -100,11 +100,35 @@ as the row's left edge, every control and hx contract byte-identical.
         <a class="btn btn-primary act-btn"
            aria-label="Log the chat with {{ a.contact.name }}"
            href="{% url 'crm:contact_detail' a.contact.id %}?log=chat#contact-live">Log the chat</a>
-        <button type="button" class="btn act-btn"
-                aria-label="Reschedule the chat with {{ a.contact.name }}"
-                title="Record that it moved to a new time"
-                hx-post="{% url 'crm:today_act' a.contact.id 'sent' %}"
-                hx-vals='{"kind": "chat_scheduled"}'>Reschedule</button>
+        {% comment %}
+        Reschedule ASKS FOR THE NEW TIME. It used to be a bare button that
+        posted `kind=chat_scheduled` with no date: it logged a touch stamped
+        at click time, which ratchets warmth to `replied` on the strength of
+        the student pressing a button, and reset cadence branch 2's clock —
+        a five-working-day snooze labelled "Record that it moved to a new
+        time". The chat's real date, if a Gmail invite had put one on the
+        calendar, never moved, so the same card came back later still asking
+        about the superseded time.
+
+        A <details> so the row stays one line until it is actually needed,
+        and a real <form> so htmx picks up the CSRF token from the hidden
+        input the way the contact page's own log form does (a bare hx-post
+        with fields beside it has no form for htmx to serialise). Same
+        hx-target contract as every other control here: the whole cockpit
+        re-renders, because a chat that moved changes the schedule rail and
+        the confirm-chat card at once.
+        {% endcomment %}
+        <details class="act-when">
+          <summary class="btn act-btn" aria-label="Reschedule the chat with {{ a.contact.name }}">Reschedule</summary>
+          <form class="logform act-when-form"
+                hx-post="{% url 'crm:today_act' a.contact.id 'sent' %}">
+            {% csrf_token %}
+            <input type="hidden" name="kind" value="chat_scheduled">
+            <input type="datetime-local" name="scheduled_at" required
+                   aria-label="New time for the chat with {{ a.contact.name }}">
+            <button class="btn btn-primary act-btn" type="submit">Save time</button>
+          </form>
+        </details>
       {% elif a.touch_kind %}
         {% comment %}
         "Log it", not "Sent". This button does not send anything -- it records

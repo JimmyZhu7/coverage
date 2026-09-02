@@ -198,12 +198,23 @@ def daily_brief(request: HttpRequest) -> HttpResponse:
     from assistant.brief import get_or_build
     from assistant.situation import build_situation
 
+    from .today import queue_silenced_contact_ids
+
     cockpit = _cockpit_context(request.user)
     situation = build_situation(request.user)
+    actions = cockpit.get("_actions_for_brief") or []
+    # The same second question `crm.today.week` asks before it decides to draw
+    # the placeholder that called this endpoint — asked again here because
+    # `get_or_build` makes its own staleness decision and would otherwise hand
+    # back the very row the page just refused to render. One query, and only
+    # on a day the plan is empty. See `assistant.brief._is_stale`.
     text = get_or_build(
         request.user,
-        cockpit.get("_actions_for_brief") or [],
+        actions,
         situation=situation.get("events"),
+        silenced_ids=(
+            queue_silenced_contact_ids(request.user) if not actions else None
+        ),
     )
     return render(request, "crm/_daily_brief.html", {"daily_brief": text})
 
