@@ -203,6 +203,67 @@ def test_into_is_a_minor_word():
         "Bank of America | Insight Day - Step into Finance")
 
 
+# --- Nobiliary and patronymic particles -----------------------------------
+# _MINOR shipped with the Romance particles ("de", "della", "du") and none of
+# the Germanic or Scandinavian ones, so a name or a German-language title
+# built on the missing half got its particle capitalized.
+
+GERMANIC_PARTICLE_CASES = [
+    # The founder's own contact row, and the exact name ContactMerge cites as
+    # the duplicate-merge feature's motivating example — so it renders on the
+    # Settings > Duplicate Contacts card, where it read "Ebba Af Klercker".
+    ("Ebba af Klercker", "Ebba af Klercker"),
+    ("Ursula von der Leyen", "Ursula von der Leyen"),
+    ("Jan van den Berg", "Jan van den Berg"),
+    ("Ludwig von Mises", "Ludwig von Mises"),
+    # Live scraped titles: twelve German-language PwC/EY roles carry "in der".
+    ("Trainee in der Steuerberatung", "Trainee in der Steuerberatung"),
+    ("Praktikum in der Wirtschaftsprüfung",
+     "Praktikum in der Wirtschaftsprüfung"),
+    # ...and a Dutch one from Accenture carries "van" three times.
+    ("De Rol van Hybride Warmtesystemen", "De Rol van Hybride Warmtesystemen"),
+    # A particle that OPENS the phrase is part of the name, not a connective
+    # inside it, so force_cap still applies — the same rule "Del Rey Oaks"
+    # already depends on.
+    ("Von Neumann", "Von Neumann"),
+    ("Van Lanschot Kempen", "Van Lanschot Kempen"),
+]
+
+
+@pytest.mark.parametrize("raw,expected", GERMANIC_PARTICLE_CASES)
+def test_a_germanic_particle_stays_lowercase_mid_name(raw, expected):
+    assert smart_title(raw) == expected
+
+
+def test_a_lowercase_particle_survives_in_a_location_too():
+    """Three live Deutsche Bank rows carry a street name built on the same
+    particles, and smart_location shares _MINOR with smart_title."""
+    assert smart_location("Berlin, Unter den Linden 13-15 (O)") == (
+        "Berlin, Unter den Linden 13-15 (O)")
+    assert smart_location("Hamburg, An der Alster 63-64") == (
+        "Hamburg, An der Alster 63-64")
+
+
+def test_a_particle_cannot_be_spelled_across_a_hyphen():
+    """The minor-word test measures a token with its separators stripped, so
+    a compound can spell a particle across the gap that neither half spells
+    on its own: the building code "A-12F" measures as the letters "AF", and
+    adding the Swedish particle to _MINOR turned three live 'Honhui A-12F'
+    rows into 'Honhui a-12f'. Letters on both sides of a separator mean a
+    code, never a word."""
+    assert smart_location("Honhui A-12F") == "Honhui A-12F"
+    assert smart_title("Suite D-E") == "Suite D-E"
+
+
+def test_a_particle_welded_to_punctuation_is_still_a_particle():
+    """The guard above must not overreach into the shapes real rows ship: a
+    particle really does arrive with a separator hanging off one side, and
+    each of these is still a single lettered atom."""
+    assert smart_title("English and /or French") == "English and /or French"
+    assert smart_title("Personal Banking - Rivière- des- Prairies") == (
+        "Personal Banking - Rivière- des- Prairies")
+
+
 # ---------------------------------------------------------------------------
 # Ordinals. The DB values are clean — a regex for [0-9](St|Nd|Rd|Th) over every
 # open row's stored location matches nothing — so this mis-casing was entirely

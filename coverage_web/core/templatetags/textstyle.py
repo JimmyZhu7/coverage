@@ -40,7 +40,22 @@ register = template.Library()
 
 # Words that stay lowercase unless first or last in the phrase. Includes the
 # common Romance-language connectives that show up in global boards'
-# postings ("Associate de Auditoría Financiera").
+# postings ("Associate de Auditoría Financiera") — and, on the second row,
+# the Germanic/Scandinavian ones, which were missing while their Romance
+# equivalents were here from the start. The asymmetry showed up in two
+# places at once:
+#
+#   'Ebba af Klercker'                  -> 'Ebba Af Klercker'
+#   'Trainee in der Steuerberatung'     -> 'Trainee in Der Steuerberatung'
+#   'Berlin, Unter den Linden 13-15'    -> 'Berlin, Unter Den Linden 13-15'
+#
+# The first is the founder's own contact row, and the exact name
+# `crm.models.ContactMerge` cites as the duplicate-merge feature's
+# motivating example, so it renders on the Settings > Duplicate Contacts
+# card. The other two are live scraped rows: twelve German-language PwC/EY
+# titles carry "in der", and three Deutsche Bank locations carry a street
+# name built on "den"/"der" — all of them written lowercase by a source
+# that knows its own orthography, and all of them recapitalized here.
 _MINOR = {
     "a", "an", "and", "as", "at", "but", "by", "for", "in", "into", "nor",
     "of", "on", "or", "per", "so", "the", "to", "via", "vs", "with",
@@ -80,6 +95,27 @@ _CLAUSE_BREAKS = {"-", "–", "—", "|", "·"}
 
 def _restarts_a_clause(prev: str) -> bool:
     return prev.endswith((":", ";")) or prev in _CLAUSE_BREAKS
+
+
+def _is_minor(word: str) -> bool:
+    """Whether the minor-word rule applies to this whitespace-delimited token.
+
+    The rule is about ONE word, so the letters that spell the particle have to
+    come from one atom. `_letters()` measures the whole token with the
+    separators stripped out, which lets a hyphen compound spell a particle
+    across the gap: the building code "A-12F" measured as the two letters
+    "AF", matched the Swedish particle added above, and three live 'Honhui
+    A-12F' rows rendered 'Honhui a-12f'.
+
+    Deliberately narrower than "reject every compound". A particle really does
+    arrive welded to punctuation on one side — the "/or" of "English and /or
+    French", the "des-" of "Rivière- des- Prairies", the "in-" of "Audit in-
+    Charge" — and each of those is still a single lettered atom, so each still
+    gets the rule. Only a token with letters on BOTH sides of a separator is
+    disqualified, because that shape is a code, never a word.
+    """
+    atoms = [a for a in _SUB_SEP.split(word) if _letters(a)]
+    return len(atoms) == 1 and _letters(atoms[0]).lower() in _MINOR
 
 # All-caps tokens longer than the 4-letter acronym cut that are still
 # genuinely acronyms/brands, not shouting.
@@ -158,7 +194,7 @@ def _recap(atom: str) -> str:
 def _case_word(word: str, *, force_cap: bool) -> str:
     """Case one whitespace-delimited word, handling -/ compounds and the
     minor-word rule."""
-    if not force_cap and _letters(word).lower() in _MINOR:
+    if not force_cap and _is_minor(word):
         return word.lower()
     return "".join(
         part if part in "-/" else _case_atom(part)
@@ -343,7 +379,7 @@ def _location_codes(text: str) -> set[str]:
 def _case_word_location(word: str, *, codes: set[str], shouting: bool,
                         force_cap: bool) -> str:
     letters = _letters(word)
-    if letters and letters.lower() in _MINOR and not force_cap:
+    if letters and _is_minor(word) and not force_cap:
         if letters in codes:
             return word          # a state/country code, not a particle
         if letters.islower() or letters.istitle():
