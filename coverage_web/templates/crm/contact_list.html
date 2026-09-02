@@ -409,8 +409,20 @@
               and points to Settings' own picker for touch, rather than
               telling a phone to do a gesture it cannot receive.
               {% endcomment %}
+              {% comment %}
+              `view-transition-name` per firm, inline for the same reason
+              Today's act cards set theirs inline: the value has to be unique
+              per element and a CSS variable cannot supply one. Retiering a
+              card is a real state change and it was the only one on this
+              page that did not move — the card teleported to the new lane
+              and the tint was the whole announcement. Named, the browser
+              glides it there and slides its old neighbours into the gap,
+              which is the same motion Today's queue already uses when a card
+              leaves. See `setTier` below for the `startViewTransition` that
+              opts the DOM move into it.
+              {% endcomment %}
               <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
-                   style="--i:{{ forloop.counter0 }}"
+                   style="--i:{{ forloop.counter0 }}; view-transition-name: firm-card-{{ fc.firm.id }}"
                    title="Tier drives your action priorities. Drag this card to another lane to change its tier (or use Settings > Target Firms on mobile).">
                 {% comment %}
                 The COUNT badges are gone. Asked for directly: take the
@@ -1148,16 +1160,42 @@
         body: body.toString(),
       }).then(function (resp) {
         if (!resp.ok) return false;
-        section.querySelector(".tier-grid").appendChild(card);
-        // Re-sync every tier's empty-state placeholder. Used to also
-        // patch a count span here (2026-08-31: the count is gone from
-        // the label entirely, per the founder's call, so there is
-        // nothing left to keep in sync but the placeholder).
-        document.querySelectorAll(".tier-section").forEach(function (s) {
-          var cards = s.querySelector(".tier-grid").children.length;
-          var empty = s.querySelector(".tier-empty");
-          if (empty) empty.hidden = cards > 0;
-        });
+        // The card MOVES, so the move is animated. Every card carries a
+        // `view-transition-name` (see the markup above), which is all the
+        // browser needs to snapshot this lane and the destination lane
+        // before and after and tween between them: the dragged card glides
+        // into its new grid and the cards it left behind close the gap.
+        //
+        // Wrapped rather than hand-rolled: the same View Transitions API
+        // Today's queue uses through htmx, called directly here because this
+        // move is a local `appendChild`, not a swap. A browser without the
+        // API (old Firefox) runs `move()` straight through and gets exactly
+        // the instant reparent it had before.
+        //
+        // Reduced motion SKIPS the transition rather than zeroing its
+        // duration. §17's `::view-transition-*` override already flattens
+        // it, but starting a transition at all leaves live animations on the
+        // document for a reader who asked for none, and the honest reading
+        // of the preference is "do not start one".
+        function move() {
+          section.querySelector(".tier-grid").appendChild(card);
+          // Re-sync every tier's empty-state placeholder. Used to also
+          // patch a count span here (2026-08-31: the count is gone from
+          // the label entirely, per the founder's call, so there is
+          // nothing left to keep in sync but the placeholder).
+          document.querySelectorAll(".tier-section").forEach(function (s) {
+            var cards = s.querySelector(".tier-grid").children.length;
+            var empty = s.querySelector(".tier-empty");
+            if (empty) empty.hidden = cards > 0;
+          });
+        }
+        var still = window.matchMedia
+          && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (document.startViewTransition && !still) {
+          document.startViewTransition(move);
+        } else {
+          move();
+        }
         // The card just moved tiers, so both the old and new grid's row
         // count changed — recompute every cap rather than track which
         // two moved.

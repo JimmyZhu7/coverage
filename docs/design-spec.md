@@ -1,42 +1,82 @@
-# Coverage — Visual Identity & Layout System Specification v1
+# Coverage — Visual Identity & Layout System Specification
 
-*Authored by the design-planning pass, 2026-07-23. This file is the single
-authoritative contract for the redesign. Implementers follow it verbatim; if a
-page spec conflicts with an implementer's taste, the spec wins. The shared CSS
-(`static/css/coverage.css`) and `templates/base.html` have already been shipped
-verbatim from this spec — do not modify either.*
+*Section 0 was rewritten on 2026-09-01 to describe the system that ships, not
+the system the 2026-07-23 planning pass committed to. Five of its statements had
+been false for weeks, and every "spec drift" finding filed against them was the
+document being wrong. The rest of the file is the July contract, kept for the
+class-name and htmx guarantees that are still binding.*
 
-> **One page in this spec no longer exists (noted 2026-07-25).** The
-> `directory/calendar.html` heat-mapped cycle grid at `/calendar/` was retired
-> after this spec was written; the Opportunities feed absorbed its job, and
-> per-firm cycle timelines moved onto `directory/firm_detail.html`. Its section
-> below, and the `/calendar/` links and "Deadline calendar" copy in the home and
-> pricing specs, describe a page that is not in the URL conf. Everything else in
-> this file remains the live contract. The retirement is deliberate, not drift:
-> a feed ranked by deadline states what is closing; a grid only displays it.
+*`static/css/coverage.css` and `templates/base.html` are living files. Read the
+CSS for the current class inventory; where this document and the CSS disagree,
+the CSS is what a student sees, so the CSS wins and this document is the bug.*
 
-## 0. Design direction (committed)
+## 0. Design direction (as shipped, v4)
 
-**The look: a well-set financial ledger.** Warm paper ground, near-black ink,
-hairline rules, one deep-navy accent, squared-off badges with letterspaced
-small caps, monospace tabular figures wherever a number carries weight
-(deadlines, scores, counts, the capture address). Serif display type for the
-wordmark and page titles only (Georgia stack — print-financial, zero bytes);
-system sans for everything else. Density comes from tight vertical rhythm and
-hairlines, not from shrinking text below legibility.
+**The look: a well-set financial ledger.** Green-tinted paper ground, near-black
+ink, hairline rules, one navy accent, letterspaced small-caps eyebrows,
+monospace tabular figures wherever a number carries weight (deadlines, scores,
+counts, the capture address). Density comes from tight vertical rhythm and
+hairlines, not from shrinking text below legibility: `--fs-nano` (10px) is the
+floor and nothing may set a smaller size.
 
-**Signature element:** a 3px accent-colored bar across the very top of every
-page (the "masthead rule"), and the serif wordmark. That is the entire brand
-flourish. No gradients, no illustrations, no rounded-pill badges (2px-radius
-rectangles read "terminal", full-round reads "startup"), no hover motion beyond
-a 120ms color shift.
+**Signature element:** the ledger row. A hairline-separated line carrying an
+eyebrow, a claim, and its figures, with a 3px accent rule (`--edge-w`) on the
+left when the row is claimed. It survives on Today, Contact detail and the firm
+page. The 3px masthead rule across the top of every page and the serif wordmark
+stay.
 
-**Fonts: system stacks only.** No @font-face. Decision is final.
+**Fonts: three self-hosted variable families, no CDN.** `@font-face` is the
+shipped mechanism, vendored woff2, same posture as htmx. The July rule
+("system stacks only, no @font-face, decision is final") was reversed by the
+initial repo commit `471b2f7` (2026-07-24) and has never been true in this
+repository. System stacks remain, as the fallback tail of each token.
 
-**Dark mode: not in v1.** ~22 semantic tint pairs would each need a second
-AA-validated value; everything is custom-property-driven so a later
-`prefers-color-scheme` block is purely additive. Do not ship a half-tuned dark
-theme.
+```css
+/* §0 typefaces — this list must equal the @font-face families in coverage.css.
+   core/tests/test_design_spec.py fails if they diverge. */
+font-family: "Fraunces";         /* display: masthead, page titles */
+font-family: "Instrument Sans";  /* ui + body */
+font-family: "Spline Sans Mono"; /* data: numbers, eyebrows, labels */
+```
+
+**Dark mode ships.** The full palette is re-stated once for
+`prefers-color-scheme: dark` and once for `[data-theme="dark"]`, so system
+preference sets the default and an explicit choice overrides it in either
+direction. It is not the light palette inverted: warm near-black ground, every
+semantic tint's TEXT colour lifted and its SURFACE dropped to a dim wash, the
+four warmth bars desaturated. Contrast was measured on both themes, not
+eyeballed. Landed in `76f0e8a` (2026-08-07); the pairings that had to flip with
+it (`--on-accent`, `--on-accent-2`, the shadow pair) are tokens, not literals.
+
+**Badges are pills.** `--r-badge` is 999px, and the pill is the badge shape by
+decision, not by drift: full-round is reserved for things that REPORT state
+(warmth chips, plan badges, status), and `--r-ctl` (10px) is the shape of a
+thing you press. Spending the pill on actions is what leaves nothing to tell an
+action apart from a status, which is why `.btn` and `.site-nav` were squared in
+`db3385d` and the filter bar in `de8170f` (both 2026-08-22). Two control
+families, two radii, no third.
+
+**Gradients are permitted, in four named places.** The warmth meter's ramp, the
+marketing hero (`.kin-hero`, with its sheen), the daily brief (`.daily-brief`)
+and the auth card (`.auth-card`). Every one is built from tokens rather than
+literals so it re-states itself in dark mode. Outside those, a surface is a flat
+token. Shipped from `471b2f7`; tokenised in `bf1b613` (2026-08-09).
+
+**`.page` is 1440px.** `--page-w-full` is the default measure for an app page,
+because the app's widest page is a directory of thousands of rows and a 960px
+column wastes half a laptop screen on it. `--page-w-narrow` (680px) is forms,
+auth and legal; `--page-w-wide` (1120px) is the masthead's own inner measure;
+`--page-w` (960px) is the narrow reading column the marketing pages re-take for
+their hero, cards and comparison table. The July "`.page` is 960px" line
+described the shell before `471b2f7`.
+
+**Motion: one budget, honoured everywhere.** Motion is added where state changes
+and removed where nothing does (P8). Panels and cards may lift on hover
+(`--shadow-1`/`--shadow-2`, <= 1px translate, <= 180ms). htmx swaps settle with a
+220ms rise. The page header draws one accent stroke, once. Nothing loops at rest
+outside the three live indicators (`.cols-pulse`, `.ap-pulse`, the Talk state
+dots). `prefers-reduced-motion: reduce` flattens all of it, and §17 of the
+stylesheet is the single override that does so.
 
 **Class-name contract with existing templates:** dynamic class suffixes
 generated by views are preserved exactly — `warmth-{{ w }}`
@@ -53,20 +93,26 @@ Shipped verbatim at `coverage_web/static/css/coverage.css`. Read that file for
 the complete class inventory (tokens; shell; page furniture; panels/empty/
 honesty/msg; buttons; forms; pills/chips/badges; bands + axis bars; warmth
 meter; touches/deflist/summary tables; deadline + markers; onboarding steps;
-legal prose; htmx niceties; responsive; reduced motion). **The shared file is
-read-only for implementers** — a missing style goes in your app's per-page
-partial, never in the shared file.
+legal prose; htmx niceties; responsive; reduced motion). The shared file is a
+living file (the v2 addendum lifted the July freeze); a style used on one page
+still belongs in that app's partial, and a style used on three belongs here.
 
 ## 3. Base shell
 
-Shipped verbatim at `templates/base.html`: masthead rule via `body`'s top
-border; `.site-header` with serif `.wordmark`, `.site-nav` (active state via
-`request.path` slices), `.site-auth`; `main`; `.site-footer` with
-privacy/terms links. **Convention: every template's content root is
-`<div class="page">` (960px) or `<div class="page page--narrow">` (680px —
-forms, auth, legal, capture, accounts).**
+`templates/base.html`: masthead rule via `body`'s top border; `.site-header`
+with serif `.wordmark`, `.site-nav` (active state via `request.path` slices),
+`.site-auth`; `main`; `.site-footer` with privacy/terms links. **Convention:
+every template's content root is `<div class="page">` (1440px, `--page-w-full`)
+or `<div class="page page--narrow">` (680px — forms, auth, legal, accounts).**
+The nav renders only for a user who has finished onboarding.
 
-## 4. Per-app style partials (complete contents — replace each file entirely)
+## 4. Per-app style partials
+
+*Stale as written (noted 2026-09-01): the blocks below are the July
+full-replacement contents, and all three files have been rewritten many times
+since. They are kept as the record of what each partial is FOR — app-only
+extras, with anything generic living in the shared stylesheet. Read the files
+themselves for what they contain.*
 
 ### `templates/directory/_styles.html`
 
@@ -153,299 +199,48 @@ partial must never style body/nav/main — the shared shell owns those.
 
 ## 5. Per-page layout specs
 
-General rules applying to every template: keep every form field, name
-attribute, csrf token, htmx attribute, `{% url %}` name, context variable, and
-conditional block exactly as-is unless a rename is listed. Only classes,
-wrappers, and copy change. The sanctioned inline-style exceptions:
-`style="margin-top:0"` on an h2 that opens a panel, and
-`style="border-color: var(--danger-line);"` on danger panels
-(settings danger zone, delete page). No other inline styles.
+The July per-page blocks that used to fill this section were full-replacement
+templates for pages that have since been rewritten, renamed or retired, and an
+executor reading them was being handed the July product as a contract. They are
+gone. What survives is the general rule and the index below.
 
-### core/home.html (implementer A) — full replacement
+**General rule, still binding.** Keep every form field, `name` attribute, csrf
+token, htmx attribute, `{% url %}` name and context variable exactly as-is
+unless a rename is listed. Only classes, wrappers and copy change. The
+sanctioned inline-style exceptions are `style="margin-top:0"` on an h2 that
+opens a panel and `style="border-color: var(--danger-line);"` on danger panels.
+No other inline styles.
 
-```django
-{% extends "base.html" %}
+**How to read the index.** "No spec" is a statement of fact, not a gap to be
+filled opportunistically: a spec written mid-refactor documents the refactor,
+not the product. Where a page has none, the CSS comments and the page's own
+tests are the record, and D-14 decides whether the Network page earns one.
 
-{% block title %}Coverage{% endblock %}
+| Page | Template | Spec |
+|---|---|---|
+| Home `/` | `core/home.html` | Marketing. `.kin-hero` marquee, product mock, waitlist form. Verbs in the mock are "Log it" and "They replied". |
+| Pricing `/pricing/` | `core/pricing.html` | Marketing. Hero and cards re-take `--page-w`; the comparison table stacks at <= 560px. |
+| Opportunities `/opportunities/` | `directory/opportunities.html` | `docs/specs/opportunities-page-redesign.md`, and `docs/specs/filter-bar-redesign.md` for the bar. |
+| My Applications `/opportunities/mine/` | `directory/my_applications.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Firm page `/firms/<slug>/` | `directory/firm_detail.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Today `/app/` | `crm/week.html` | `docs/specs/today-page.md`. |
+| Network `/app/contacts/` | `crm/contact_list.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Contact detail `/app/contacts/<id>/` | `crm/contact_detail.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Calendar `/app/calendar/` | `crm/calendar.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Talk `/assistant/` | `assistant/chat.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Settings `/welcome/settings/` | `accounts/settings.html` | `docs/specs/settings-page.md`. |
+| Onboarding `/welcome/` | `accounts/onboarding.html` | No spec. See `docs/specs/` or the CSS comments. |
+| Weekly digest | `crm/emails/weekly_digest.{html,txt}` | No spec. See `docs/specs/` or the CSS comments. |
+| Import / export / delete | `accounts/{import,export,delete}.html` | `page page--narrow`, one `.pagehead`, one `.panel` each. Delete and the danger zone carry `border-color: var(--danger-line)`. |
+| Auth | `templates/account/**` | `page page--narrow`, `.auth-card`, Google first then email. Styles live in `account/_auth_styles.html`. |
+| Legal | `legal/privacy.html`, `legal/terms.html` | `page page--narrow legal`. Copy is the lawyer's; structure is a `.pagehead` and prose. |
 
-{% block content %}
-<div class="page page--narrow">
-  <header class="page-head">
-    <h1>Coverage</h1>
-    <p class="lede">The deadline calendar is free and never paywalled. The CRM tracks who you know at each firm, how warm they are, and who to reach this week.</p>
-  </header>
-
-  <div class="panel">
-    <h2 style="margin-top:0">Deadline calendar</h2>
-    <p class="muted small">Every open IB, consulting, and tech opening we track, with the date we last confirmed each one. No login required.</p>
-    <div class="actions">
-      <a class="btn btn-primary" href="/calendar/">Open the calendar</a>
-    </div>
-  </div>
-
-  <div class="panel">
-    <h2 style="margin-top:0">Your coverage</h2>
-    <p class="muted small">Contacts, warmth, fit scores, and a ranked weekly list — built from the outreach you BCC to your capture address.</p>
-    <div class="actions">
-      {% if user.is_authenticated %}
-        <a class="btn btn-primary" href="/app/">This week</a>
-      {% else %}
-        <a class="btn btn-primary" href="/accounts/signup/">Create an account</a>
-        <a class="btn" href="/accounts/login/">Sign in</a>
-      {% endif %}
-    </div>
-  </div>
-</div>
-{% endblock %}
-```
-
-### directory/calendar.html (A)
-- Root: `<div class="cov">` → `<div class="page">`. Keep
-  `{% block head %}{% include "directory/_styles.html" %}{% endblock %}`.
-- Renames: `cov-head`→`page-head`, `cov-lede`→`lede`, `cov-sub`→`subnav`,
-  `cov-honesty`→`honesty`, `cov-filters`→`filters`, `cov-clear`→`filters-clear`.
-- **Do not change** `id="cov-results"`, any `hx-*` attribute, form fields, or
-  facet loops. `<h1>` copy stays "Deadline calendar". Lede stays.
-
-### directory/_results.html (A)
-- `cov-count`→`count-line`, `cov-cards`→`cards`, `cov-empty`→`empty`. Nothing
-  else changes. (htmx partial — no wrapper may be added.)
-
-### directory/_card.html (A)
-- `cov-card`→`opp-card` (keep `{% if mine %} is-mine{% endif %}`),
-  `cov-card-top`→`opp-top`, `cov-firm`→`opp-firm`, `cov-meta`→`opp-meta`,
-  `cov-deadline`→`deadline` (keep `past`/`none` modifiers and
-  `.date`/`.count` spans), `cov-markers`→`markers`.
-- Stale pill: remove the `⚠` glyph. New text:
-  `{{ card.staleness.label }} · may be stale` (keep the `title` attribute).
-- All other pills unchanged (`conf-{{ ... }}`, `spon-{{ ... }}` preserved).
-
-### directory/_timeline.html (A)
-- `cov-timeline`→`tl`, `cov-tl-row {{ row.state }}`→`tl-row {{ row.state }}`,
-  `cov-tl-date`→`tl-date`, `cov-tl-event`→`tl-event`,
-  `cov-tl-scope`→`tl-scope`, `cov-markers`→`markers`, `cov-count`→`count-line`.
-  Pills unchanged.
-
-### directory/firm_detail.html (A)
-- Root → `page`. `cov-head`→`page-head`, back-link line → `subnav`,
-  `cov-lede`→`lede`, `cov-section`→`section`. Keep `id="cov-results"` and both
-  includes. Back-link copy: `← Deadline calendar` stays.
-
-### directory/mine.html (A)
-- Root → `page`; `cov-head`→`page-head`, `cov-lede`→`lede`, `cov-sub`→`subnav`,
-  `cov-empty`→`empty`, `cov-count`→`count-line`, `cov-section`→`section`,
-  `cov-section-firm`→`section-firm`, `cov-tier`→`tier`, `cov-cards`→`cards`.
-- Delete the inline `style="margin-top:.7rem;"` on the cards div.
-- Empty-state link text `Set up your list →` stays, href `/welcome/` stays.
-
-### crm/week.html (B)
-- Root: `<div class="crm">` → `<div class="page">`. Keep the `_styles.html`
-  include in the head block.
-- Wrap heading: `<header class="page-head"><h1>This week</h1><p class="lede">…</p></header>`;
-  subnav above it gains class `standalone` (`<nav class="subnav standalone">`).
-- Renames: `card`→`panel`, `btn btn-accent`→`btn btn-primary`,
-  `capture-note`→`note`. `prio`, `chip warmth-*`, `row`, `muted`, `small`,
-  `empty`, `btn` unchanged.
-- The reason line `<p class="small muted" style="margin:8px 0 10px">` →
-  `<p class="small muted reason-line">`.
-- Subnav active state: replace `<strong>` markup with `aria-current="page"` on
-  the active link (both crm pages). "This Week" → "This week" (sentence case)
-  in both subnav and title.
-
-### crm/contact_list.html (B)
-- Root → `page`; subnav → `subnav standalone` with `aria-current="page"` on
-  Contacts. `card`→`panel`. Meter block untouched (`meter`/`meter-track`/
-  `meter-fill` with inline `--from`/`--to` is the animation contract).
-- Lede keeps `{{ rows|length }} active contact…`.
-
-### crm/contact_detail.html (B)
-- Root → `page`; subnav → `subnav standalone` (breadcrumb
-  `<span class="muted">/ {{ contact.name }}</span>` stays).
-- Remove inline `style="margin-bottom:8px"` on the lede. `card`→`panel`,
-  `btn-accent`→`btn-primary`, `capture-note`→`note`.
-- `{% include "crm/_contact_live.html" %}` untouched.
-
-### crm/_contact_live.html (B)
-- **Highest-risk file. Change class names only, nothing structural.** Keep
-  `id="contact-live"`, the `hx-post`/`hx-target="#contact-live"`/
-  `hx-swap="outerHTML"` form, all selects/inputs, all context variables.
-- Renames: `class="logform"` stays; `btn btn-accent`→`btn btn-primary`.
-- Everything else (`meter*`, `moved-flag`, `arrow`, `band band-*`, `num`,
-  `reasoning`, `axes`, `axis`, `name/bar/val/meta`, `touches`, `when`, `kind`,
-  `chip warmth-*`) keeps its exact current class names — the shared CSS defines
-  them.
-
-### accounts/onboarding.html (B)
-- Wrap all content in `<div class="page page--narrow">`. Keep the
-  `_welcome_head.html` include.
-- Step indicator: existing `ol.steps` markup kept exactly (li.current/.done,
-  span.dot with ✓/number) — the shared `.steps` CSS is the redesign.
-- Renames: `lead`→`lede`, `card`→`panel`, `btn`→`btn btn-primary` on the three
-  Continue/Finish buttons, `btn secondary`→`btn` (Download template),
-  `capture-addr` unchanged.
-- Step-2 firm filter input + inline `oninput` JS: keep verbatim.
-- Copy: h1s stay sentence-case as-is; step-4 copy is already on-voice, keep.
-
-### accounts/_profile_form.html (B)
-- No structural change (it is the `#profile-fields` htmx swap target).
-  `msg success` stays. No class renames needed.
-
-### accounts/_firm_list.html (B)
-- Keep `id="firm-list"` and checkbox markup. The inner metadata span:
-  `class="muted" style="font-size:.8rem"` → `class="firm-meta"`.
-
-### accounts/import.html (B)
-- Wrap in `page page--narrow`; REMOVE the `_welcome_head` include. `lead`→`lede`,
-  `card`→`panel`, `msg` loop unchanged, `table.summary` unchanged,
-  Upload & import → `btn btn-primary`, Download template → `btn` (drop
-  `secondary`). Keep the h2 `style="margin-top:0"`. Footer links unchanged.
-
-### accounts/settings.html (B)
-- Wrap in `page page--narrow`; KEEP the `_welcome_head` include.
-- `card`→`panel`, `capture-addr` unchanged, Save profile → `btn btn-primary`,
-  Import/Export → `btn` (drop `secondary`), Delete → `btn btn-danger`.
-- **Keep** the form's `hx-post` / `hx-target="#profile-fields"` /
-  `hx-swap="innerHTML"` and `id="profile-fields"` exactly.
-- Danger zone panel: `<div class="panel" style="border-color: var(--danger-line);">`.
-
-### accounts/export.html (B)
-- `page page--narrow`; REMOVE `_welcome_head` include. `lead`→`lede`,
-  `card`→`panel`, both download buttons → `btn btn-primary`. Back link
-  unchanged.
-
-### accounts/delete.html (B)
-- `page page--narrow`; REMOVE `_welcome_head` include. `lead`→`lede`. The list
-  panel → `<div class="panel" style="border-color: var(--danger-line);">`.
-  Error → `msg error`. Confirm input + label verbatim. Buttons:
-  `btn danger`→`btn btn-danger` ("Permanently delete my account"),
-  `btn secondary`→`btn` (Cancel).
-
-### capture/health.html (B)
-- Wrap in `<div class="page page--narrow">`:
-  - `<header class="page-head"><h1>Email capture</h1><p class="lede">BCC or forward your recruiting mail; Coverage logs the touch and moves the contact.</p></header>`
-  - Address section → `<div class="panel">` keeping `aria-label`;
-    `<code>{{ address }}</code>` → `<p class="capture-addr">{{ address }}</p>`;
-    explanatory paragraph gains `class="muted small"`.
-  - Status section → `<section aria-label="Capture status"><h2>Is it working?</h2>`
-    with the `<ul>` replaced by a `.deflist`:
-
-```django
-<div class="deflist">
-  <div><span>Applied (logged a touch)</span><span class="v">{{ counts.applied }}</span></div>
-  <div><span>Needs review{% if counts.needs_review %} — <a href="{% url 'capture:review' %}">review now</a>{% endif %}</span><span class="v">{{ counts.needs_review }}</span></div>
-  <div><span>Pending</span><span class="v">{{ counts.pending }}</span></div>
-  <div><span>Ignored</span><span class="v">{{ counts.ignored }}</span></div>
-</div>
-```
-
-  - Keep the `last_received` conditional verbatim, in a `<p>` above the deflist.
-
-### capture/review_queue.html (B)
-- Wrap in `page page--narrow`; `<header class="page-head">` around h1 + intro
-  (`<p class="lede">`, copy unchanged).
-- Each `<article>` → `<article class="panel" aria-label="Captured event {{ event.id }}">`.
-  Sender line: name in `<strong>`, email in `<span class="muted small tabular">`.
-- "Why flagged" line → `<p class="small muted"><em>Why flagged:</em> …</p>`.
-- Both forms inside `<div class="actions">` (forms as flex children, no extra
-  class): Confirm button → `btn btn-primary`, Ignore → `btn`. Keep both forms'
-  existing actions and csrf tokens.
-- Empty case: `<div class="empty"><p>Nothing to review.</p><p><a href="{% url 'capture:health' %}">Back to capture health</a></p></div>`.
-
-### legal/privacy.html and legal/terms.html (B)
-- Root: `<div class="legal">` → `<div class="page page--narrow legal">`.
-  DELETE the whole `{% block head %}` (the `_welcome_head` include).
-  `lead`→`lede`. All copy, links, structure unchanged.
-
-### Allauth overrides (A) — new files under `templates/account/`
-
-**`templates/account/login.html`** (full content):
-
-```django
-{% extends "base.html" %}
-{% load socialaccount %}
-
-{% block title %}Sign in · Coverage{% endblock %}
-
-{% block content %}
-<div class="page page--narrow">
-  <header class="page-head">
-    <h1>Sign in</h1>
-    <p class="lede">Your calendar never needs a login. Your CRM does.</p>
-  </header>
-
-  <div class="panel">
-    <form method="post" action="{% provider_login_url 'google' %}">
-      {% csrf_token %}
-      <button type="submit" class="btn btn-primary">Continue with Google</button>
-    </form>
-    <p class="note">Login-only scopes. Coverage cannot read your inbox.</p>
-  </div>
-
-  <div class="panel">
-    <h2 style="margin-top:0">Or with email</h2>
-    <form method="post" action="{% url 'account_login' %}">
-      {% csrf_token %}
-      {{ form.as_p }}
-      {% if redirect_field_value %}
-        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
-      {% endif %}
-      <div class="actions">
-        <button type="submit" class="btn btn-primary">Sign in</button>
-        <a class="small" href="{% url 'account_reset_password' %}">Forgot password</a>
-      </div>
-    </form>
-  </div>
-
-  <p class="muted small">No account yet? <a href="{% url 'account_signup' %}">Create one</a>.</p>
-</div>
-{% endblock %}
-```
-
-**`templates/account/signup.html`**: identical structure. h1 "Create your
-account"; lede "Free forever: the full calendar and a CRM for your first 50
-contacts."; Google panel first (same form, same note); email panel with
-`action="{% url 'account_signup' %}"`, `{{ form.as_p }}`, redirect hidden
-field, submit `btn btn-primary` labeled "Create account"; bottom line links to
-`{% url 'account_login' %}` ("Already have an account? Sign in.").
-
-**`templates/account/logout.html`**:
-
-```django
-{% extends "base.html" %}
-{% block title %}Sign out · Coverage{% endblock %}
-{% block content %}
-<div class="page page--narrow">
-  <header class="page-head"><h1>Sign out</h1></header>
-  <div class="panel">
-    <p>Sign out of Coverage on this browser?</p>
-    <form method="post" action="{% url 'account_logout' %}">
-      {% csrf_token %}
-      {% if redirect_field_value %}
-        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
-      {% endif %}
-      <div class="actions">
-        <button type="submit" class="btn btn-primary">Sign out</button>
-        <a class="btn" href="/">Cancel</a>
-      </div>
-    </form>
-  </div>
-</div>
-{% endblock %}
-```
-
-**Password reset set** (ship all four): `account/password_reset.html`,
-`account/password_reset_done.html`, `account/password_reset_from_key.html`,
-`account/password_reset_from_key_done.html`. Common pattern:
-`page page--narrow` → `page-head` with h1 → one `panel`. h1s: "Reset your
-password" / "Check your email" / "Set a new password" / "Password changed".
-Forms where present: `{% csrf_token %}{{ form.as_p }}` + `btn btn-primary`
-submit ("Send reset link" / "Set password"). `password_reset_done` body:
-`<p>If an account exists for that address, a reset link is on its way. It
-expires after a few hours.</p>`. `from_key_done` body: `<p>Your password has
-been changed.</p><p><a class="btn btn-primary" href="{% url 'account_login' %}">Sign in</a></p>`.
-For `from_key`, handle the invalid-token branch:
-`{% if token_fail %}<p class="msg error">This reset link is invalid or has
-expired. <a href="{% url 'account_reset_password' %}">Request a new one</a>.</p>{% else %}…form…{% endif %}`.
+**Retired since July.** `directory/calendar.html` (the heat-mapped cycle grid at
+`/calendar/`) was retired 2026-07-25: the Opportunities feed absorbed its job
+and per-firm cycle timelines moved onto the firm page. A feed ranked by deadline
+states what is closing; a grid only displays it. `capture/health.html` and
+`capture/review_queue.html` are gone too: email capture is CONFIGURATION and now
+lives inside Settings, which is why `/capture/` lights the Settings tab.
 
 ## 6. Voice & microcopy rules
 
@@ -503,18 +298,20 @@ file.
 
 ## v2 addendum (founder-directed elevation, 2026-07-23)
 
-The founder asked for a full design pass over the six-page IA. v2 keeps the
-committed identity — paper, ink, one navy accent, hairlines, squared badges,
-system fonts, light-only — and supersedes the following v1 rules. Where this
-addendum conflicts with §0, the addendum wins; everything not listed stands.
+The founder asked for a full design pass over the six-page IA. Kept as the
+record of what v2 changed. **§0 above supersedes this addendum wherever the two
+disagree** — that ordering is reversed from what this section originally
+claimed, because §0 now describes what ships and this section describes July.
 
 1. **§0 "shipped verbatim — do not modify" is lifted** for
    `static/css/coverage.css` and `templates/base.html`. Both are living files
    again; this addendum is the record of what changed.
-2. **Site IA is now six pages** (mirrors the founder's radar): Today (`/app/`),
-   Calendar — the heat-mapped cycle grid (`/calendar/`), Opportunities — the
-   listing (`/opportunities/`), Network (`/app/contacts/`), Email capture
-   (`/capture/health/`), Settings (`/welcome/`).
+2. **Site IA is now six pages** (mirrors the founder's radar). The six have
+   since changed twice: today they are Today (`/app/`), Opportunities
+   (`/opportunities/`), Network (`/app/contacts/`), Calendar (`/app/calendar/`),
+   Talk (`/assistant/`) and Settings (`/welcome/`). Email capture became
+   configuration and moved inside Settings; the heat-mapped `/calendar/` grid
+   was retired (see §5).
 3. **Sticky masthead.** `.site-header` is sticky with a translucent
    `color-mix` surface and backdrop blur. The 3px masthead rule stays.
 4. **One sanctioned motion beyond color.** Panels and opportunity cards may
@@ -527,7 +324,8 @@ addendum conflicts with §0, the addendum wins; everything not listed stands.
 6. **Type scale bump.** `--fs-xl` 22px, `--fs-xxl` 29px, new `--fs-hero` 34px
    (landing only).
 
-Unchanged and still binding: class-name contract with view-generated
-suffixes, htmx ids, no gradients (warmth meter's ramp excepted as before),
-no @font-face, no rounded pills, no dark mode until every tint pair is
-AA-validated.
+Still binding: the class-name contract with view-generated suffixes, and the
+htmx ids. **Not binding, and false since 2026-07-24:** this section's closing
+list of prohibitions (gradients, `@font-face`, rounded pills, dark mode). Each
+one was reversed deliberately and each reversal is dated in §0. Reading them as
+live rules is what produced five spec-drift findings against a shipping product.

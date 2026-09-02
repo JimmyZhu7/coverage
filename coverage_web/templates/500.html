@@ -29,6 +29,10 @@ a reader whose whole OS is dark).
       --ink: #191b16;
       --ink-2: #4e5248;
       --accent: #1f4e79;
+      /* Copied from the shared display scale for the same reason the palette
+         above is copied: the token is the NAME of the size, and a page that
+         cannot load a stylesheet still has to sit on the scale. */
+      --fs-display-3: 22px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -42,7 +46,7 @@ a reader whose whole OS is dark).
       background: var(--paper); color: var(--ink); display: grid;
       place-items: center; min-height: 100vh; }
     main { text-align: center; padding: 24px; }
-    h1 { font-size: 22px; margin: 0 0 8px; }
+    h1 { font-size: var(--fs-display-3); margin: 0 0 8px; }
     p { color: var(--ink-2); margin: 0 0 16px; }
     a { color: var(--accent); }
   </style>

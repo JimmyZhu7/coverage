@@ -75,6 +75,9 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     animation: rise-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: min(calc(var(--i, 0) * 40ms), 240ms); }
   .cd-log-row:first-child { border-top: 0; }
+  /* A row that was already there when the panel swapped. Motion means
+     "this changed"; a row that did not change does not get any. */
+  .cd-log-row.is-settled { animation: none; }
   .cd-log-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
     flex: none; align-self: center; }
   .cd-log-dot.in { background: var(--ok); }
@@ -385,7 +388,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @keyframes pace-grow { from { stroke-dashoffset: 327; } }
   .pace-text { min-width: 0; }
   .pace-figure { margin: 0; display: flex; align-items: baseline; gap: var(--s1); }
-  .pace-done { font: var(--w-black) 26px/1 var(--font-display); color: var(--ink);
+  .pace-done { font: var(--w-black) var(--fs-figure)/1 var(--font-display); color: var(--ink);
     font-variant-numeric: tabular-nums; }
   .pace-goal { color: var(--ink-3); font-family: var(--font-mono);
     font-variant-numeric: tabular-nums; font-size: var(--fs-s); }
@@ -558,7 +561,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* NOT `.dash-num` — see week.html. That class is count-animated site-wide
      from base.html, which renders wrong numbers for the first ~700ms. */
   .ribbon-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: var(--fs-xl); font-weight: var(--w-bold); color: var(--ink);
+    font-size: var(--fs-display-3); font-weight: var(--w-bold); color: var(--ink);
     line-height: 1; letter-spacing: -0.01em; transition: color var(--t-fast); }
   .ribbon-lbl { font-size: var(--fs-micro); color: var(--ink-2);
     display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
@@ -581,7 +584,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      actually reads. */
   .ribbon-stat:not(:has(.ribbon-num)) { justify-content: center; }
   /* The funnel's number USED to render at --fs-l against its three
-     neighbours' --fs-xl ("the funnel is a sentence, not a measurement").
+     neighbours' 22px ("the funnel is a sentence, not a measurement").
      Direct feedback on the populated strip: side by side the smaller digit
      read as a misaligned cell, not a quieter one — its shorter line-height
      also pulled the label 5px closer to the number than the other three
@@ -815,12 +818,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
          needs undoing, so a full alarm would misstate the stakes. The
          edge is enough to say "this one is different". */
   {% comment %}
-  Real tokens, not `var(--surface-2, …)` / `var(--ink-4, …)`. Neither of those
-  two names is defined anywhere in the system — this rule was the only place
-  in the codebase that mentioned them, so both fallbacks fired 100% of the
-  time and the declarations were an elaborate way of writing what follows the
-  comma. A fallback to a token that never exists is a token gap pretending to
-  be a graceful degradation.
+  Real tokens. This rule used to reach for two names, a second surface and a
+  fourth ink, that are not defined anywhere in the system, each with an inline
+  fallback after the comma. This was the only place in the codebase that
+  mentioned either, so both fallbacks fired 100% of the time and the
+  declarations were an elaborate way of writing what follows the comma. A
+  fallback to a token that never exists is a token gap pretending to be a
+  graceful degradation, and it hides the gap from every grep that would have
+  found it.
   {% endcomment %}
   .ap-strip-quiet { background: var(--surface);
     border-color: var(--line); border-left-color: var(--line);

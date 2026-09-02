@@ -97,30 +97,12 @@
   {% endscript %}
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
   {% comment %}
-  THE SHELL'S OWN FINGER TARGETS, and the only CSS this file carries.
-
-  Measured at 375px: the footer's three links are 19px tall and the wordmark
-  21px, on every page of the product. They are text links, so they are
-  correctly sized for a cursor; on a phone they are under half the 44px floor
-  the rest of the app keeps, and the footer is where a student goes looking
-  for Privacy and Terms.
-
-  Padding plus an equal negative margin, not `min-height`: the target grows,
-  the footer does not. `pointer: coarse` only, so nothing changes on a
-  desktop.
-
-  This belongs in coverage.css beside `.site-footer-inner a`, and it will go
-  there: that file is another pass's, so the rule sits with the shell it is
-  about rather than being written into a file two agents are editing at once.
+  The shell's finger targets moved to coverage.css §16b on 2026-09-01, which is
+  where the note left here said they belonged. This file now carries no CSS at
+  all, which is also what let /opportunities/ regain the only
+  `@media (pointer: coarse)` block on the page: two tests read the FIRST such
+  block as the feed's, and a second one in the shell silently redirected them.
   {% endcomment %}
-  <style>
-    @media (pointer: coarse) {
-      .site-footer-inner nav a, .site-footer-inner > a {
-        display: inline-block; padding: 13px 6px; margin: -13px -6px;
-      }
-      .site-auth a { display: inline-flex; align-items: center; min-height: 44px; }
-    }
-  </style>
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
   {% block head %}{% endblock %}

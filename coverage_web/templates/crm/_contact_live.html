@@ -188,7 +188,21 @@ values.
       {% if touch_rows %}
         <ol class="cd-log">
           {% for t in touch_rows %}
-            <li class="cd-log-row" style="--i:{{ forloop.counter0 }}">
+            {% comment %}
+            ONE row moves, not the whole list. Logging a touch swaps this
+            panel whole, which re-ran the staggered entrance on every history
+            row: a page where one thing changed announced the ten things that
+            did not, and the new row was the hardest to spot because it
+            arrived first and its nine unchanged neighbours arrived after it.
+
+            `moved` is set only by the log_touch swap, so on the first render
+            the list still cascades in as one object. On a swap, rows past
+            the newest are `.is-settled` and hold still. Newest first
+            (`order_by("-ts")`), so the row that animates is the row that
+            just appeared.
+            {% endcomment %}
+            <li class="cd-log-row{% if moved and not forloop.first %} is-settled{% endif %}"
+                style="--i:{{ forloop.counter0 }}">
               <span class="cd-log-dot{% if t.inbound %} in{% endif %}" aria-hidden="true"></span>
               <span class="cd-log-what">
                 <b>{{ t.kind_label }}</b>{% if t.channel_label %} · {{ t.channel_label }}{% endif %}

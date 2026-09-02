@@ -10,7 +10,7 @@ colour-tinted left rail on a rounded card, up to seven 999px pills per
 card (role type, Save, class year, three facts, Read), and 771 identical
 fixed-height boxes down the page.
 
-The stylesheet already names the identity — a ledger — and a ledger is
+The stylesheet already names the identity, a ledger, and a ledger is
 ruled rows and aligned figures, not boxes with badges in them. This is
 that: the deadline in a fixed left column so the figures stack and the
 eye scans one axis, the title and its facts as text, and hairlines
@@ -30,8 +30,8 @@ WHAT DID NOT CHANGE, deliberately (see the design contract):
     policy failed in the direction its own comments did not anticipate: with
     every part `flex: none` and only `:last-child` allowed to shrink, the
     line cut whatever the template rendered LAST, which on an undated row is
-    "No date posted, first seen 39d ago" — the answer the mute dash in
-    `.rr-due` deliberately withholds. Measured live on the founder's board,
+    "No date posted, first seen 39d ago", the answer the mute dash in
+    `.rr-due` used to withhold. Measured live on the founder's board,
     that span was rendering at 5px of the 193px it needs. The meta line now
     WRAPS, and the single cut is a named 205px cap on `.rr-loc`. Order still
     governs what a reader meets first; it no longer governs what survives.
@@ -45,7 +45,7 @@ only reintroduce the clipping bug this file's history is full of.
 <div class="rolerow urg-{{ r.level }}">
   {% comment %}
   The deadline, in its own fixed column so the figures form a real column
-  down the page — tabular-nums in the stylesheet is what makes them line
+  down the page; tabular-nums in the stylesheet is what makes them line
   up. Undated rows print a dash HERE and the words "No date posted" in the
   meta line below: the dash alone would be an invented fact, and the words
   are what a screen reader and a stylesheet-less render get.
@@ -78,7 +78,20 @@ only reintroduce the clipping bug this file's history is full of.
     {% elif r.rolling_stated %}
       <span class="rr-due-n rr-due-rolling" title="{{ r.rolling_why }}"><span class="rolling-dot"></span></span>
     {% else %}
-      <span class="rr-due-n rr-due-none" aria-hidden="true">&mdash;</span>
+      {% comment %}
+      A DRAWN rule, not a typed character, and a spoken sentence rather than
+      silence. The cell used to hold an `aria-hidden` em dash, which meant a
+      sighted reader saw "no date" and a screen-reader user heard nothing at
+      all in the column the whole page is sorted by. It was also the last em
+      dash left in the feed's markup, and the product does not use that
+      character.
+
+      So: `.rr-due-none::before` paints a 12px hairline in the stylesheet
+      (a pseudo-element is never announced, which is what makes it the right
+      place for a mark that means nothing on its own), and the `.vh` span
+      gives the cell the accessible name the sighted column already has.
+      {% endcomment %}
+      <span class="rr-due-n rr-due-none"><span class="vh">No date posted</span></span>
     {% endif %}
   </span>
 
@@ -123,8 +136,8 @@ only reintroduce the clipping bug this file's history is full of.
       it holds ~95% of locations whole and bites on the multi-city dumps,
       the widest of which is 762px of ten cities), so the full string has to
       survive the cut somewhere. `_place`'s own `why` covers the tidied and
-      market-fallback cases and is the better sentence when it exists —
-      it says WHY the text differs from what the posting stated — but it is
+      market-fallback cases and is the better sentence when it exists
+      (it says WHY the text differs from what the posting stated), but it is
       deliberately empty when the text IS what the posting stated, and that
       is exactly a raw multi-city list. Falling back to the text itself adds
       no claim: it is the same string the span already holds.
@@ -139,7 +152,7 @@ only reintroduce the clipping bug this file's history is full of.
       LAST IN READING ORDER (see above), because it is about the posting's
       HISTORY, not about the reader and not about their eligibility: nothing
       that could end the decision should be met after it. It used to be last
-      for a second reason — it was the slot that ellipsised first, and that
+      for a second reason: it was the slot that ellipsised first, and that
       is what made it safe to add. That reasoning is retired with the policy:
       under `:last-child` truncation this span was measured at 0px width on a
       live Picked row, which is not "ellipsising first", it is being deleted.
@@ -154,8 +167,8 @@ only reintroduce the clipping bug this file's history is full of.
       predicts nothing.
 
       DATED ROWS ONLY. An undated row's `.rr-undated` span below already ends
-      with "first seen 12d ago" — the same measurement, in wording pinned by
-      a test — and printing both would be the row saying one fact twice. A
+      with "first seen 12d ago", the same measurement, in wording pinned by
+      a test, and printing both would be the row saying one fact twice. A
       dated row has nowhere else that says it.
       {% endcomment %}
       {% if r.dated and r.open_run_days is not None %}
@@ -174,9 +187,9 @@ only reintroduce the clipping bug this file's history is full of.
       {% comment %}
       Actions ride the SECOND line, not a third grid column. Measured at
       302px (the real column width): as a column they took 160px and left
-      the title 70px — about twelve characters — which inverted the row's
+      the title 70px, about twelve characters, which inverted the row's
       whole hierarchy. On this line they take their width from the meta
-      instead, which is the part that can afford to give ground — it wraps
+      instead, which is the part that can afford to give ground: it wraps
       now rather than ellipsising, so the ground it gives is a line break.
       {% endcomment %}
       <div class="rr-act">
@@ -192,12 +205,12 @@ only reintroduce the clipping bug this file's history is full of.
     WHY THIS ONE, on the Picked column only (`pick_why` is set on the copies
     that column makes, never on the firm columns' rows). ONE quiet line, in
     the meta line's own size and colour, ellipsised at the row's edge with
-    every full sentence in the `title` — the same one-line-not-pills call
+    every full sentence in the `title`. The same one-line-not-pills call
     the column header makes for the shared reasons (_results.html), and for
     the same reason: a pile of chips wrapped and staggered the column.
 
     The header prints what every pick shares; this prints what is left for
-    this pick — the firm's tier, the track the title states, the intake
+    this pick: the firm's tier, the track the title states, the intake
     year. It is the scorer's own chip texts joined the way `Recommendation.
     why` joins them, so a caveat chip ("2027 intake, a year early for you")
     reads as the caveat it is, here and in the digest email that prints the

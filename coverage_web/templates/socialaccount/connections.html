@@ -8,7 +8,9 @@
 {% block content %}
 <div class="page page--narrow acct-wrap">
   <a class="acct-back" href="{% url 'accounts:settings' %}#security">← Back to settings</a>
-  <header class="page-head"><h1>Connected Accounts</h1></header>
+  <header class="pagehead pagehead--compact">
+    <div class="pagehead-text"><h1 class="pagehead-title">Connected Accounts</h1></div>
+  </header>
   {% comment %}
   Sign-in only. Every provider in settings/base.py requests identity scopes
   and nothing else — connecting one here never grants Coverage mailbox access,

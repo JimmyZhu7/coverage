@@ -7,7 +7,9 @@
 {% block content %}
 <div class="page page--narrow acct-wrap">
   <a class="acct-back" href="{% url 'accounts:settings' %}#security">← Back to settings</a>
-  <header class="page-head"><h1>Email Addresses</h1></header>
+  <header class="pagehead pagehead--compact">
+    <div class="pagehead-text"><h1 class="pagehead-title">Email Addresses</h1></div>
+  </header>
   <p class="acct-lede">Your primary address is how you sign in and where password
     resets go. Changing it means adding the new one, verifying it, then making it
     primary.</p>

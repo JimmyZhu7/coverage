@@ -136,7 +136,7 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
   .set-row-label .pill { margin-left: var(--s2); vertical-align: 1px; }
   .set-row-desc { color: var(--ink-3); font-size: var(--fs-s); margin-top: 2px; }
   .set-row-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: 24px; font-weight: var(--w-med); color: var(--accent-ink); flex: none; }
+    font-size: var(--fs-figure); font-weight: var(--w-med); color: var(--accent-ink); flex: none; }
   .set-row-sub { color: var(--ink-3); font-size: var(--fs-xs); }
   .set-row-control { flex: none; display: flex; gap: var(--s2); align-items: center; }
   /* A read-only figure: the number over the word that says what it counts.
@@ -587,7 +587,14 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
     transition: left 520ms cubic-bezier(0.22, 1, 0.36, 1); }
   .cad-mark::after { content: ""; width: 9px; height: 9px; border-radius: 50%;
     background: var(--accent); box-shadow: 0 0 0 3px var(--paper);
-    transition: transform 200ms var(--t-ease, ease-out); }
+    /* Plain `ease-out`. These three rules used to reach for a motion-easing
+       token by name, with ease-out as the inline fallback. No such token exists
+       anywhere in the system, so the fallback fired on every one of these
+       three rules and the reference was an elaborate way of writing what
+       follows the comma. The motion tokens are shorthands (`--t-fast`,
+       `--t-med` carry a duration too), and minting an easing-only token for
+       three rules on one page would be a fourth motion vocabulary. */
+    transition: transform 200ms ease-out; }
   .cad-rail.is-live .cad-mark::after { animation: cad-pop 420ms cubic-bezier(0.22, 1, 0.36, 1); }
   @keyframes cad-pop { 40% { transform: scale(1.5); } }
   .cad-mark-park::after { background: var(--ink-3); }
@@ -599,14 +606,14 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
      like one. */
   .cad-lab { position: absolute; bottom: 15px; display: flex;
     align-items: baseline; gap: 5px; white-space: nowrap;
-    transition: bottom 200ms var(--t-ease, ease-out); }
+    transition: bottom 200ms ease-out; }
   /* The second row, assigned per draw by layoutLabels() — see the JS for why
      it is measured rather than fixed. 20px is one 16px label box plus air.
      The rail then drops by exactly that much, so a raised label keeps its
      clearance under the caption instead of climbing into it. */
   .cad-mark.is-raised .cad-lab { bottom: 35px; }
   .cad-rail.is-stacked { margin-top: 50px; }
-  .cad-rail { transition: margin-top 200ms var(--t-ease, ease-out); }
+  .cad-rail { transition: margin-top 200ms ease-out; }
   /* The markers pinned to the ends of a rail (Note and Touch at 0%, Closes
      at 100%) hang their label INWARD instead of centring it on the dot.
      Centred, half of each one sat out past the end of the track, and the
@@ -672,7 +679,12 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
     transition: stroke-dashoffset 320ms cubic-bezier(0.22, 1, 0.36, 1); }
   .pace-ring-widget .pr-val { position: absolute; inset: 0; display: grid;
     place-content: center; text-align: center; }
-  .pace-ring-widget .pr-val b { font-family: var(--font-mono); font-size: 30px;
+  /* `--fs-figure`, the same size `.set-row-value` takes two cards up. Both
+     are a number inside a panel, which is the whole distinction the figure
+     token draws: a display size is for a TITLE. It read 30px against that
+     card's 24px before the scale landed, which was two answers to one
+     question sitting a scroll apart. */
+  .pace-ring-widget .pr-val b { font-family: var(--font-mono); font-size: var(--fs-figure);
     font-weight: var(--w-med); color: var(--accent-ink); line-height: 1; }
   .pace-ring-widget .pr-val span { font-size: var(--fs-nano); text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--ink-3); }

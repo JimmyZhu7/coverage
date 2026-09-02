@@ -1232,7 +1232,20 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      read: 5.05:1 light, 6.24:1 dark, measured the same way. */
   .rr-due-n.meta-soon { color: var(--w-chatted-t); }
   .rr-due-n.meta-upcoming { color: var(--accent-ink); }
+  /* The undated cell. The mark is DRAWN, and the sentence is spoken.
+     It used to be an `aria-hidden` em dash, which cost twice: 2,382 of the
+     2,723 open campus rows carry it, and on every one of them a screen
+     reader met an empty cell in the column the board is sorted by, while
+     the character itself was the last em dash in the feed's markup. A
+     pseudo-element is not in the accessibility tree, so the rule can say
+     "nothing here" to the eye without saying anything at all to the ear,
+     and `.vh` in the template says it to the ear instead.
+     12px, currentColor: the same faint line the column's own hairlines use,
+     so an undated row reads as a gap in the figures rather than a value. */
   .rr-due-none { color: var(--line-strong); }
+  .rr-due-none::before { content: ""; display: inline-block;
+    width: 12px; height: 1px; vertical-align: middle;
+    background: currentColor; }
   .rr-due-rolling { display: inline-flex; align-items: center; }
   /* Same dotted mark the card used for a deadline read out of prose rather
      than published as a field — the claim is about provenance, so it keeps
