@@ -7,10 +7,12 @@ does not render as multi-select checkboxes. A hand-rolled form keeps the
 array handling explicit and lets the templates control the (restrained)
 markup, while still giving Django's validation for the scalar fields.
 
-The region/track vocabularies are the ones actually present in the seeded
-`directory.Firm` rows (`{hk, us}` and `{am, consulting, corp-strat, ib,
-pe, st}`) — kept here as the single source of truth so the onboarding
-firm-picker filters and the profile checkboxes never drift apart.
+The region/track vocabularies come from `directory.classify` — the single
+source of truth, so the onboarding firm-picker filters and the profile
+checkboxes never drift apart. Tracks are `SELECTABLE_TRACKS` (`{am,
+consulting, ib, pe, st}`), which is the storage vocabulary minus the
+retired `corp-strat`; see that constant for why the slug outlives the
+checkbox.
 """
 
 from __future__ import annotations
@@ -28,7 +30,8 @@ from PIL import Image, ImageOps
 
 from coverage_domain.cadence import CADENCE_DEFAULTS
 from directory.classify import (
-    REGION_LABELS, TRACKED_REGIONS, TRACK_LABELS, TRACKED_TRACKS,
+    REGION_LABELS, SELECTABLE_TRACKS, TRACKED_REGIONS, TRACK_LABELS,
+    selectable_tracks,
 )
 # The languages the board's own extractor can recognise on a posting — the
 # module-private tuple rather than a public alias, on the same footing as
@@ -71,14 +74,20 @@ REGION_CHOICES: list[tuple[str, str]] = [
     (code, REGION_LABELS[code]) for code in TRACKED_REGIONS
 ]
 
-# Sourced from classify.TRACKED_TRACKS/TRACK_LABELS — the SAME vocabulary
+# Sourced from classify.SELECTABLE_TRACKS/TRACK_LABELS — the SAME vocabulary
 # directory/views.py's Opportunities track filter reads — rather than a
 # second, independently-hardcoded copy. The two used to drift: this list
 # called "pe" "Private Equity" while the filter called it "Private Equity /
 # Credit" (the firms actually tagged "pe" include credit shops, so that is
 # the accurate label a student sees both places now).
+#
+# SELECTABLE_TRACKS, not TRACKED_TRACKS: the storage vocabulary is six wide
+# and the picker is five, because `corp-strat` was retired (D-3) while its
+# nine firms and its check constraint stayed. A student whose profile still
+# holds it sees five boxes, none of them checked for it, and the next save
+# drops it — see `classify.selectable_tracks`.
 TRACK_CHOICES: list[tuple[str, str]] = [
-    (code, TRACK_LABELS[code]) for code in TRACKED_TRACKS
+    (code, TRACK_LABELS[code]) for code in SELECTABLE_TRACKS
 ]
 
 # Working-language vocabulary: English first, then every language
@@ -450,7 +459,11 @@ class ProfileForm(forms.Form):
                 "study_level": user.study_level,
                 "target_cycles": list(user.target_cycles or []),
                 "regions": list(user.regions or []),
-                "tracks": list(user.tracks or []),
+                # Retired tracks dropped here rather than rendered as a box
+                # that is not there: the form would save `['ib']` anyway (the
+                # choice is gone), and an initial the form cannot round-trip
+                # is how a settings page silently loses a value.
+                "tracks": selectable_tracks(user.tracks),
                 "languages": list(user.languages or []),
                 "affiliations": "\n".join(user.affiliations or []),
                 # A stored zone the host's tzdata no longer carries would

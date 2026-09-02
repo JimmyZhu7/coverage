@@ -34,7 +34,7 @@ from billing.models import CreditLedger
 from coverage_domain import cadence, scoring
 from coverage_domain.pipeline import MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
 from crm.forms import ChatDebriefForm, ContactForm
-from directory.classify import REGION_LABELS, TARGET_BUCKETS
+from directory.classify import REGION_LABELS, TARGET_BUCKETS, selectable_tracks
 from directory.models import Firm, FirmDate, Opportunity
 
 from . import (
@@ -1489,7 +1489,13 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             # over, which is how eleven PE/AM/consulting shops outranked a
             # tier-1 bank with a confirmed close on the founder's strip.
             "firm_tracks": list(uf.firm.tracks or []),
-            "user_tracks": list(user.tracks or []),
+            # The student's tracks AS THE PRODUCT READS THEM: a retired slug
+            # is not a preference any more (D-3), so a profile still holding
+            # `['ib', 'corp-strat']` ranks its nine tech firms as the
+            # off-track firms they are instead of as a track the student is
+            # recruiting for. `classify.selectable_tracks` is that rule, in
+            # one place, for every surface.
+            "user_tracks": selectable_tracks(user.tracks),
             "recruiting_style": uf.firm.recruiting_style,
         }
         for uf in user_firms

@@ -99,7 +99,7 @@ from typing import Mapping, Sequence
 
 from directory.classify import (
     ENTRY_LEVEL, INSIGHT, INTERNSHIP, TRACKED_REGIONS, derive_class_year,
-    normalize_region,
+    normalize_region, selectable_tracks,
 )
 
 # ---------------------------------------------------------------------------
@@ -751,7 +751,12 @@ class Profile:
             ),
             school=getattr(user, "school", "") or "",
             regions=tuple(r.lower() for r in (getattr(user, "regions", None) or [])),
-            tracks=tuple(getattr(user, "tracks", None) or []),
+            # Retired slugs dropped on the way in (D-3): a track the picker
+            # no longer offers cannot score a firm up, on this page or in
+            # the digest, and a profile still holding one reads as the
+            # one-track profile it now is. `classify.selectable_tracks` is
+            # the single definition of that read.
+            tracks=tuple(selectable_tracks(getattr(user, "tracks", None))),
             firm_tiers=dict(firm_tiers or {}),
             warm_firms=dict(warm_firms or {}),
             # `getattr` with a default on purpose: the column is being added
@@ -1654,7 +1659,12 @@ def role_matches_tracks(title: str, tracks) -> bool:
                                                  _new_role_events`)
       student stated no tracks        -> True   (nothing to filter to)
     """
-    wanted = set(tracks or ())
+    # Retired slugs are not preferences (D-3): a student whose profile still
+    # holds `corp-strat` is filtered as the ib-only student the picker would
+    # now make them, and a corp-strat-ONLY profile degrades to the
+    # no-tracks-stated case above, which is the honest read of a preference
+    # the product has withdrawn.
+    wanted = set(selectable_tracks(tracks))
     if not wanted:
         return True
     fn = role_function_cached(title)

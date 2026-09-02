@@ -102,15 +102,18 @@ TRACKED_REGIONS = ("hk", "us", "sg", "eu", "cn", "jp")
 # stops "Other Markets" appearing in Settings as somewhere to want to work.
 REGION_ORDER = TRACKED_REGIONS + ("other", "global")
 
-# Human labels for the firms.yaml track slugs, and the same six-way
-# vocabulary a student can state a preference for. Single source of truth
-# for the same reason REGION_LABELS/TRACKED_REGIONS are above it:
+# Human labels for the firms.yaml track slugs. Single source of truth for
+# the same reason REGION_LABELS/TRACKED_REGIONS are above it:
 # accounts/forms.py's Settings checkboxes and directory/views.py's
 # Opportunities filter used to hardcode this vocabulary separately and
 # drifted — Settings offered "Private Equity", the filter called the same
 # slug "Private Equity / Credit" (the firms actually tagged "pe" include
 # credit shops: Apollo, Ares, Blue Owl, Golub Capital, HPS, Oaktree, Sixth
 # Street, not just buyout funds, so the fuller label is the accurate one).
+#
+# A LABEL HERE IS NOT AN OFFER. Every slug the STORAGE vocabulary carries
+# needs a human name, because a firm tagged with it still prints its desk on
+# its own card; what a student may TARGET is `SELECTABLE_TRACKS` below.
 TRACK_LABELS = {
     "ib": "Investment Banking",
     "st": "Sales & Trading",
@@ -119,7 +122,47 @@ TRACK_LABELS = {
     "consulting": "Consulting",
     "corp-strat": "Corporate Strategy",
 }
+
+# THE STORAGE VOCABULARY. `FirmDate.track`'s CHECK constraint is built from
+# this tuple (see directory/models.py and migration 0014), so a value cannot
+# be deleted from it without a schema migration, and the nine firms tagged
+# `corp-strat` keep their tag: a student who knows someone at Google should
+# still be able to log it.
 TRACKED_TRACKS = ("ib", "st", "pe", "am", "consulting", "corp-strat")
+
+# Retired 2026-09-02 (D-3). `corp-strat` returned zero open rows in any
+# bucket, 5 open campus rows named it by title against 602 for ib, and not
+# one firm tagged with it has a connector — the scope cut of 2026-07-23 kept
+# tech off the board deliberately (`directory/boards.py`, "Deliberately
+# absent"). Seven of the founder's 54 tiered firms carry it and six of them
+# have nobody at all, a quarter of his 24 zero-contact tiered firms: coverage
+# work manufactured by a track the board cannot fill. A track that is
+# selectable and returns nothing is a promise, so it stops being offered.
+#
+# RETIRED, NOT DELETED. The slug stays in TRACKED_TRACKS (the constraint),
+# in TRACK_LABELS (the firm cards) and on the nine firms. What changes is
+# that nobody can newly choose it, nothing counts it as a preference, and no
+# surface offers it as somewhere to want to work.
+RETIRED_TRACKS = ("corp-strat",)
+
+# THE PICKER VOCABULARY: what a student may state a preference for, and the
+# only track set any facet, archetype table or fit rule may read. Derived,
+# never restated — a seventh track added above is selectable the same day.
+SELECTABLE_TRACKS = tuple(t for t in TRACKED_TRACKS if t not in RETIRED_TRACKS)
+
+
+def selectable_tracks(values):
+    """`values` (a stored `User.tracks` list) as the product reads it today:
+    retired slugs dropped, order and duplicates otherwise untouched.
+
+    THE READ-TIME DEGRADE, and the reason D-3 needs no data migration. A
+    profile holding `['ib', 'corp-strat']` answers `['ib']` here, which is an
+    already-supported state (a one-track student), and the row itself is left
+    alone until the student next saves Settings — where the checkbox is gone,
+    so the save drops it. Nothing rewrites a student's stated preferences
+    behind their back to make a product decision true."""
+    return [t for t in (values or []) if t in SELECTABLE_TRACKS]
+
 
 # Checked in order; the first matching market wins. Keys are lowercase
 # substrings (city / country / region tokens).
