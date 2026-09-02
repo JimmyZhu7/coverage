@@ -2311,7 +2311,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-family: var(--font-mono); font-size: var(--fs-micro);
     text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
   .daily-brief-text { position: relative; margin: 0; color: var(--ink);
-    font-size: var(--fs-m); line-height: 1.55; max-width: 68ch; }
+    font-size: var(--fs-m); line-height: 1.55; max-width: 92ch; }
+  {% comment %}
+  92ch, not 68ch (2026-09-02, the founder's own review). 68ch is the right
+  cap for a paragraph read top to bottom; this is one sentence in a wide
+  row with a fixed-width button pinned to its right, and the tighter cap
+  wrapped the sentence early and left the gap between the wrap and the
+  button empty on any screen wider than about 700px. Widened rather than
+  removed: a brief that ever runs to several sentences should still wrap
+  before it reaches edge to edge.
+  {% endcomment %}
   /* The one or two words the advisor itself chose to bold — see
      assistant.brief's prompt — get the accent ink rather than plain black,
      so the important word pops without the sentence turning into a wall of
