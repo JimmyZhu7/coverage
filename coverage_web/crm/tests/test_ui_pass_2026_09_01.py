@@ -182,24 +182,30 @@ def test_the_first_warmth_row_with_people_in_it_opens():
     assert all(" open" not in r for r in rows[1:]), "only the first row opens"
 
 
-def test_the_gap_strip_is_one_ledger_not_six_boxes():
-    """Three card shapes shared one board (`.gap-card`, `.firm-card`,
-    `.contact-card`) and the gap strip was six identical 150px boxes with
-    six identical buttons. The strip is now six rows in one surface, at the
-    density `.rolerow` and `.act-card` already set.
+def test_the_board_is_down_to_two_card_shapes():
+    """REWRITTEN 2026-09-02. It read
+    `test_the_gap_strip_is_one_ledger_not_six_boxes` and pinned the ledger
+    that fixed the defect: three card shapes shared one board (`.gap-card`,
+    `.firm-card`, `.contact-card`) and the gap strip was six identical 150px
+    boxes with six identical buttons, so the strip became six rows in one
+    surface at the density `.rolerow` and `.act-card` already set.
+
+    The founder then deleted the strip outright. The DEFECT this test was
+    written for is therefore not fixed but gone, one shape further than the
+    ledger got it: two card shapes on this board instead of three. That is
+    what it pins now, which is the stronger claim, and the ledger rules must
+    not be sitting in the stylesheet waiting to draw a third.
     """
     css = _styles(_get(NETWORK, "ui-gaps@example.com"))
-    row = re.search(r"\.gap-row \{(.*?)\}", css, re.S)
-    assert row, ".gap-row is gone"
-    assert "flex-direction: column" in row.group(1), (
-        "the strip is a column of rows, not a six-across grid"
+    assert not re.search(r"^[ \t]*\.gap-card \{", css, re.M), (
+        "the deleted strip's card shape still has a rule on this board"
     )
-    card = re.search(r"\.gap-card \{(.*?)\}", css, re.S)
-    assert "grid-template-columns" in card.group(1)
-    # The zones are placed explicitly so a row missing its sourcing panel
-    # cannot slide its button one column left.
-    for zone in (".gap-name", ".gap-head", ".gap-state", ".src", ".gap-act"):
-        assert f".gap-card > {zone} {{ grid-column:" in css
+    assert not re.search(r"^[ \t]*\.gap-row \{", css, re.M)
+    assert ".gap-card > " not in css, "the ledger's zone placements survive"
+    # The two that stay, and they are genuinely different things: a firm on
+    # a tier lane, and a person in the warmth ledger.
+    assert re.search(r"^[ \t]*\.firm-card \{", css, re.M)
+    assert re.search(r"^[ \t]*\.contact-card \{", css, re.M)
 
 
 def test_log_touch_is_a_ghost_so_the_page_keeps_one_primary():

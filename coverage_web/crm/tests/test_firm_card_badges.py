@@ -6,11 +6,15 @@ The card measured 109px without a wrapped badge row and 134px with one; it
 measures a flat 82px now.
 
 Two of the three deleted badges lose nothing. Open roles are the
-Opportunities feed's whole subject, and the Coverage Gaps strip at the top of
-this same page still names the count for the four firms it ranks. Every
-contact behind "Act Now" is listed BY NAME in the action lanes to the left of
-these cards. "Sponsors" is a firm attribute with its own filter in the
+Opportunities feed's whole subject; every contact behind "Act Now" is listed
+BY NAME on Today. "Sponsors" is a firm attribute with its own filter in the
 directory.
+
+The Coverage Gaps strip that used to sit above these cards, and which kept
+its own open-role count for a while after they lost theirs, is deleted
+(2026-09-02). What it said about a firm's coverage is on the card now, as a
+"CG" pill built the same way as "SP" — see crm/tests/test_coverage_gaps.py
+for the bar that decides which cards wear it.
 
 The third one did carry something. "N Soon" counted roles whose deadline was
 inside two weeks, and a deadline is precisely the signal a progress bar
@@ -49,6 +53,19 @@ def _tier_board(body: str) -> str:
     from "the legend always shows one anyway" if it were left in scope."""
     start = body.index('<div class="tier-section"')
     return body[start : body.index('<p class="net-legend-mini"', start)]
+
+
+def _card(board: str, name: str) -> str:
+    """One firm's card, from its name to the start of the next card.
+
+    Was a fixed 600-character window off the firm's name, which is a
+    heuristic that breaks whenever a card gains anything: the "CG" tag
+    (2026-09-02) carries a 70-character `title=`, which pushed the card's
+    own verb past the window and failed a test about the verb. Bounded on
+    the next card's opening tag instead, so the slice is the card."""
+    start = board.index(name)
+    nxt = board.find('<div class="firm-card ', start)
+    return board[start:] if nxt == -1 else board[start:nxt]
 
 
 @pytest.fixture
@@ -186,8 +203,7 @@ def test_a_firm_with_nobody_added_shows_a_bar_but_no_sockets(client, student):
     board = _board(client, student)
 
     assert "Untouched Co" in board
-    card_start = board.index("Untouched Co")
-    card = board[card_start : card_start + 600]
+    card = _card(board, "Untouched Co")
     assert 'class="firm-bar" title="No contacts yet"' in card, (
         "an untouched firm should still draw its bar, honestly titled"
     )
@@ -259,34 +275,27 @@ def test_a_distant_close_date_is_not_urgent(client, student):
     assert "gap-due-tag" not in board
 
 
-def test_the_coverage_gaps_card_dropped_its_open_count_too(client, student):
+def test_no_surface_on_this_page_wears_an_open_count_any_more(client, student):
     """"Take away the open xx for ALL of these" — said while pointing at a
-    card in the Coverage Gaps strip, which is a different component from the
-    tier board's firm card and had kept its badge through the first pass.
-    Both surfaces now say the same nothing about inventory."""
+    card in the Coverage Gaps strip, which was a different component from
+    the tier board's firm card and had kept its badge through the first pass.
+
+    Rewritten 2026-09-02: that strip is deleted, so the test can no longer
+    slice down to it, and the tooltip clause it used to check ("48 open roles
+    right now") went with the row that carried it. The claim is kept and made
+    BOARD-WIDE rather than dropped, which is the stronger version of what was
+    asked for: nothing anywhere on this page states an open-role count, on a
+    face or in a hover. The count is still a real ranking input inside
+    `rank_gaps` and still the Opportunities feed's whole subject.
+    """
     _busy_firm(student)
     client.force_login(student)
     body = client.get(reverse("crm:contact_list")).content.decode()
-    # Sliced up to "Covered Firms" — the next <h2> on the board, renamed
-    # 2026-08-31 from "Firm Coverage" — since the "Contacts Needing Action"
-    # panel this used to end at is gone (it duplicated Today's own queue;
-    # see crm/views.py::contact_list). `start` bounds the second `.index()`
-    # too: the page's own inlined <style> block still names the section by
-    # its old name in a CSS comment ABOVE this heading (see
-    # crm/_styles.html), and an unbounded search would find that first and
-    # return an empty slice.
-    strip_start = body.index('<h2 class="strip-title strip-title-lg" title="Ranked by exposure')
-    strip = body[strip_start : body.index("Covered Firms", strip_start)]
 
-    assert "Busy Co" in strip, "the seeded firm is not on the gaps strip at all"
-    assert "gap-badges" not in strip and "pill fc-open" not in strip, (
-        "a Coverage Gaps card is wearing an open-role count again."
-    )
-    assert "48 open roles right now" in strip, (
-        "the count is gone from the card's tooltip as well. It still breaks "
-        "ties in the ranking, so the reader deserves to be able to find out "
-        "why one identically-scored card sits above another."
-    )
+    assert "Busy Co" in body, "the seeded firm is not on the board at all"
+    for banned in ("gap-badges", "pill fc-open", "open roles right now",
+                   "48 Open", "48 open"):
+        assert banned not in body, f"an open-role count is back: {banned!r}"
 
 
 def test_the_removed_counts_still_decide_which_firm_reads_first(client, student):

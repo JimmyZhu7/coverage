@@ -1,34 +1,29 @@
-"""Tests for `crm.sourcing` — the "Who to find" suggestions on a Coverage
-Gap card — and for the render + event endpoint that carry them.
+"""Tests for `crm.sourcing` — the "Who to find" suggestions — and for the
+event endpoint that logged them.
 
-`crm.sourcing` is pure (no DB, no clock, no network), so most of this file
-is plain unit tests over tiny stand-in objects. That is deliberate: the
-claims the panel makes to a student ("these are your tracks' seats", "this
-link searches THIS firm") should be assertable without a database row.
+`crm.sourcing` is pure (no DB, no clock, no network), so most of this file is
+plain unit tests over tiny stand-in objects. That is deliberate: the claims
+the suggestions make to a student ("these are your tracks' seats", "this link
+searches THIS firm") should be assertable without a database row, and it is
+why this file survived the deletion of the only surface that rendered them
+(2026-09-02, section 5 below).
 """
 
 from __future__ import annotations
 
 import re
-from datetime import timedelta
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.urls import reverse
-from django.utils import timezone
 
 from crm import sourcing
 from crm.models import UserFirm
 from directory.classify import SELECTABLE_TRACKS, TRACK_LABELS
-from directory.models import Firm, FirmDate
+from directory.models import Firm
 
 User = get_user_model()
-
-STYLES = (
-    Path(__file__).resolve().parents[2] / "templates" / "crm" / "_styles.html"
-)
 
 
 class FakeUser:
@@ -217,11 +212,40 @@ def test_a_key_names_the_same_seat_whatever_order_the_tracks_are_in():
 
 
 # ---------------------------------------------------------------------------
-# 5. The render: the panel on the Coverage Gaps card.
+# 5. The render. THERE ISN'T ONE ANY MORE (2026-09-02).
+#
+# "Who to find" only ever rendered inside a Coverage Gaps row: a `<details>`
+# in the row's fourth column, opening a dropdown of three LinkedIn searches.
+# The founder asked for that widget deleted whole and its coverage status
+# routed onto the firm cards, and the panel was inside it, so it went with
+# the ledger it lived in.
+#
+# The five render tests that stood here are replaced by one. They pinned the
+# panel's markup, its single disclosure line, the assessment note, its
+# absence on a covered firm, and its drop-in animation; all five described
+# markup that cannot render, and a passing assertion about markup that cannot
+# render is not evidence of anything. The one below pins the deletion, which
+# is the only claim about the render that is still checkable.
+#
+# NOTHING ELSE IN THIS FILE CHANGED. `crm/sourcing.py` is untouched and every
+# unit test above it still runs; the `crm:sourcing_event` endpoint is
+# untouched and section 6 below still exercises it, though the app no longer
+# calls it. That is deliberate and is flagged in `views.sourcing_event`'s own
+# docstring: what was deleted is a widget, and whether this feature deserves
+# a surface somewhere else is a separate question nobody has been asked.
 # ---------------------------------------------------------------------------
 @pytest.mark.django_db
-def test_a_gap_card_carries_its_who_to_find_panel(client):
-    user = User.objects.create_user(email="src@example.com", password="x")
+def test_the_panel_is_off_the_page_and_the_module_is_not(client):
+    """Delete, not hide. A board that would have drawn the panel on every
+    row draws none of it: no toggle, no dropdown, no disclosure line, and no
+    rules for any of them.
+
+    The seeded firm is exactly the case the panel was best at — a tier-1 firm
+    with nobody at it, on the student's own track, at a school that used to
+    add an alumni row — so "nothing renders" is a real absence rather than an
+    empty board.
+    """
+    user = User.objects.create_user(email="src@example.com", password="x" * 14)
     user.tracks = ["ib"]
     user.school = "USC"
     user.save(update_fields=["tracks", "school"])
@@ -230,145 +254,30 @@ def test_a_gap_card_carries_its_who_to_find_panel(client):
 
     client.force_login(user)
     body = client.get(reverse("crm:contact_list")).content.decode()
+    styles = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", body, re.S))
+    markup = re.sub(r"<style[^>]*>.*?</style>", "", body, flags=re.S)
 
-    # Anchored on the rendered element, not the bare words: `crm/_styles.html`
-    # is inlined into this same document and its CSS comment names the panel
-    # too, so a plain `"Who to find" in body` passes on the stylesheet alone.
-    assert '<summary class="src-toggle">Who to find</summary>' in body
-    assert sourcing.DISCLOSURE in body
-    assert sourcing.TRACK_ARCHETYPES["ib"][0][0] in body
-    assert "Someone from USC" in body
-    # Outbound, new tab, and no window.opener handed to LinkedIn.
-    assert 'rel="noopener noreferrer"' in body
-    assert 'target="_blank"' in body
-    # The firm name is encoded in the href, ampersand and all.
-    assert "Rothschild%20%26%20Co" in body or "Rothschild+%26+Co" in body
-
-
-@pytest.mark.django_db
-def test_an_ordinary_firms_panel_states_its_disclosure_once(client):
-    """The panel had two note slots and they resolved to the same sentence.
-    `sourcing_note` is the page-level `DISCLOSURE`, `g.sourcing_note` is
-    `panel_note(firm)`, and `panel_note` returns `DISCLOSURE` for every firm
-    that is not assessment-gated — so an opened panel printed "Suggestions,
-    not a list of people. Each one opens a LinkedIn search." twice, one line
-    under the other, on five of the six rows the demo board renders.
-
-    Rendered once now. Nothing is lost: the paragraph above the rows still
-    carries it, and the per-card slot still prints when it has something the
-    paragraph does not, which is what the next test pins.
-    """
-    user = User.objects.create_user(email="src-once@example.com", password="x")
-    user.tracks = ["ib"]
-    user.save(update_fields=["tracks"])
-    firm = Firm.objects.create(slug="lazard", name="Lazard")
-    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-
-    client.force_login(user)
-    body = client.get(reverse("crm:contact_list")).content.decode()
-
-    # The class attribute now also carries `panel panel--raised` (2026-09-02,
-    # D-13's panel primitive), so an exact-string match on `class="src-panel"`
-    # alone silently matched nothing. Anchored on the class NAME instead of
-    # the full attribute.
-    panels = re.findall(r'<div class="src-panel[^"]*">(.*?)</div>', body, re.S)
-    assert panels, "the firm rendered no sourcing panel"
-    assert panels[0].count(sourcing.DISCLOSURE) == 1, (
-        "the disclosure is printed twice in one panel again — the per-card "
-        "note slot is repeating the page-level one."
+    assert "Rothschild &amp; Co" in markup, "the firm is not on the board at all"
+    assert '<summary class="src-toggle">' not in markup
+    assert 'class="src-panel' not in markup
+    assert sourcing.DISCLOSURE not in markup
+    assert sourcing.TRACK_ARCHETYPES["ib"][0][0] not in markup
+    assert "Someone from USC" not in markup
+    assert "linkedin.com" not in markup, (
+        "the board is still handing out LinkedIn searches from somewhere"
     )
+    # The rules too, animation included. Asserted on the rendered stylesheet
+    # rather than on the template file, because a `{% comment %}` in the
+    # template is not served and a `/* */` in the CSS is.
+    for rule in (".src-toggle {", ".src-panel {", ".src-link {",
+                 "@keyframes src-drop"):
+        assert rule not in styles, f"{rule} outlived the markup it drew"
 
-
-@pytest.mark.django_db
-def test_an_assessment_firms_panel_still_says_the_thing_only_it_says(client):
-    """The per-card slot exists for exactly one case: a firm whose own FAQ
-    declines the coffee chat gets a note saying so and pointing at Apply.
-    That note is not the disclosure, so it still prints, and the disclosure
-    prints above it. Two lines, two facts.
-    """
-    user = User.objects.create_user(email="src-assess@example.com", password="x")
-    user.tracks = ["st"]
-    user.save(update_fields=["tracks"])
-    firm = Firm.objects.create(
-        slug="jane-street", name="Jane Street", recruiting_style="assessment",
-        tracks=["st"],
-    )
-    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-    # `track_fit` zeroes an assessment firm's gap points, so the only way one
-    # reaches this strip at all is on the additive deadline bonus — see the
-    # `exposure <= 0` branch in `coverage.rank_gaps`. A confirmed, day-precise
-    # close is what puts this row on the board to be asserted against.
-    FirmDate.objects.create(
-        firm=firm, event_kind="app_close", region="us",
-        date=timezone.localdate() + timedelta(days=10),
-        confidence=1.0, precision="day",
-    )
-
-    client.force_login(user)
-    body = client.get(reverse("crm:contact_list")).content.decode()
-
-    panels = re.findall(r'<div class="src-panel[^"]*">(.*?)</div>', body, re.S)
-    assert panels, "the firm rendered no sourcing panel"
-    assert sourcing.ASSESSMENT_NOTE in panels[0], (
-        "the assessment note went with the duplicate; a test-gated firm now "
-        "prompts for a chat its own FAQ declines."
-    )
-    assert panels[0].count(sourcing.DISCLOSURE) == 1
-
-
-@pytest.mark.django_db
-def test_a_covered_firm_has_no_card_and_so_no_panel(client):
-    """The panel lives on gap cards only. A firm that is done is not a
-    place the product should be sending anyone looking for names."""
-    user = User.objects.create_user(email="cov@example.com", password="x")
-    firm = Firm.objects.create(slug="done-co", name="Done Co")
-    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
-    from crm.models import Contact
-
-    for i in range(2):
-        Contact.all_objects.create(
-            user=user, name=f"A{i}", firm=firm, warmth="advocate"
-        )
-    client.force_login(user)
-    body = client.get(reverse("crm:contact_list")).content.decode()
-    # Same anchoring reason as the test above: the inlined stylesheet names
-    # the panel in a comment whether or not any card renders one.
-    assert '<summary class="src-toggle">' not in body
-    assert sourcing.DISCLOSURE not in body
-
-
-def test_the_panel_drop_is_a_real_animation_and_reduced_motion_turns_it_off():
-    """`--t-med` is a TRANSITION token: it expands to a duration AND a
-    timing function. Written as `animation: src-drop var(--t-med) ease
-    both` that is two timing functions in one shorthand, so the browser
-    throws the whole declaration away and the panel appears with no drop
-    at all. Measured live at 1440x950: `animationName` computed to "none"
-    with `prefers-reduced-motion: no-preference`, which is the value the
-    reduced-motion guard below is supposed to be the only way to get.
-
-    An invalid shorthand is silent in every unit test that reads the
-    rendered page, so the check has to be on the declaration itself.
-    """
-    css = " ".join(STYLES.read_text().split())
-    match = re.search(r"\.src-panel \{(.*?)\}", css, re.S)
-    assert match, ".src-panel is gone from crm/_styles.html"
-    shorthand = re.search(r"animation:\s*src-drop([^;]*);", match.group(1))
-    assert shorthand, "the panel lost its drop-in animation"
-    value = shorthand.group(1)
-    assert "var(--t-" not in value, (
-        "--t-* are transition tokens (duration + easing together); one in "
-        "an animation shorthand alongside a second easing makes the whole "
-        "declaration invalid and the animation silently never runs"
-    )
-    assert re.search(r"\d+ms", value), "the drop needs a literal duration"
-    # And the only way to get no animation stays the user's own setting.
-    guard = re.search(
-        r"@media \(prefers-reduced-motion: reduce\) \{([^}]*\.src-panel[^}]*\})",
-        css,
-    )
-    assert guard and "animation: none" in guard.group(1), (
-        "the panel's drop must be off under prefers-reduced-motion: reduce"
-    )
+    # And the module is untouched: it still answers, in full, for this firm.
+    rows = sourcing.suggestions_for(firm, user)
+    assert len(rows) == 3
+    assert any("USC" in r["label"] for r in rows)
+    assert sourcing.panel_note(firm) == sourcing.DISCLOSURE
 
 
 # ---------------------------------------------------------------------------

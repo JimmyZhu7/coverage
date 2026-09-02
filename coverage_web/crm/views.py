@@ -37,9 +37,14 @@ from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import REGION_LABELS, TARGET_BUCKETS, selectable_tracks
 from directory.models import Firm, FirmDate, Opportunity
 
+# `sourcing` is NOT imported here any more. Its only caller in this module
+# was the "Who to find" panel on a Coverage Gaps row, and that strip is gone
+# (2026-09-02). The module itself is untouched and still tested; the
+# `sourcing_event` endpoint below is untouched too, and now has no caller in
+# the app — see its docstring.
 from . import (
     ai_brief, ai_summary, campaigns, coverage, debrief as debrief_svc,
-    recruitment, services, sourcing,
+    recruitment, services,
 )
 from .models import (
     Campaign, ChatDebrief, Contact, Touch, UserFirm,
@@ -1313,6 +1318,53 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # measures against (User.assets["advocate_target"], default 2).
     adv_target = coverage.advocate_target(user)
 
+    # --- The coverage ranking, ABOVE the cards it now marks ---------------
+    # It used to sit below them, because its only consumer was a strip of six
+    # rows at the top of the page and the cards knew nothing about it. The
+    # strip is gone (2026-09-02, the founder's call: "route its status of
+    # coverage gaps into the actual company cards"), so the ranking has to be
+    # in hand before `firm_card` runs — `cg_firm_ids` below is what a card
+    # reads to decide whether it wears the tag.
+    #
+    # `closes`, `open_by_firm` and `by_firm_contacts` are all computed above:
+    # the ranking and the cards read the same dicts and the same
+    # CONFIRMED-only deadline bar, which is what stops a card and its own tag
+    # disagreeing about the firm they both describe.
+    gap_rows = [
+        {
+            "firm_id": uf.firm_id,
+            "name": uf.firm.name,
+            "tier": uf.tier,
+            "warmths": [c.warmth for c in by_firm_contacts.get(uf.firm_id, [])],
+            "app_close": closes.get(uf.firm_id),
+            # A ranking INPUT, not a display field: it breaks ties between
+            # firms that score identically. See `rank_gaps`.
+            "open": open_by_firm.get(uf.firm_id, 0),
+            # The firm's verticals and the student's own, and how the firm
+            # hires. `rank_gaps` halves the gap at a firm off the student's
+            # tracks and zeroes it at one that hires off a test (see
+            # `crm.coverage`'s formula, terms 4 and 5). Both were always in
+            # hand here — `uf.firm` is select_related — and never handed
+            # over, which is how eleven PE/AM/consulting shops outranked a
+            # tier-1 bank with a confirmed close on the founder's board.
+            "firm_tracks": list(uf.firm.tracks or []),
+            # The student's tracks AS THE PRODUCT READS THEM: a retired slug
+            # is not a preference any more (D-3), so a profile still holding
+            # `['ib', 'corp-strat']` ranks its nine tech firms as the
+            # off-track firms they are instead of as a track the student is
+            # recruiting for. `classify.selectable_tracks` is that rule, in
+            # one place, for every surface.
+            "user_tracks": selectable_tracks(user.tracks),
+            "recruiting_style": uf.firm.recruiting_style,
+        }
+        for uf in user_firms
+    ]
+    # Every gap now, not the worst six. The cap belonged to the strip and
+    # went with it; a per-card tag has no cap, and `flagged_firm_ids` is the
+    # bar that replaces one (`coverage.CG_EXPOSURE_MIN`, measured).
+    gaps = coverage.rank_gaps(gap_rows, today=today, target=adv_target, limit=None)
+    cg_firm_ids = coverage.flagged_firm_ids(gaps)
+
     def firm_card(uf):
         cs = by_firm_contacts.get(uf.firm_id, [])
         total = len(cs) or 1
@@ -1455,6 +1507,14 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                          coverage.GAP_LABELS[coverage.gap_state(
                              (c.warmth for c in cs), advocates, adv_target)]),
             "lever": None if adv_met else _pick_lever(cs),
+            # The "CG" tag: everything the deleted Coverage Gaps strip said,
+            # said on the card it was about. NOT the same thing as
+            # `gap_label`, which every under-target card carries and which
+            # names the RUNG this firm sits on. This is the RANKING: the
+            # firm's exposure cleared `coverage.CG_EXPOSURE_MIN`, the bar
+            # measured and defended in that module. On the founder's board it
+            # marks 11 of 54 cards; `gap_label` is on all 54.
+            "cg": uf.firm_id in cg_firm_ids,
         }
 
     tier_sections = []
@@ -1479,85 +1539,6 @@ def contact_list(request: HttpRequest) -> HttpResponse:
                 "label": label,
                 "cards": cards,
             })
-
-    # --- Coverage Gaps strip (top of the page) ---------------------------
-    # `closes` is computed above, with the firm-card inputs — the strip and
-    # the cards read the same dict and the same CONFIRMED-only bar.
-    gap_rows = [
-        {
-            "firm_id": uf.firm_id,
-            "name": uf.firm.name,
-            "tier": uf.tier,
-            "warmths": [c.warmth for c in by_firm_contacts.get(uf.firm_id, [])],
-            "app_close": closes.get(uf.firm_id),
-            # Goes IN to the ranking now rather than being attached to
-            # the result afterwards, because it decides ORDER now rather
-            # than being printed on the card. See `rank_gaps` — it breaks
-            # ties and touches nothing else.
-            "open": open_by_firm.get(uf.firm_id, 0),
-            # The firm's verticals and the student's own, and how the firm
-            # hires. `rank_gaps` halves the gap at a firm off the student's
-            # tracks and zeroes it at one that hires off a test (see
-            # `crm.coverage`'s formula, terms 4 and 5). Both were always in
-            # hand here — `uf.firm` is select_related — and never handed
-            # over, which is how eleven PE/AM/consulting shops outranked a
-            # tier-1 bank with a confirmed close on the founder's strip.
-            "firm_tracks": list(uf.firm.tracks or []),
-            # The student's tracks AS THE PRODUCT READS THEM: a retired slug
-            # is not a preference any more (D-3), so a profile still holding
-            # `['ib', 'corp-strat']` ranks its nine tech firms as the
-            # off-track firms they are instead of as a track the student is
-            # recruiting for. `classify.selectable_tracks` is that rule, in
-            # one place, for every surface.
-            "user_tracks": selectable_tracks(user.tracks),
-            "recruiting_style": uf.firm.recruiting_style,
-        }
-        for uf in user_firms
-    ]
-    gaps = coverage.rank_gaps(gap_rows, today=today, target=adv_target)
-    # One honest aggregate over the same rows: advocates across every tiered
-    # firm, against the 2-20 the outcome research says predicts an offer.
-    # Fifty-four cards each reading "0 of 2 advocates" is one fact fifty-four
-    # times; this is the fact once. Returned as a dict (see
-    # `coverage.advocate_summary`) so the template can print `line` whole or
-    # its parts.
-    advocate_summary = coverage.advocate_summary(gap_rows, target=adv_target)
-    # One click to act on each gap: somewhere to start when the firm is
-    # empty, and the warmest person who isn't an advocate yet when it
-    # isn't — that contact is the shortest path to closing the gap.
-    # `_pick_lever` — same function every firm card below uses.
-    firms_by_id = {uf.firm_id: uf.firm for uf in user_firms}
-    for g in gaps:
-        firm = firms_by_id.get(g["firm_id"])
-        g["slug"] = firm.slug if firm else ""
-        g["lever"] = _pick_lever(by_firm_contacts.get(g["firm_id"], []))
-        # `g["open"]` is set by `rank_gaps` from the input above — it is a
-        # ranking input now, not a display field bolted on afterwards. The
-        # card no longer prints it; it shows up as the card's POSITION among
-        # equally-exposed firms, and as one clause in the card's title=.
-        # "Who to find" — the other half of the answer. `lever` covers the
-        # firms where the student already knows someone; this covers the
-        # ones where the only verb on the card is "Add" and the card can't
-        # say WHO. Pure, in-memory, no query: `crm.sourcing` reads the
-        # firm's name and two fields off the user, and hands back three
-        # role archetypes with a prefilled LinkedIn search each. Nothing is
-        # fetched and nothing is imported (see that module's docstring) —
-        # these are suggestions and links out.
-        g["sourcing"] = sourcing.suggestions_for(firm, user) if firm else []
-        # The line above the rows: the generic "suggestions, not a list of
-        # people" for most firms, and for a firm that hires off a test the
-        # one that says so and points at "apply". Per card because the
-        # answer is per firm; the page-level `sourcing_note` below stays for
-        # anything that still reads it.
-        g["sourcing_note"] = sourcing.panel_note(firm) if firm else sourcing.DISCLOSURE
-        # Where "Apply" goes. `rank_gaps` sets `verb` to "Apply" only for an
-        # assessment firm, and the honest destination is that firm's own
-        # roles page here — not a LinkedIn search, which is what every other
-        # link on the card opens. Empty for the ordinary "Add" card.
-        g["apply_url"] = (
-            reverse("directory:firm_detail", args=[firm.slug])
-            if firm and g["verb"] == coverage.VERB_APPLY else ""
-        )
 
     # --- Full contact cards ---------------------------------------------
     # Warmth sections, same four as every other scope — School used to
@@ -1616,16 +1597,23 @@ def contact_list(request: HttpRequest) -> HttpResponse:
             "unplaced_total": unplaced_total,
             "unplaced_groups": unplaced_groups,
             "region_verb_labels": REGION_BULK_LABELS,
+            # The full ranking, every tiered firm with a gap, worst first.
+            # NOTHING ON THIS PAGE ITERATES IT any more: the strip that did
+            # is gone, and what the page renders off it is one boolean per
+            # card (`fc.cg`, set from `coverage.flagged_firm_ids`). It stays
+            # in the context because it is the ranking the tag is an opinion
+            # about, and a test that wants to know WHY a card is tagged
+            # should be able to read the arithmetic rather than infer it
+            # from a pill.
+            #
+            # `advocate_summary` and `sourcing_note` were dropped with the
+            # strip (2026-09-02). Both were built for markup that no longer
+            # exists — the caption line's number ended up in the strip
+            # heading's `title=`, and the heading went too; the disclosure
+            # line belonged to the "Who to find" panel. `coverage
+            # .advocate_summary` and `crm.sourcing` are both untouched and
+            # still the one definition of what they compute.
             "gaps": gaps,
-            # `coverage.advocate_summary(...)`: advocates across the tiered
-            # firms, the firm count, and the 2-20 range, plus a ready `line`.
-            # Computed above with the gap rows; not rendered yet — the
-            # template owner prints `advocate_summary.line` (or its parts)
-            # in the coverage summary.
-            "advocate_summary": advocate_summary,
-            # Said once per panel, in the module that builds the links, so
-            # the promise and the code can't drift apart.
-            "sourcing_note": sourcing.DISCLOSURE,
             "tier_sections": tier_sections,
             "firm_total": len(user_firms),
             "sections": sections,
@@ -1708,8 +1696,16 @@ _SOURCING_EVENTS = {
 @login_required
 @require_POST
 def sourcing_event(request: HttpRequest) -> HttpResponse:
-    """Log that a student opened a Coverage Gap card's "Who to find" panel,
-    or clicked one of its LinkedIn searches.
+    """Log that a student opened a "Who to find" panel, or clicked one of
+    its LinkedIn searches.
+
+    NO CALLER IN THE APP as of 2026-09-02. The panel lived on a Coverage
+    Gaps row and the strip was deleted whole; the endpoint, its tests and
+    `crm/sourcing.py` are all left standing rather than torn out in the same
+    pass, because what went was a WIDGET and the sourcing feature is a
+    separate product question the founder has not been asked. Wire a caller
+    back up or delete this deliberately; do not let it rot as a live POST
+    nobody reaches.
 
     Fire-and-forget, exactly like the assistant's thumbs up/down
     (`assistant.views.feedback`): one append-only `record_event` row, no

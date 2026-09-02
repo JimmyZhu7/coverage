@@ -5,11 +5,12 @@
 modules that feed it: `crm/coverage.py`, `crm/sourcing.py`, `crm/campaigns.py`,
 `crm/recruitment.py`. Audience: the next agent to change this page.*
 
-*This describes the page AS IT IS after the 2026-09-01 pass, not as it was
-audited before it. Where the CSS and this document disagree, the CSS wins and
-this document is the bug, same rule `docs/design-spec.md` states for itself.
-Numbers below were measured on the demo account (`demo@coverage.local`: 49
-contacts, 22 target firms, 6 gap rows) on 2026-09-02.*
+*Revised 2026-09-02 (evening): the Coverage Gaps strip this file described in
+full was deleted and its status moved onto the firm cards as a "CG" tag. Where
+this document and the code disagree, the code wins and this document is the bug,
+same rule `docs/design-spec.md` states for itself. Numbers below were measured
+on the demo account (`demo@coverage.local`: 49 contacts, 23 firm cards) and on
+the founder's own board (54 firm cards) on 2026-09-02, read-only.*
 
 The thesis this page serves: **who do I know, where am I exposed.** Today
 answers "what do I do now" and owns the cadence queue. Network is the standing
@@ -31,16 +32,19 @@ Order, top to bottom, at every width:
    Profile "Regions of Interest", so a student recruiting US only does not carry
    a Singapore tab forever. "Other countries" renders only when it holds
    somebody or the reader is standing on it. No counts (Part 3, D1).
-3. **Coverage Gaps** (`.gap-strip`), when `gaps` is non-empty. A heading and
-   six ledger rows. No caption line (Part 3, D9).
-4. **Unplaced** (`.net-unplaced`), only on `?scope=unplaced`. Not a tab. Its one
+3. **Unplaced** (`.net-unplaced`), only on `?scope=unplaced`. Not a tab. Its one
    route in is the "Place them" link in the caveat above the contact grid, which
    renders on a region tab and only when that tab is actually showing guesses.
-5. **Covered Firms** (`.net-coverage`): one panel, one section per tier, firm
-   cards inside, then a five-item warmth key.
-6. **Contacts** (`.net-contacts`): the search and sort toolbar, the one-shot
+4. **Covered Firms** (`.net-coverage`): one panel, one section per tier, firm
+   cards inside, then a six-item key.
+5. **Contacts** (`.net-contacts`): the search and sort toolbar, the one-shot
    park Undo strip when there is one, then the warmth ledger, then the sticky
    bulk bar.
+
+There is no Coverage Gaps strip. One stood between the scope tabs and Covered
+Firms until 2026-09-02 and is deleted (Part 3, D11). Nothing may take its
+place: a second list of firms above a board that already lists every firm is
+the seam that got it removed.
 
 There is no right rail and no warmth meter. The meter (`.meter-fill`, with its
 `--from`/`--to` animation contract) lives on the contact detail page, not on
@@ -67,61 +71,88 @@ guess. Place them"), and that line is the entire nag budget for the unplaced
 pool. It is zero on All and on School, so those scopes carry no caveat and no
 route into the Unplaced tool.
 
-### B. Coverage Gaps
+### B. Coverage exposure, and the CG tag
 
-The worst six tiered firms, worst first, from `coverage.rank_gaps` with
-`limit=6`. Exposure is `tier_weight × gap_points + deadline_bonus`, where
-`gap_points` is the ladder rung after `track_fit` halves it for an off-track
-firm and zeroes it for an assessment firm. Covered firms are dropped.
+There is no strip. `coverage.rank_gaps` still ranks EVERY tiered firm with a
+gap, worst first, and what the page renders off it is one mark: firms whose
+exposure clears `coverage.CG_EXPOSURE_MIN` wear a "CG" pill on their own card
+in Covered Firms.
 
-Row anatomy, five zones on six shared grid tracks. The sixth track is an empty
-gutter, between the facts and the verb:
+Exposure is `tier_weight × gap_points + deadline_bonus`, where `gap_points` is
+the ladder rung after `track_fit` halves it for an off-track firm and zeroes it
+for an assessment firm. Covered firms are dropped: at or above the advocate
+target is not a gap.
 
-```
-| firm name | T1  6d to close | No advocate | Who to find ↓ |        | Add Contact |
-```
+**The bar is 8, written as `TIER_WEIGHT[2] × GAP_POINTS[NO_CONTACTS]`.** It
+reads "a firm you ranked, that you have no way into": both of the formula's
+heaviest terms have to fire. Measured 2026-09-02 by rendering the board at each
+candidate bar and counting the cards that would wear the tag:
 
-- **The face carries no number.** Not the exposure score, not the rank, not the
-  advocate fraction, not the open-role count. All of it is in the row's own
-  `title=`, spelled out with the word "exposure". Pinned by
-  `crm/tests/test_coverage_gaps.py::test_the_gap_strip_shows_no_number_on_its_face`.
-- **Tier is a text tag and a weight step, never a rail.** `.gap-tier-tag`
-  prints "T1" at `--ink-3` on every row and `.gap-t1` sets it bold. The tag
-  does not come off: it is the only place tier appears in words, and colour
-  alone is the failure mode this rule exists to avoid. The 3px tier-coloured
-  left edge that used to carry the second channel is gone (Part 4, item 6).
-  Weight rather than ink because the ink step landed T1 on the state phrase's
-  own `--ink-2`, which is the separation directly below this line.
-- **The state phrase outranks the tier tag,** by size (`--fs-s` against
-  `--fs-xs`), by colour (`--ink-2` against `--ink-3`) and by face (UI against
-  mono). It is the one thing that differs row to row; tier is a rank the rows
-  are already sorted by.
-- **Ties are broken by order, not by text.** Same tier and same gap state score
-  identically, which is the formula being honest. `rank_gaps` then sorts on open
-  campus roles. Open roles never enter the exposure formula: hiring volume is
-  not a coverage gap.
-- **"Who to find"** is a native `<details>` so it opens with no JavaScript. It
-  sits with the facts, not with the verb: the gutter falls between it and the
-  button, which is what stopped the two reading as competing controls. The
-  panel is absolutely positioned `left: 0` against the toggle's own
-  `<details>`, so it opens directly under the word that opened it at every
-  width. Three role archetypes from `crm/sourcing.py`, each a prefilled
-  LinkedIn search. `sourcing.DISCLOSURE` states that we hand over a query, not
-  a person. The script does two things on top: close the others when one
-  opens, and POST to `crm:sourcing_event` fire and forget.
-- **The toggle carries no rule at rest.** The ↓ glyph is the affordance and
-  flips to ↑ when open; a solid underline appears on hover, on keyboard focus
-  and while the panel is open. A permanent hairline under text beside a
-  bordered button was flagged twice, dashed and then dotted.
-- **The verb is "Add Contact", or "Apply" at an assessment firm.** An assessment
-  firm's own FAQ declines the coffee chat, so prompting for a contact there
-  would send a student to manufacture a relationship the firm has said does not
-  move the process. `verb_reason` carries the why in `title=`.
+| bar | founder, 54 cards | demo, 23 cards |
+| --- | --- | --- |
+| any gap at all | 54 (100%) | 21 (91%) |
+| exposure ≥ 4 | 44 (81%) | 20 (86%) |
+| exposure ≥ 6 | 28 (51%) | 18 (78%) |
+| **exposure ≥ 8** | **11 (20%)** | **6 (26%)** |
+| exposure ≥ 9 | 7 (13%) | 6 (26%) |
+| exposure ≥ 12 | 1 (2%) | 6 (26%) |
 
-`advocate_summary.line` is not rendered. It is one number, the one the research
-says predicts outcomes, and it now hangs off the strip heading's `title=`
-instead of printing under it (Part 3, D9). `crm.coverage.advocate_summary` and
-the context key are both untouched.
+Every one of the founder's 54 tiered firms carries some gap, because he has
+zero advocates anywhere, so "any gap" is his default state and a tag on the
+default state is furniture. Every bar under 8 still tags half the board or
+more; 12 tags one card out of 54. At 8 the tag lands on eleven banks on his own
+tracks: one with nobody (3 × 4 = 12), six he has emailed with no reply (3 × 3 =
+9), and four tier-2 banks with nobody (2 × 4 = 8). On the demo board it selects
+exactly the six firms the old strip drew, name for name.
+
+What it deliberately does not tag: the eleven PE, AM and consulting shops he
+tiered aspirationally and knows nobody at, because `track_fit` already halved
+them and tagging them would re-open the defect that multiplier was added to
+close; tier-3 firms, because tier 3 is the student's own statement that they
+matter least; and any firm where somebody has replied. A firm that HAS an
+advocate can never be tagged: `BELOW_TARGET` is 1 point, so its ceiling is
+3 × 1 + 3 = 6.
+
+Measured on the raw contact table the numbers differ, and the board is right.
+The view drops archived, parked, campaign-hidden and non-recruitment people
+before it counts a firm's warmths, so Société Générale is `all_cold` in a bare
+query and `no_contacts` on the board, a whole ladder rung apart.
+
+Rules the tag inherits from the strip's own arguments:
+
+- **No number on a card's face, and none in its `title=` either.** "exposure
+  12" was a term that means something else in finance; "ranked 1 of 6" restated
+  a position the reader could see. The strip was allowed to keep the
+  arithmetic in a hover; a card is not, because a card is not in a ranked list
+  and there is nothing to compare it against.
+- **The mark is readable without a hover.** "CG" is two letters. The key at
+  the foot of the panel says "Coverage gap, nobody warm yet" in words a
+  touchscreen can reach, and it renders whether or not any card is tagged. The
+  pill's own `title=` carries the sentence: "Coverage gap. You ranked this firm
+  high and nobody here is warm yet."
+- **Red, in a different register from the countdown.** `--danger` is the
+  founder's own call and the palette already carries it, but the deadline tag
+  two elements along is bare `--danger` mono text on the same 22px row. CG is
+  the soft-filled chip instead (`--danger-soft` / `--danger` / `--danger-line`),
+  built exactly like the green "SP". Shape separates them before hue does, and
+  the countdown stays the loudest mark on the card: a gap you can work is not
+  an alarm, a closing deadline is.
+- **Ties are not broken by the tag.** Same tier and same rung score
+  identically, which is the formula being honest, and both cards get the same
+  mark. `rank_gaps` breaks the tie on open campus roles, which still decides
+  order for the weekly digest (`crm/digest.py` names `no_contact[:3]`). Open
+  roles never enter the exposure formula: hiring volume is not a coverage gap.
+
+`advocate_summary` is not rendered and is no longer in the context. Its last
+surface was the deleted heading's `title=`. The function is untouched and
+remains the one definition of the count.
+
+"Who to find" is gone with the strip: three role archetypes from
+`crm/sourcing.py`, each a prefilled LinkedIn search, in a `<details>` inside a
+gap row. The module, the `crm:sourcing_event` endpoint and their tests all
+still stand and the feature now has no surface. That is deliberate — what the
+founder asked to delete was a widget — and it is an open question, not a
+finished decision (Open uncertainties, 5).
 
 ### C. Unplaced
 
@@ -151,16 +182,25 @@ One `.net-panel`, one `.tier-section` per tier, `tier_sections` from the view.
 **Firm card anatomy:**
 
 ```
-Bank of America        [SP]  [12d]
+Bank of America   [CG] [SP]  [12d]
 [========== warmth bar ==========]  [●●]
 ＋ Add a contact
 ```
 
-- **Head row:** firm name, the "SP" sponsorship pill, and a red mono countdown
-  for a CONFIRMED close inside 30 days, from `crm.utils.confirmed_firm_dates`.
-  Rumours never draw one. The card says "12d" where the gap strip says "12d to
-  close", because a 190px card shares this line with the firm's name; the
-  sentence is in `close_title`.
+- **Head row:** firm name, then up to three marks, in that order. "CG" when the
+  firm's exposure clears the bar (section B). "SP" when the firm sponsors. A red
+  mono countdown for a CONFIRMED close inside 30 days, from
+  `crm.utils.confirmed_firm_dates`; rumours never draw one. The card says "12d"
+  where the deleted strip said "12d to close", because a 190px card shares this
+  line with the firm's name; the sentence is in `close_title`.
+- **The marks lead with coverage,** because this board is what coverage means.
+  "SP" is a fact about the firm and the countdown is a fact about the calendar,
+  and they keep the order they already had behind it.
+- **Only the name gives.** Both pills and the countdown are `flex: none`; the
+  name is `flex: 1 1 auto` and ellipsises. Measured at 1280x800: a head row
+  carrying all three marks and a 44-character name is one line at 22px on a 96px
+  card, identical to a card with no marks, and leaves the name 77px. No card on
+  either board carries more than one mark today.
 - **The warmth bar renders on every card,** including a firm with zero contacts,
   which draws a flat grey track because `.firm-bar`'s own background is the cold
   colour. `bar_title` says "No contacts yet" for that case, so the one thing
@@ -199,9 +239,12 @@ not scroll; only the grid inside it does.
 Empty lane: "No firms on this tier." plus a link to Settings > Target Firms,
 because that is where the absence is actually resolved.
 
-The five-item key at the foot of the panel reads its labels from
+The six-item key at the foot of the panel reads its warmth labels from
 `warmth_labels`, derived from `_WARMTH_SECTIONS`, so it cannot disagree with the
-section headings a scroll below it.
+section headings a scroll below it. Four warmth dots, then the "SP" and "CG"
+swatches with their words. Every mark a card can wear owes the key an entry: a
+two-letter pill the key cannot explain is an abbreviation with no reading, and
+the key is the only explanation a touchscreen can reach.
 
 ### E. Contacts
 
@@ -284,10 +327,13 @@ real counts for that firm, which is more specific than a legend ever was, and it
 costs a row only on the card being hovered. The key at the foot of the panel is
 the one permanent explanation, and it exists because every card draws a bar now.
 
-**D3. No number on a gap card's face.** Tried twice, cut twice. "exposure 12"
-was a term that means something else in finance and an integer only readable
-against its neighbours. "ranked 1 of 6" told the reader a position they could
-already see, with a denominator that moved as the strip's length moved.
+**D3. No number on a firm card's face, or in its `title=`.** Tried twice on the
+old gap card, cut twice. "exposure 12" was a term that means something else in
+finance and an integer only readable against its neighbours. "ranked 1 of 6"
+told the reader a position they could already see, with a denominator that moved
+as the strip's length moved. The strip was allowed to keep the arithmetic in a
+hover; the CG tag that inherited the rule is not, because a card is not in a
+ranked list and has nothing to be compared against.
 
 **D4. Tier counts came off the tier labels too,** same day and same call. The
 `aria-label` on a capped grid still reads the tier name by element rather than
@@ -307,8 +353,10 @@ labels. The queue's one home is Today.
 
 **D7. Hidden people are counted, not disappeared.** Campaign-excluded and
 not-recruitment contacts are removed before the scope filter and before every
-count, so the tier board, the gap strip, `contact_total` and the warmth sections
-all derive from one list. They are kept, counted and reachable. A board that
+count, so the tier board, the exposure ranking, `contact_total` and the warmth
+sections all derive from one list. That list is also what the CG bar is measured
+against, and it differs from a raw contact query by a whole ladder rung at some
+firms (section B). They are kept, counted and reachable. A board that
 quietly shrinks is a bug this repository has now fixed three times.
 
 **D8. Zero-state rows do not render.** "Other countries" with nobody in it, a
@@ -317,20 +365,35 @@ behind them are all a standing reproach for a state the product allows. The one
 exception is standing on the tab already: answering "London" for your first
 Other contact must not make the tab you are looking at vanish.
 
-**D9. The Coverage Gaps strip has no caption line.** Removed 2026-09-02 on the
-founder's direct call, quoting the line back word for word. `.strip-note` went
-with it and nothing else on the site used the class. The number is in the
-heading's `title=` and in the context, and
-`test_the_advocate_line_is_off_the_face_and_on_the_headings_title` pins that
-split. Do not render it under the heading again; if it must be seen without a
-hover, that is a new decision about where an aggregate belongs on this page,
-not a restoration of this one.
+**D9. The advocate aggregate is nowhere on this page.** Removed from the face
+2026-09-02 on the founder's direct call, quoting the line back word for word;
+`.strip-note` went with it and nothing else on the site used the class. It then
+lived in the strip heading's `title=` for a few hours, and the heading was
+deleted the same evening, so the sentence has no surface at all now and
+`advocate_summary` is out of the context.
+`test_the_advocate_line_is_nowhere_on_the_page` pins that.
+`crm.coverage.advocate_summary` is untouched and stays the one definition of the
+count. Putting it back anywhere is a new decision about where an aggregate
+belongs, not a restoration of this one.
 
-**D10. Nothing on a gap row draws a coloured left edge.** Removed 2026-09-02:
-`rank_gaps` weights tier heaviest, so the top of the strip is T1 on any board
-with T1 firms, and six identical `--danger` edges read as a wall rather than a
-signal. Tier's second channel is the tag's weight. Red on this strip means a
-deadline is close and nothing else.
+**D10. Red means one thing per surface, and shape separates two reds.** The gap
+row's 3px tier-coloured left edge was cut 2026-09-02 because `rank_gaps` weights
+tier heaviest, so six identical `--danger` edges read as a wall rather than a
+signal. The firm card now carries two `--danger` marks — the CG chip and the
+close countdown — and they are distinguished by SHAPE, not hue: a soft-filled
+chip against bare mono text. A third red mark on this card needs a third shape
+or it does not go on.
+
+**D11. The Coverage Gaps strip is deleted, whole.** "Delete this widget and
+route its status of coverage gaps into the actual company cards." Heading,
+ledger, six rows, "Who to find" dropdown, and every CSS rule that drew any of
+them. `.gap-due-tag` is the one class that survived, because the firm card had
+already adopted it for its countdown. What is not allowed back is a second list
+of firms above a board that already lists every firm: the strip named six firms
+in one place while the board named all of them in another, and the reader had to
+hold six names in their head to cross-reference. `test_the_widget_is_gone_and
+_left_nothing_behind` pins the deletion at both the markup and the stylesheet
+level.
 
 ## Part 4. What the 2026-09-01 pass changed
 
@@ -339,8 +402,9 @@ from an old one.
 
 1. **The gap strip became a ledger.** Six 150px boxes in a six-across grid
    became six rows in one bordered surface. Three card shapes shared this board
-   and this was one of them. The columns are placed explicitly, so a row missing
-   its sourcing panel cannot slide its button one column left.
+   and this was one of them. SUPERSEDED the following evening: the strip was
+   deleted outright, which takes the board to two card shapes rather than three
+   and is what `test_the_board_is_down_to_two_card_shapes` now pins.
 2. **The first non-empty warmth row opens by default.** Collapsing all five
    (2026-08-31) meant a page called Network opened showing zero people. The
    objection had been to the page arriving several screens tall, not to it
@@ -355,7 +419,8 @@ from an old one.
    `.fc-act-link` (a card's only verb, measured 247x16px on a phone),
    `.gap-tier-tag`, `.gap-due-tag`, `.gap-act` and the "Who to find" toggle.
    `--fs-nano`'s own token comment calls 10px the floor and reserves it for
-   uppercase badge labels; on this page only the "SP" pill still qualifies.
+   uppercase badge labels; on this page only the "SP" and "CG" pills qualify,
+   and three of the five elements listed here were deleted the next evening.
 5. **The Covered Firms panel stopped nesting its own scroller.** It was fixed at
    606px, its content measured 606px, and it never scrolled while the capped
    grid inside it did. The Unplaced panel keeps its cap, because it has no inner
@@ -368,7 +433,9 @@ founder's eye rather than off a measurement. The first pass gave the six rows
 one set of column tracks (`subgrid`), moved the flexible track off the firm
 name, and quieted the "Who to find" rule from dashed `--line-strong` to dotted
 `--line`. Shown that, he asked for the caption gone and said the widget still
-needed work, which produced the second:
+needed work, which produced the second. Items 6 to 9 below are therefore a
+record, not a live description: the strip they refined was deleted a few hours
+after they landed, and their tests went with it (item 11).
 
 6. **The tier rail came off.** Six identical `--danger` edges, one continuous
    3px bar down a 340px strip. Tier moved entirely into the tag: the word plus
@@ -385,10 +452,19 @@ needed work, which produced the second:
    face. They had been identical but for the tag being the heavier.
 10. **The advocate caption was removed** (D9).
 
-Items 6 to 10 are pinned in `crm/tests/test_network_row_and_card_geometry.py`
-and `crm/tests/test_coverage_track_fit.py`. Measured at 1280px before and
-after: state text ended at x=380 with the next zone at x=1047, against a
-tight fact cluster ending at x=491.7 with the button alone at x=1141.2.
+Then the third pass, the same evening:
+
+11. **The strip was deleted and the CG tag replaced it** (D11, section B). Its
+    eight geometry tests in `crm/tests/test_network_row_and_card_geometry.py`
+    are retired with the markup they measured and replaced by two: one that the
+    rules went with it, and one for the chip that carries its meaning now. Items
+    6 to 9 were true of a widget that no longer renders; item 10 survives as
+    D9, and the tier-rail argument survives as the shape rule in D10.
+
+Measured at 1280px across those passes: the ledger's state text ended at x=380
+with the next zone at x=1047, then a tight fact cluster ending at x=491.7 with
+the button alone at x=1141.2, and now no row at all — the board opens on
+Covered Firms.
 
 ## Part 5. Honesty rules
 
@@ -407,11 +483,13 @@ What this page must not imply.
    Log Touch is a link to the contact page, not a one-click attestation.
 6. **Bulk verbs name their reach and their way back.** Archive and park confirm
    with the live count; park also leaves a one-shot Undo.
-7. **Colour is never the only signal.** Tier is a word ("T1") that a weight
-   step ranks, warmth is a dot and a word, sponsorship is a pill with text.
-   The rule is that the word can always stand alone, not that every fact owes
-   a hue: the gap strip proved the second reading wrong by painting six rows
-   the same alarming colour.
+7. **Colour is never the only signal, and a two-letter mark is not a word.**
+   Warmth is a dot and a word; sponsorship and coverage are lettered pills that
+   spell themselves out in a `title=` AND in the key at the foot of the panel,
+   because a `title=` is unreachable on a touchscreen. The rule is that the
+   words can always stand alone, not that every fact owes a hue: the deleted gap
+   strip proved the second reading wrong by painting six rows the same alarming
+   colour.
 8. **Progressive enhancement is a promise, not a nicety.** Every control this
    page reveals with script has a working no-script equivalent that posts to the
    same endpoint. "Select all", the per-firm chips and both bulk bars are all in
@@ -419,9 +497,6 @@ What this page must not imply.
 
 ## Part 6. Responsive and accessibility
 
-- **700px:** the gap row's columns reflow to two. The firm name and the verb
-  keep their line; tier, state and "Who to find" stack under them, and the
-  gutter track does not exist at this width. Still one surface.
 - **900px:** `.net-panel` drops its height cap and grows with its content.
 - **560px:** the search and sort toolbar stacks. Watch the flex-basis when
   touching it: `flex: 1 1 260px` reads against the main axis, and in a column it
@@ -431,9 +506,11 @@ What this page must not imply.
   never plays the entrance animation and so never fires the recompute.
 - A capped grid gets `tabindex="0"`, `role="region"` and a label naming the tier
   and the firm count.
-- Every checkbox carries an `aria-label` with the contact's name; the gap strip's
-  "Add Contact" links carry an `aria-label` with the firm's name, because the
-  visible text is deliberately the same six times over.
+- Every checkbox carries an `aria-label` with the contact's name. A firm card's
+  verb carries one with the firm's name, because the visible text is the same on
+  every card. The "SP" and "CG" swatches in the key are `aria-hidden`: the words
+  beside them are the accessible content, and announcing the abbreviation twice
+  helps nobody.
 - `prefers-reduced-motion: reduce` flattens the bar growth, the card entrance
   and the retier transition. §17 of the stylesheet is the single override.
 - The warmth summary is the whole disclosure control, not a triangle at its end:
@@ -443,16 +520,26 @@ What this page must not imply.
 
 Context keys the template reads: `scope`, `region_scopes`, `all_total`,
 `school_total`, `unplaced_scope`, `unplaced_groups`, `region_verb_labels`,
-`gaps`, `advocate_summary`, `sourcing_note`, `tier_sections`, `firm_total`,
-`sections`, `contact_total`, `unconfirmed_total`, `warmth_labels`, `park_undo`.
+`tier_sections`, `firm_total`, `sections`, `contact_total`, `unconfirmed_total`,
+`warmth_labels`, `park_undo`. Each firm card in `tier_sections` carries `cg`, the
+boolean the tag renders off.
 
-`unplaced_total` is in the context and nothing renders it. It stays as the
-assertion surface for `crm/tests/test_region_resolution.py`, which reads "how
-many contacts still have no region" off the page's own computation rather than
-re-deriving it.
+Two keys are in the context and nothing iterates them, both deliberately:
+
+- `gaps`, the full ranking. `coverage.flagged_firm_ids` reads it to build the
+  tag, and it stays in the context so a test can read the arithmetic behind a
+  mark rather than inferring it from a pill.
+- `unplaced_total`, the assertion surface for
+  `crm/tests/test_region_resolution.py`, which reads "how many contacts still
+  have no region" off the page's own computation rather than re-deriving it.
+
+Two keys were REMOVED on 2026-09-02 with the strip that rendered them:
+`advocate_summary` (D9) and `sourcing_note`. Both functions still exist and are
+still the one definition of what they compute.
 
 Endpoints this page posts to: `crm:contacts_bulk` (both forms),
-`crm:contacts_park_undo`, `crm:set_firm_tier`, `crm:sourcing_event`.
+`crm:contacts_park_undo`, `crm:set_firm_tier`. It no longer posts to
+`crm:sourcing_event`; that endpoint is live, tested, and has no caller.
 
 Vocabulary has one source. `_WARMTH_SECTIONS` in `crm/views.py` is the only map
 from a stored warmth slug to the words a student reads, `_warmth_labels()`
@@ -471,6 +558,12 @@ survive.
    its size and radius, but no template renders it. It went with the per-card
    picker on 2026-08-31. Removing the CSS means retiring that assertion in the
    same change.
+3. `crm/sourcing.py`, the `crm:sourcing_event` endpoint and `crm/urls.py`'s route
+   for it are all live and tested with no caller in the app, since 2026-09-02.
+   The "Who to find" panel was their only surface and it was inside the deleted
+   strip. Left standing on purpose: what was deleted is a widget, and whether
+   contact sourcing deserves a surface elsewhere is a product question (Open
+   uncertainties, 5), not a cleanup.
 
 ## Open uncertainties
 
@@ -485,3 +578,12 @@ survive.
    with the work in it.
 4. Whether the warmth share fill reads as a measurement to anyone. It carries a
    real number and claims none, which is the intent, and nobody has been asked.
+5. Where, if anywhere, "Who to find" goes. It died as a side effect of deleting
+   the widget it lived inside, not on its own merits, and the founder has not
+   been asked about it. It does not fit the firm card as-is: the panel is an
+   absolutely-positioned dropdown and the card sits inside a capped, scrolling
+   grid with `overflow: hidden`.
+6. Whether the CG bar holds as the founder's board changes. It is a fixed
+   position on the exposure scale, not a share of the board, so it will tag more
+   cards as he tiers more firms and fewer as people start replying. The second
+   is the point; the first is worth re-measuring after the next tiering pass.

@@ -320,32 +320,46 @@ def test_network_page_ranks_with_tracks_and_style_and_exposes_the_aggregate(clie
     assert gaps["KKR"]["label"] == "Not on your tracks"
     assert gaps["Jane Street"]["verb"] == "Apply"
     assert gaps["Jane Street"]["verb_reason"] == "They hire off their test, not off a chat."
-    assert gaps["Jane Street"]["apply_url"] == reverse(
-        "directory:firm_detail", args=["janestreet-fit"])
-    assert gaps["Jane Street"]["sourcing_note"] == sourcing.ASSESSMENT_NOTE
-    assert gaps["HSBC"]["apply_url"] == "" and gaps["HSBC"]["verb"] == "Add"
-    assert gaps["HSBC"]["sourcing_note"] == sourcing.DISCLOSURE
+    assert gaps["HSBC"]["verb"] == "Add"
 
-    summary = resp.context["advocate_summary"]
-    assert summary["line"] == "Advocates: 0 across 3 target firms · aim for 2 per firm, 20 in all"
-    assert summary["firms"] == 3 and summary["advocates"] == 0
+    # `apply_url` and `sourcing_note` are no longer attached to a gap. Both
+    # were bolted on by the view for the deleted Coverage Gaps row's own
+    # button and "Who to find" panel; with no markup to feed, a key on every
+    # gap dict is dead weight. What they described is untouched: `verb` and
+    # `verb_reason` are still the formula's own conclusion (asserted above),
+    # `crm.sourcing.panel_note` still answers per firm, and
+    # `directory:firm_detail` is still where an assessment firm's roles live.
+    for dropped in ("apply_url", "sourcing", "sourcing_note", "slug", "lever"):
+        assert dropped not in gaps["Jane Street"], (
+            f"{dropped!r} is back on a gap dict with nothing rendering it"
+        )
+    assert sourcing.panel_note(jane) == sourcing.ASSESSMENT_NOTE
+    assert sourcing.panel_note(hsbc) == sourcing.DISCLOSURE
+
+    # `advocate_summary` is off the CONTEXT too, for the same reason: the
+    # strip heading's `title=` was its last renderer. The function is
+    # untouched and is still the one definition of the count — see
+    # `test_advocate_summary_counts_across_tiered_firms_only` above, which
+    # exercises it directly.
+    assert "advocate_summary" not in resp.context
+    assert "sourcing_note" not in resp.context
 
 
 @pytest.mark.django_db
-def test_the_advocate_line_is_off_the_face_and_on_the_headings_title(client):
-    """The founder quoted this caption back word for word and asked for it
-    gone from the page. It was a rendered `<p class="strip-note">` under the
-    "Coverage Gaps" heading.
+def test_the_advocate_line_is_nowhere_on_the_page(client):
+    """Rewritten from `test_the_advocate_line_is_off_the_face_and_on_the
+    _headings_title`, whose premise was that the sentence had moved into the
+    Coverage Gaps heading's `title=`. That heading is gone (2026-09-02), so
+    the sentence has nowhere left to hang.
 
-    Cut the explanation, keep the fact: `advocate_summary` still computes it,
-    the view still puts it in the context (asserted directly above), and it
-    is in the heading's own `title=` — the same convention the rest of this
-    strip already runs on, where every number taken off a face is in the
-    `title` of the thing it describes.
+    The rewrite is STRICTER, not weaker: the founder quoted this caption back
+    word for word and asked for it gone from the page, and it is now gone
+    from the page in every form, tooltip included. The earlier version could
+    only assert it was not PRINTED.
 
-    Asserted on the STRIPPED text rather than on the raw HTML, because the
-    hover version of a sentence and the printed version of it are the same
-    characters and only one of them is the thing that was rejected.
+    Asserted on the raw HTML as well as on the stripped text, because a
+    `title=` and a rendered line are the same characters and only the raw
+    form can tell them apart.
     """
     user = User.objects.create_user(
         email="advline@example.com", password="pw12345!", tracks=["ib"]
@@ -357,19 +371,18 @@ def test_the_advocate_line_is_off_the_face_and_on_the_headings_title(client):
     body = client.get(reverse("crm:contact_list")).content.decode()
     line = "Advocates: 0 across 1 target firm · aim for 2 per firm, 20 in all"
 
-    heading = re.search(
-        r'<h2 class="strip-title strip-title-lg" title="([^"]*)">Coverage Gaps</h2>',
-        body,
-    )
-    assert heading, "the Coverage Gaps heading is gone or lost its tooltip"
-    assert line in heading.group(1), "the advocate count is not reachable at all"
-
+    assert "Coverage Gaps</h2>" not in body, "the heading is back"
     assert 'class="strip-note"' not in body, "the caption element is back"
+    assert line not in body, "the advocate line is reachable on the page again"
+    assert "aim for 2 per firm" not in body
     text = " ".join(re.sub(r"<[^>]+>", " ", body).split())
-    assert line not in text, (
-        "the advocate line is printed on the page again; it may only be a "
-        "hover on the heading"
-    )
+    assert "Advocates:" not in text
+
+    # The count itself is not lost, it just has no surface: the function is
+    # still the one definition of it, and still correct for this account.
+    assert coverage.advocate_summary(
+        [{"tier": 1, "warmths": []}], target=2
+    )["line"] == line
 
 
 @pytest.mark.django_db
