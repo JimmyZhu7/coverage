@@ -169,17 +169,26 @@ def test_the_picked_column_renders_shared_reasons_in_the_firmcol_why_line(db):
 def test_the_picked_column_really_does_render_a_shorter_id_stack(feed_with_both_columns):
     """The condition that made centring fail, asserted on real markup.
 
-    Not a hypothetical: with no why-chips to show, Picked's stats row is
-    present and empty while every firm column's carries at least a tier.
+    Not a hypothetical: Picked's stats row is shorter than every firm
+    column's, which is the asymmetry that made centring fail.
+
+    Rewritten 2026-09-02. It used to assert that row was EMPTY, and its own
+    failure message named the day that would stop being true: the row now
+    carries a "Picked" eyebrow, added so the column is distinguishable on a
+    board where every firm is one of the student's own and the accent border
+    therefore says nothing. Empty was never the property under test, though.
+    Short was. A tier pill is what a firm column puts there, so the guard is
+    that Picked does not carry one.
     """
     html = feed_with_both_columns.get("/opportunities/").content.decode()
     html = _STYLE_RE.sub("", html)
 
     stats = re.findall(r'<div class="firmcol-stats">(.*?)</div>', html, re.S)
     assert len(stats) >= 2, f"expected the Picked column and a firm one, got {len(stats)}"
-    assert stats[0].strip() == "", (
-        "the Picked column is expected to render an EMPTY stats row here — if "
-        "it now carries chips, this test is no longer exercising the failure"
+    assert "firmcol-tier" not in stats[0], (
+        "the Picked column now carries a tier pill, so its id stack is no "
+        "longer shorter than a firm column's and this test no longer "
+        "exercises the centring failure it was written for"
     )
     assert "firmcol-tier" in stats[1], "a firm column should carry its tier pill"
     assert ":empty" not in _feed_css(), (

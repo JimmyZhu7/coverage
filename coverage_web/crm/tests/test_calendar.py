@@ -412,7 +412,16 @@ def test_the_chip_time_is_short_and_gets_noon_and_midnight_right(
 
 
 def _style_block(body: str) -> str:
-    return body.split("<style>", 1)[1].split("</style>", 1)[0]
+    """Every inline stylesheet on the page, concatenated.
+
+    This used to return the FIRST `<style>` block, which worked only while the
+    calendar page had one. The 2026-09-02 UI pass added a coarse-pointer block
+    to the shell, ahead of the page's own, and three guards below started
+    reading a stylesheet that had never heard of `.cal-grid` — failing with
+    "the rule moved" when nothing had moved at all. The guards are about what
+    the page's CSS says in total, so read it in total; a page is free to split
+    its rules across as many blocks as it likes."""
+    return "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", body, re.DOTALL))
 
 
 def _outside_media(css: str) -> str:

@@ -160,15 +160,26 @@ def _rule_all(css: str, selector: str) -> str:
 
 
 def _coarse_block(css: str) -> str:
-    """The body of the feed's `@media (pointer: coarse) { ... }` block,
-    brace-counted so a nested rule inside it does not truncate the match."""
-    m = re.search(r"@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{", css)
-    assert m, "no (pointer: coarse) block in the feed's rendered CSS"
-    depth, i = 1, m.end()
-    while depth and i < len(css):
-        depth += (css[i] == "{") - (css[i] == "}")
-        i += 1
-    return css[m.end():i - 1]
+    """Every `@media (pointer: coarse) { ... }` body on the page, joined.
+
+    Brace-counted, so a nested rule inside one does not truncate the match.
+
+    ALL of them, not the first. This returned the first until 2026-09-02,
+    which was the feed's own while the feed was the only source of one. The
+    UI pass then gave the shell a coarse block of its own, earlier in the
+    document, and the guards below started reading a stylesheet with no
+    `.rolerow` in it and reporting that the row rule was gone. What the page
+    does on a touch screen is the union of its coarse rules, wherever they
+    were written, so read the union."""
+    bodies = []
+    for m in re.finditer(r"@media\s*\(\s*pointer:\s*coarse\s*\)\s*\{", css):
+        depth, i = 1, m.end()
+        while depth and i < len(css):
+            depth += (css[i] == "{") - (css[i] == "}")
+            i += 1
+        bodies.append(css[m.end():i - 1])
+    assert bodies, "no (pointer: coarse) block in the feed's rendered CSS"
+    return "\n".join(bodies)
 
 
 def test_the_role_row_never_pins_a_fixed_height():

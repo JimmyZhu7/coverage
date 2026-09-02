@@ -52,10 +52,15 @@ def _markup(resp) -> str:
     Assertions about what was drawn have to read the markup, not the rules
     that would style it. (`_style_block` in test_calendar.py is the same split
     from the other side.)
+
+    Strips EVERY style block, not just the first. One was enough while the
+    page carried one; the 2026-09-02 UI pass added a coarse-pointer block in
+    the shell, the survivor's rules started counting as markup, and this guard
+    failed on a page that had drawn no such cell.
     """
-    body = resp.content.decode()
-    head, _, rest = body.partition("<style>")
-    return head + rest.partition("</style>")[2]
+    return re.sub(
+        r"<style[^>]*>.*?</style>", "", resp.content.decode(), flags=re.DOTALL
+    )
 
 
 def _today_link(resp) -> str:
