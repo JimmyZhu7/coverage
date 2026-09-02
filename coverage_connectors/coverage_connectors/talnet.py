@@ -25,7 +25,19 @@ platform migration:
   serving 50+ live vacancies.
 
 The card branch runs only when the table branch finds nothing, so the
-four table tenants above cannot be affected by it.
+table tenants above cannot be affected by it.
+
+**Both layouts page at 50 and both are walked.** Oleeo renders the same
+`next_links` nav under either layout, and for a year only the card branch
+followed it, on the stated grounds that the table boards did not paginate
+("Morgan Stanley returns 1,076 rows in one response"). Re-probed
+2026-09-02 with the response bodies kept (`docs/talnet-pagination-2026-09.md`):
+Morgan Stanley serves 50 rows and a nav under its own "67 results match",
+and Bank of America serves 50 under "148 results match!" and pages three
+deep. Every table-layout fetch was page one read as the whole board, and
+50 live Bank of America roles plus 17 live Morgan Stanley ones had
+therefore never reached the database at all. `_fetch_pages` now takes the
+layout's parser as an argument and both branches share it.
 
 That year of silent zeroes is also why `fetch()` carries a zero-rows
 guard: a page that plainly contains vacancy markup but yields no parsed
@@ -57,6 +69,7 @@ import html as html_mod
 import re
 import urllib.error
 import urllib.parse
+from collections.abc import Callable
 
 from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text
 from .models import FetchResult, Opportunity, TalnetBoard, VerificationResult
@@ -95,15 +108,26 @@ _CARD_FIELD_LABEL_RE = re.compile(
     r'(?P<label>.*?)</span>(?P<value>.*)',
     re.DOTALL | re.IGNORECASE,
 )
-# Card boards page at 50 tiles and advertise the rest with this nav. The
-# table boards do not paginate (Morgan Stanley returns 1,076 rows in one
-# response), so following it is deliberately confined to the card branch —
-# the four working table tenants issue exactly the requests they always did.
+# Oleeo pages BOTH layouts at 50 listings and advertises the rest with this
+# one nav, rendered identically whichever layout the tenant serves:
+#
+#     <div class="paging"> <span class="next_links">
+#       <a href="?start=50">Next page</a> </span> </div>
+#
+# This used to be followed on the card branch only, on the stated grounds
+# that "Morgan Stanley returns 1,076 rows in one response". That was true
+# once and is not true now: measured 2026-09-02 (`docs/talnet-pagination-
+# 2026-09.md`), morganstanley.tal.net serves 50 rows, this nav, and its own
+# header saying "67 results match"; bankcampuscareers.tal.net serves 50
+# rows against "148 results match!" and pages three deep. So for as long
+# as the table branch stopped at page one it was reading a third of Bank
+# of America's board and calling it the whole thing — and ingest closes
+# what a complete fetch did not return. Both branches walk the nav now.
 _NEXT_PAGE_RE = re.compile(
     r'<span[^>]*\bclass="[^"]*\bnext_links\b[^"]*"[^>]*>\s*<a[^>]*\bhref="([^"]+)"',
     re.DOTALL | re.IGNORECASE,
 )
-_MAX_CARD_PAGES = 20
+_MAX_PAGES = 20
 
 # "This page is showing vacancies" — the evidence that separates a parser
 # that has stopped reading the page from a board that genuinely has nothing
@@ -241,30 +265,43 @@ def _parse_cards(html: str) -> list[dict]:
     return rows
 
 
-def _fetch_card_pages(first_url: str, first_html: str) -> tuple[list[dict], bool]:
-    """Walk a card board's `next_links` nav, returning (rows, truncated).
+def _fetch_pages(parse: Callable[[str], list[dict]],
+                 first_url: str, first_html: str) -> tuple[list[dict], bool]:
+    """Walk a board's `next_links` nav, returning (rows, truncated).
 
-    Card boards render 50 tiles a page, so a single fetch of a 51-vacancy
+    `parse` is the layout's own row reader — `_parse_table` or
+    `_parse_cards` — chosen once from page one and held for the whole walk.
+    Both layouts page at 50 listings, so a single fetch of a 51-vacancy
     board is a successful read of an incomplete list — and ingest infers
     "closed" from "absent from the fetch", so returning that list without
-    saying so would auto-close a live posting. Bounded at
-    `_MAX_CARD_PAGES`; hitting the bound (or being handed a nav that loops
-    back to a page already seen) returns `truncated=True` rather than
-    pretending the list is whole."""
+    saying so would auto-close a live posting. Bounded at `_MAX_PAGES`;
+    hitting the bound (or being handed a nav that loops back to a page
+    already seen) returns `truncated=True` rather than pretending the list
+    is whole, which `ingest` reads as "do not close this pair off this
+    run".
+
+    Dedup is by CANONICAL url, not by the url the page served. tal.net
+    mints a fresh per-session `xf-<hex>` segment per RESPONSE, not per
+    board: page one of bankcampuscareers carried `/xf-6e8af9994f5b` and
+    page two `/xf-3d06b2f89a01` (measured 2026-09-02). A raw-url set can
+    therefore never recognise a posting it has already seen on an earlier
+    page, which is the one thing this set exists to do.
+    """
     rows: list[dict] = []
     seen_urls: set[str] = set()
     seen_pages = {first_url}
     page_url, page_html = first_url, first_html
-    for page_no in range(1, _MAX_CARD_PAGES + 1):
-        for row in _parse_cards(page_html):
-            if row["url"] in seen_urls:
+    for page_no in range(1, _MAX_PAGES + 1):
+        for row in parse(page_html):
+            key = canonical_url(row["url"])
+            if key in seen_urls:
                 continue
-            seen_urls.add(row["url"])
+            seen_urls.add(key)
             rows.append(row)
         nxt_m = _NEXT_PAGE_RE.search(page_html)
         if not nxt_m:
             return rows, False
-        if page_no == _MAX_CARD_PAGES:
+        if page_no == _MAX_PAGES:
             return rows, True
         nxt = urllib.parse.urljoin(page_url, html_mod.unescape(nxt_m.group(1)))
         if nxt in seen_pages:
@@ -331,12 +368,13 @@ def fetch(board: TalnetBoard) -> FetchResult:
                 board=board, ok=False, opportunities=[], raw_count=0,
                 error=f"{BOT_BLOCK_PREFIX} ({challenge}) — board unreadable, not empty",
             )
-        # Table first, always: it is the layout four working tenants serve,
+        # Table first, always: it is the layout the working tenants serve,
         # and the card branch only ever sees a page it found nothing in.
-        rows = _parse_table(html)
-        truncated = False
-        if not rows:
-            rows, truncated = _fetch_card_pages(board.board_url, html)
+        # Page one decides the layout for the whole walk — a board does not
+        # change layout mid-nav, and re-deciding per page would let one odd
+        # page silently swap parsers halfway through a list.
+        parse = _parse_table if _parse_table(html) else _parse_cards
+        rows, truncated = _fetch_pages(parse, board.board_url, html)
         # Kept inside this try — see greenhouse.py's fetch() for why a
         # normalization failure must not propagate uncaught out of
         # `fetch()`.
