@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 
 import pytest
+from django.conf import settings
 
 
 def _auth_css(client) -> str:
@@ -66,14 +67,26 @@ def test_the_small_auth_links_get_a_finger_floor_on_coarse_pointers(client):
     assert re.search(r"\.auth-foot a, \.auth-legal a\s*\{[^}]*margin: -14px -6px", block)
 
 
-@pytest.mark.django_db
-def test_the_shell_footer_links_get_the_same_floor(client):
+def test_the_shell_footer_links_get_the_same_floor():
     """`.site-footer` links measured 19px on every page in the product, and
-    the footer is where a student goes looking for Privacy and Terms."""
-    body = client.get("/accounts/login/").content.decode()
-    css = " ".join(re.findall(r"<style>(.*?)</style>", body, re.S))
+    the footer is where a student goes looking for Privacy and Terms.
 
-    coarse = re.findall(r"@media \(pointer: coarse\)\s*\{(.*?)\n    \}", css, re.S)
-    joined = " ".join(coarse) + css
+    READ FROM THE SHARED STYLESHEET, not from the page's inline `<style>`
+    blocks. The rule shipped inside a `<style>` in base.html, with a note
+    saying it belonged in `coverage.css` and would move there once that file
+    was not being edited by another pass; it moved on 2026-09-01. The
+    assertion follows it rather than being weakened: the floor is still
+    pinned, on the same two selectors, under the same `pointer: coarse`
+    query. What changed is only where the rule lives.
+
+    Moving it also fixed a second problem the inline block caused. Two tests
+    in `directory/tests/test_styles_block.py` read the FIRST
+    `@media (pointer: coarse)` block on a rendered page as the feed's, and
+    the shell's block was reaching them first.
+    """
+    css = (settings.BASE_DIR / "static" / "css" / "coverage.css").read_text()
+    blocks = re.findall(r"@media \(pointer: coarse\) \{(.*?)\n\}", css, re.S)
+    assert blocks, "no coarse-pointer block left in coverage.css"
+    joined = "\n".join(blocks)
     assert ".site-footer-inner nav a" in joined
     assert re.search(r"\.site-auth a\s*\{[^}]*min-height: 44px", joined)

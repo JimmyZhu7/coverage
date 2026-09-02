@@ -4,16 +4,18 @@
 
 {% block content %}
 <div class="page page--narrow">
-  <header class="page-head">
-    <h1>Import Contacts</h1>
+  <header class="pagehead pagehead--compact">
+    <div class="pagehead-text">
+    <h1 class="pagehead-title">Import Contacts</h1>
     {% comment %}"Upload a CSV." restated the h1 and the file input below it
     and answered none of the two questions a student actually has here —
     what goes in the file, and what happens to duplicates. The onboarding
     step used to carry that sentence; it belongs on the page that does the
     work, which is also the page reached from Settings, where there is no
     wizard to have explained it.{% endcomment %}
-    <p class="lede">Names, emails, firms, roles, notes. We match firms to the
-      directory where we can and skip anyone you already have.</p>
+    <p class="pagehead-sub">Names, emails, firms, roles, notes. We match firms
+      to the directory where we can and skip anyone you already have.</p>
+    </div>
   </header>
 
   {% if messages %}

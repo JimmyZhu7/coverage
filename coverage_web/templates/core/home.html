@@ -48,7 +48,7 @@
     margin: 0 0 var(--s3); }
   /* Beats `.kin-hero h1` (0,1,1) on specificity without touching it. */
   .desk-hero .desk-title {
-    font: var(--w-black) clamp(32px, 3.6vw, 44px)/1.05 var(--font-display);
+    font: var(--w-black) clamp(var(--fs-display-2), 3.6vw, var(--fs-display-1))/1.05 var(--font-display);
     letter-spacing: -0.015em; color: var(--ink); margin: 0; max-width: 16ch; }
   .desk-sub { color: var(--ink-2); font-size: var(--fs-m);
     margin: var(--s3) 0 0; max-width: 48ch; }
@@ -60,7 +60,7 @@
     margin-top: var(--s5); padding-top: var(--s4);
     border-top: 1px solid var(--line); }
   .desk-stat { display: flex; align-items: baseline; gap: var(--s2); }
-  .desk-stat .dash-num { font-size: 20px; color: var(--ink); }
+  .desk-stat .dash-num { font-size: var(--fs-display-3); color: var(--ink); }
   .desk-stat .dash-lbl { white-space: nowrap; }
 
   /* The panel: a mini Today screen, framed like a real window. */
@@ -156,7 +156,7 @@
   .land-eyebrow { font-family: var(--font-mono); font-size: var(--fs-micro);
     color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em;
     margin: 0 0 var(--s2); text-align: center; }
-  .land-title { font: var(--w-black) clamp(24px, 3vw, 32px)/1.15 var(--font-display);
+  .land-title { font: var(--w-black) clamp(var(--fs-display-3), 3vw, var(--fs-display-2))/1.15 var(--font-display);
     letter-spacing: -0.01em; text-align: center; margin: 0 auto var(--s2);
     max-width: 28ch; }
 
@@ -220,7 +220,7 @@
   .feature-kicker { font-family: var(--font-mono); font-size: var(--fs-micro);
     color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em;
     margin: 0 0 var(--s2); }
-  .feature-copy h3 { font: var(--w-black) 24px/1.2 var(--font-display);
+  .feature-copy h3 { font: var(--w-black) var(--fs-display-3)/1.2 var(--font-display);
     letter-spacing: -0.01em; margin: 0 0 var(--s3); }
   .feature-copy p { color: var(--ink-2); margin: 0 0 var(--s3); max-width: 44ch; }
   .feature-points { list-style: none; margin: 0; padding: 0;
@@ -332,7 +332,7 @@
       var(--surface);
     border: 1px solid var(--line); border-radius: var(--r-panel);
     box-shadow: var(--shadow-1); }
-  .cta-band h2 { font: var(--w-black) clamp(24px, 3vw, 34px)/1.1 var(--font-display);
+  .cta-band h2 { font: var(--w-black) clamp(var(--fs-display-3), 3vw, var(--fs-display-2))/1.1 var(--font-display);
     letter-spacing: -0.01em; margin: 0 0 var(--s2); }
   .cta-band p { color: var(--ink-2); margin: 0 auto var(--s5); max-width: 52ch; }
   .cta-band .actions { display: flex; justify-content: center; gap: var(--s3);

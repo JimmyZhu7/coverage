@@ -180,10 +180,36 @@
   --fs-s:   13px;   /* pills-adjacent text, small */
   --fs-m:   15px;   /* body */
   --fs-l:   17px;   /* section headings (h2) */
-  --fs-xl:  22px;   /* page titles on subpages */
-  --fs-xxl: 29px;   /* page titles on top-level pages */
-  --fs-hero: 34px;  /* landing headline only */
   --fs-micro: 11px; /* uppercase badge labels only */
+
+  /* THE DISPLAY SCALE. Four sizes, and every title and every large figure in
+     the product is one of them.
+
+     It was three tokens (--fs-xl 22, --fs-xxl 29, --fs-hero 34) and FOURTEEN
+     sizes in use: 30/42 on the page title, 30 on the auth title, 24-32 in
+     onboarding, 22 on Talk, 30-46 on the hero, 24-32 and 24-34 on the landing
+     sections, 22 on a plan name, 17-20 on the calendar month, 18-23 in the
+     drawer, 26 on the pace figure, 24 on a settings value, 42 on a price, 38
+     on the onboarding preview count, 30 on a hero stat, 32 on a dashboard
+     number. Settings alone carried twelve distinct sizes on one page. Nobody
+     chose fourteen; each one was chosen once, locally, against whatever sat
+     beside it, and a scale that is never written down is re-derived every
+     time someone adds a heading.
+
+     The four values are all sizes already in use, so this renames the system
+     rather than restyling it. --fs-xl, --fs-xxl and --fs-hero are gone: two
+     of them had no readers left, and --fs-xl was --fs-display-3 under an
+     older name, which is one fact with two definitions (P5).
+
+     TITLES take a display size. FIGURES take --fs-figure, unless the figure
+     IS the headline (a price, a hero stat, the onboarding count), in which
+     case it takes the display size its headline would. The distinction is
+     what stops a number inside a settings row competing with the page title
+     above it. */
+  --fs-display-1: 42px;  /* the page title's ceiling; a marketing headline; a price */
+  --fs-display-2: 30px;  /* the page title's floor; section titles; a headline figure */
+  --fs-display-3: 22px;  /* subpage, panel and card titles */
+  --fs-figure:    26px;  /* a large number inside a panel or a row */
   /* THE FLOOR. Nothing in the product may set a smaller size than this, and
      it exists because seven rules had quietly gone under --fs-micro with
      hardcoded pixels — 9px month labels, 9px event times, and an 8px year
@@ -233,11 +259,26 @@
   --shadow-1: 0 1px 2px rgba(23, 27, 19, 0.05), 0 4px 14px rgba(23, 27, 19, 0.06);
   --shadow-2: 0 2px 4px rgba(23, 27, 19, 0.06), 0 10px 28px rgba(23, 27, 19, 0.09);
 
-  /* Layout */
+  /* Layout. Four measures, and every one of them is consumed — a 2026-09-01
+     audit read the first two as dead because `.page` no longer takes either,
+     which is true and is not the same thing.
+
+       --page-w        the READING column: `.site-footer-inner`, and the
+                       pricing page's hero, plan cards and comparison table,
+                       which re-narrow to it by hand because `.page` around
+                       them is full width.
+       --page-w-narrow forms, auth, legal, the account pages.
+       --page-w-wide   the masthead's inner measure (`.site-header-inner`).
+                       It was the retired calendar grid's page width first.
+       --page-w-full   `.page` itself, and its `--wide`/`--full` modifiers.
+
+     Kept rather than deleted because the alternative was pricing hardcoding
+     960px in four rules: a token with two consumers on different pages is
+     doing exactly the job a token is for. */
   --page-w:        960px;
   --page-w-narrow: 680px;
-  --page-w-wide:   1120px;  /* the heat-mapped calendar breathes wider */
-  --page-w-full:   1440px;  /* the opportunities directory uses the whole page */
+  --page-w-wide:   1120px;
+  --page-w-full:   1440px;
 }
 /* ==========================================================================
    DARK MODE — the same tokens, re-stated.
@@ -407,7 +448,7 @@ img, svg { max-width: 100%; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-ink); text-decoration: underline; }
 h1, h2, h3 { line-height: var(--lh-tight); margin: 0 0 var(--s2); }
-h1 { font: var(--w-black) var(--fs-xxl)/var(--lh-tight) var(--font-display); letter-spacing: -0.01em; }
+h1 { font: var(--w-black) var(--fs-display-2)/var(--lh-tight) var(--font-display); letter-spacing: -0.01em; }
 h2 { font-size: var(--fs-l); font-weight: var(--w-bold); margin-top: var(--s6); letter-spacing: -0.01em; }
 h3 { font-size: var(--fs-m); font-weight: var(--w-med); }
 code { font-family: var(--font-mono); font-size: 0.9em; }
@@ -554,7 +595,7 @@ main { flex: 1 0 auto; }
  *
  * The app had four header patterns across five nav pages: a tall marquee
  * card (.kin-hero) on Network/Settings/Capture, a compact variant on
- * Opportunities, a bespoke strip on Today, and a centered .page-head
+ * Opportunities, a bespoke strip on Today, and a centred July header
  * elsewhere. Same product, four different first impressions.
  *
  * The split this settles on is the one every serious app makes — Linear,
@@ -622,7 +663,7 @@ main { flex: 1 0 auto; }
    title now leads the page without competing with the wordmark. */
 .pagehead-title {
   margin: var(--s1) 0 0; letter-spacing: -0.018em;
-  font: var(--w-black) clamp(30px, 3.6vw, 42px)/1.06 var(--font-display);
+  font: var(--w-black) clamp(var(--fs-display-2), 3.6vw, var(--fs-display-1))/1.06 var(--font-display);
   color: var(--ink);
   animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
 }
@@ -702,17 +743,27 @@ main { flex: 1 0 auto; }
    Centring is the DEFAULT from the `margin: auto` further down; this block
    only has to stop overriding it. */
 
-/* v3: page heads are centered and breathe — the rule below them is gone,
-   whitespace does the separating now. */
-.page-head { text-align: center; padding-bottom: var(--s5); margin-bottom: var(--s5); }
-.page-head h1 { margin-bottom: var(--s2); }
+/* The centred July header is GONE, and its fourteen sites —
+   the allauth set, Import, Export, Delete, Sign out other devices, Connected
+   accounts — wear `.pagehead pagehead--compact` instead. Two header
+   components meant two answers to "where does a page start", and the account
+   pages were reachable from Settings, which wore the other one.
+
+   `--compact` is a modifier, not a second component: same hairline datum,
+   same left edge, same text block. What it drops is the app header's
+   ceremony — the drawn accent stroke and the 42px title — because these are
+   pages you PASS THROUGH (sign out, reset a password, download a zip), not
+   pages you work in. A title that announces itself at 42px on a 680px column
+   above a two-line form is the header outweighing the page. */
+.pagehead--compact { padding-bottom: var(--s3); margin-bottom: var(--s4); }
+.pagehead--compact .pagehead-title { font-size: var(--fs-display-2); }
+.pagehead--compact::after { content: none; }
 /* Left-aligned, not `margin: 0 auto`: every live use of this class sits
    under a left-aligned heading (Cycle Dates, the confirm pages, the hidden
    list), and the centring made each one read as a caption that had drifted
    off its section. The 56ch cap stays — it is about line length, not
    position. */
 .lede { color: var(--ink-2); margin: 0 0 var(--s3); font-size: var(--fs-m); max-width: 56ch; }
-.page-head .subnav, .page-head .stats { justify-content: center; }
 
 /* ---- Chip set — multi-select taxonomy as toggle pills --------------------
  * Regions and Tracks were `CheckboxSelectMultiple` stacked one per line: 13
@@ -985,18 +1036,15 @@ main { flex: 1 0 auto; }
    dimmed ink it takes — ink-3 on the capsule surface and on the hover tint,
    on-accent-2 on the selected navy — and every one of those pairs is a
    measured token pair. */
-/* The three off-board escape hatches (Archived / Not recruiting / Not
-   recruitment), demoted from the segmented pill above into one quiet line —
-   plain breadcrumb links, not a second capsule, so the row reads as a
-   footnote rather than more filters. */
-.net-offboard { margin: 0 0 var(--s3); }
-.net-offboard a { color: var(--ink-3); }
 .section { margin-top: var(--s6); }
 .tier {
   font-size: var(--fs-micro); color: var(--ink-3);
   text-transform: uppercase; letter-spacing: 0.05em; font-family: var(--font-mono);
 }
 .row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
+/* ONE site: `directory/_timeline.html`'s row count. Kept shared rather than
+   inlined because the tabular-figure rule below is the ledger's, not the
+   timeline's, and a count line is the kind of thing a second page grows. */
 .count-line { color: var(--ink-2); font-size: var(--fs-s); margin: var(--s1) 0 var(--s4); }
 .count-line, .count-line * { font-variant-numeric: tabular-nums; }
 
@@ -1065,15 +1113,6 @@ main { flex: 1 0 auto; }
 }
 
 .note { font-size: var(--fs-xs); color: var(--ink-3); margin-top: var(--s2); }
-code.addr, .capture-addr {
-  font-family: var(--font-mono); background: var(--paper);
-  border: 1px solid var(--line); border-radius: var(--r-ctl);
-}
-code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
-.capture-addr {
-  display: block; padding: var(--s2) var(--s3); font-size: var(--fs-s);
-  word-break: break-all; margin: 0 0 var(--s3);
-}
 
 /* ---- 6. Buttons ----------------------------------------------------------- */
 .btn {
@@ -1323,7 +1362,7 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
   box-shadow: 0 0 0 1px var(--line), var(--shadow-1); }
 .avatar-preview[hidden] { display: none; }
 .avatar-preview-fallback { display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent-ink); font-weight: var(--w-bold); font-size: var(--fs-xl); }
+  color: var(--accent-ink); font-weight: var(--w-bold); font-size: var(--fs-display-3); }
 /* Column, not row: the buttons sit above the hint so a long hint (or an error)
    wraps under them instead of pushing them off the line. */
 .avatar-field-controls { display: flex; flex-direction: column; align-items: flex-start;
@@ -1445,15 +1484,13 @@ a.pill:hover { text-decoration: underline; }
 .pill.conf-medium  { background: var(--conf-medium-s);  color: var(--conf-medium-t);  border-color: var(--conf-medium-l); }
 .pill.conf-low     { background: var(--conf-low-s);     color: var(--conf-low-t);     border-color: var(--conf-low-l); }
 .pill.conf-unrated { background: var(--conf-unrated-s); color: var(--conf-unrated-t); border-color: var(--conf-unrated-l); }
-.pill.spon-known   { background: var(--spon-known-s);   color: var(--spon-known-t);   border-color: var(--spon-known-l); }
-.pill.spon-none    { background: var(--spon-none-s);    color: var(--spon-none-t);    border-color: var(--spon-none-l); }
 /* The firm timeline's "your cycle" marker — the accent look, because it is the
-   one pill on that row about the reader rather than about the date. Shares
-   tag-cat's tokens deliberately: a second accent recipe is a second thing to
-   keep in step with the theme. */
+   one pill on that row about the reader rather than about the date. It is the
+   only accent pill left: `.tag-cat`, the firm-category tag it used to share a
+   recipe with, went with the card that rendered it. */
 .pill.for-you   { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
-/* Opportunity-card tags: firm category + class year. */
-.pill.tag-cat   { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+/* The one opportunity-card tag still rendered, from `directory/views.py`'s
+   `{"label": f"Class of {opp.class_year}", "css": "tag-class"}`. */
 .pill.tag-class { background: var(--surface); color: var(--ink-2); border-color: var(--line-strong); }
 
 /* Plan badge — Settings' Credits card and the Talk composer meter (both
@@ -1493,7 +1530,16 @@ a.pill:hover { text-decoration: underline; }
 .band.band-warm { background: var(--band-warm-s); color: var(--band-warm-t); }
 .band.band-cool { background: var(--band-cool-s); color: var(--band-cool-t); }
 .band.band-cold { background: var(--band-cold-s); color: var(--band-cold-t); }
-.reasoning { font-style: italic; color: var(--ink-2); margin: var(--s2) 0 0; font-size: var(--fs-s); }
+/* The engine explaining itself, under the Fit Score and the Firm Fit band.
+   It was the site's only italic PARAGRAPH, and the choice was between
+   spreading the italic to Today's `.act-reason` (the same kind of sentence,
+   the same engine) or dropping it. Dropped, for a reason the spread would
+   have exposed: on `.act-card`, `.act-reason` sits beside `.opp-firm.is-
+   missing`, where italic already means "this fact is absent". Two italics on
+   one card meaning two different things is worse than one italic meaning
+   nothing, and the size and the quieter ink already say "this is the
+   engine's voice, not the record". */
+.reasoning { color: var(--ink-2); margin: var(--s2) 0 0; font-size: var(--fs-s); }
 
 .axes { display: grid; grid-template-columns: 1fr; gap: var(--s2); margin-top: var(--s3); }
 /* Sized for the contact page's 340px rail (its only home) — the name sits
@@ -1600,6 +1646,7 @@ a.pill:hover { text-decoration: underline; }
    now draws its own denser version (`.cd-row` on the contact page, `.set-row`
    on Settings, `.touches li` above). */
 
+/* ONE site: the import manifest in `accounts/import.html`. */
 table.summary { border-collapse: collapse; width: 100%; margin: var(--s3) 0; font-size: var(--fs-s); }
 table.summary td { padding: var(--s2) var(--s2); border-bottom: 1px solid var(--line); }
 table.summary td:last-child { text-align: right; font-family: var(--font-mono);
@@ -1613,29 +1660,6 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .deadline.past .count { color: var(--danger); }
 .deadline.none { color: var(--ink-3); font-style: italic; }
 .markers { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s2); }
-/* A second markers row for fact chips, tighter than the pill row above it. */
-.markers-facts { gap: var(--s1); margin-top: -2px; }
-
-/* Eligibility verdicts — the one chip about the READER. Green names their
-   year. A blocking verdict is grey-on-quiet, not red: a closed door is a
-   fact to route around, and eight red chips down a column would read as the
-   board shouting at its user. */
-.fact-chip.verdict-year_ok { border-color: var(--ok); color: var(--ok);
-  background: var(--ok-soft); font-weight: var(--w-med); }
-/* The same fact WORKED OUT rather than read: a summer 2027 internship
-   conventionally hires the 2028 class, but no posting said so. It earns the
-   green family because it is good news, and a dashed border because the
-   product must never dress an inference as a quotation — the two chips have
-   to be tellable apart at a glance, not only in the tooltip. */
-.fact-chip.verdict-year_likely { border: 1px dashed var(--ok); color: var(--ok);
-  background: transparent; font-weight: var(--w-med); }
-/* No strikethrough. It read as NEGATION — a struck-out "Won't sponsor you"
-   says the opposite of what it means, and the reader has to fight the
-   typography to get the fact. Quiet grey on the paper ground already says
-   "closed door" without arguing with itself, and it stays legible. */
-.fact-chip.verdict-year_out, .fact-chip.verdict-visa_out {
-  border-color: var(--line-strong); color: var(--ink-2);
-  background: var(--paper); font-style: italic; }
 
 /* A deadline read out of the posting's own prose rather than published as a
    field by the board (Opportunity.confidence < 1.0 — 92 of 121 dated open
@@ -1739,7 +1763,7 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    tabs and presented the frozen frame as data); the rise-in below moves the
    CONTAINER, so the number inside is correct on every frame. */
 .dash-num { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 32px; font-weight: var(--w-med); line-height: 1.1; color: var(--accent-ink);
+  font-size: var(--fs-display-2); font-weight: var(--w-med); line-height: 1.1; color: var(--accent-ink);
   display: inline-block; animation: rise-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 @media (prefers-reduced-motion: reduce) { .dash-num { animation: none; } }
 .dash-lbl { font-size: var(--fs-micro); color: var(--ink-3);
@@ -1827,7 +1851,8 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 .drawer-firm { margin: 0 0 2px; font-family: var(--font-mono);
   font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--ink-3); }
-.drawer-title { margin: 0 0 6px; font: var(--w-black) clamp(18px, 2vw, 23px)/1.2 var(--font-display);
+.drawer-title { margin: 0 0 6px;
+  font: var(--w-black) clamp(var(--fs-l), 2vw, var(--fs-display-3))/1.2 var(--font-display);
   letter-spacing: -0.01em; }
 .drawer-meta { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0;
   font-size: var(--fs-xs); color: var(--ink-3); }
@@ -2037,11 +2062,10 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 main > .page { animation: page-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-.page-head { animation: rise-in 460ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .page > .panel,
 .page > section,
 .warmth-section,
-.net-actions, .net-coverage {
+.net-coverage {
   animation: rise-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .net-coverage { animation-delay: 90ms; }
@@ -2161,7 +2185,7 @@ select:focus-visible, input:focus-visible {
   color: var(--accent); margin: 0 0 var(--s3);
 }
 .kin-hero h1, .kin-hero-title {
-  font: var(--w-black) clamp(30px, 4.4vw, 46px)/1.06 var(--font-display);
+  font: var(--w-black) clamp(var(--fs-display-2), 4.4vw, var(--fs-display-1))/1.06 var(--font-display);
   letter-spacing: -0.012em; margin: 0; color: var(--ink); max-width: 22ch;
 }
 .kin-hero-sub {
@@ -2171,6 +2195,8 @@ select:focus-visible, input:focus-visible {
 /* A designed line-icon, unique per page — a soft accent in the hero's
    top-right corner. Fixed 40px (also hard-set on the SVG so it can't grow if
    this rule is stale-cached). */
+/* ONE site: the pricing hero's mark (`core/pricing.html`). The home hero
+   carries a product mock instead, which is why this is not two uses. */
 .kin-hero-icon {
   position: absolute; top: var(--s5); right: var(--s5); z-index: 0;
   width: 40px; height: 40px;
@@ -2185,7 +2211,7 @@ select:focus-visible, input:focus-visible {
 .kin-hero-stat { display: flex; flex-direction: column; gap: 2px; }
 .kin-hero-stat .dash-num, .kin-hero-stat .num {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  color: var(--ink); font-size: 30px; font-weight: var(--w-med); line-height: 1.1;
+  color: var(--ink); font-size: var(--fs-display-2); font-weight: var(--w-med); line-height: 1.1;
 }
 .kin-hero-stat .dash-lbl, .kin-hero-stat .lbl {
   font-size: var(--fs-micro); color: var(--ink-3);
@@ -2409,7 +2435,7 @@ select:focus-visible, input:focus-visible {
   .site-header-inner { gap: var(--s3); padding: var(--s2) var(--s3); }
   .site-user { display: none; }
   .touches .when { min-width: 78px; }
-  h1 { font-size: var(--fs-xl); }
+  h1 { font-size: var(--fs-display-3); }
 }
 
 /* ---- 16b. The touch floor -------------------------------------------------
@@ -2430,6 +2456,71 @@ select:focus-visible, input:focus-visible {
    failure that rule's own comment records). */
 @media (pointer: coarse) {
   .btn { min-height: 44px; }
+  /* THE SHELL'S OWN FINGER TARGETS, moved here from an inline `<style>` in
+     base.html on 2026-09-01 (the note there said this is where they belong,
+     and it was right twice over: this is the shell's stylesheet, and a second
+     `(pointer: coarse)` block on every page silently misdirected two tests
+     that read the FIRST one as the feed's).
+
+     Measured at 375px: the footer's three links are 19px tall and the
+     wordmark 21px, on every page. They are text links, correctly sized for a
+     cursor and under half the floor for a finger, and the footer is where a
+     student goes looking for Privacy and Terms.
+
+     Padding plus an equal negative margin, not `min-height`: the target
+     grows, the footer does not. */
+  .site-footer-inner nav a, .site-footer-inner > a {
+    display: inline-block; padding: 13px 6px; margin: -13px -6px;
+  }
+  .site-auth a { display: inline-flex; align-items: center; min-height: 44px; }
+}
+
+/* ---- 16c. The phone nav ----------------------------------------------------
+   Between 480px and the desktop breakpoint the scrolled row above is right:
+   there is enough width that most of the six pills are visible at once, and
+   the fade plus the centring script make the rest reachable.
+
+   Below 480px it stops being right. Measured on a 375px screen: the wordmark
+   and the account chip take the row down to a 174px slot holding 606px of
+   pills, so two thirds of the product's navigation is off-screen behind a
+   gesture, the you-are-here pill is the only one you can trust to be visible,
+   and Settings is three swipes away. A scroller whose visible window is a
+   quarter of its content is not an affordance, it is a filing cabinet.
+
+   So the nav takes a row of its own and wraps into two. It costs about 50px
+   of chrome, which is real, and it is the right trade: the six items are the
+   whole product, they fit in two rows of three at this width, and every one
+   of them is now a thing you can see and hit. No hamburger — six items do not
+   need a menu, and a menu would hide the same six behind one more tap.
+
+   44px, not the 32px the pills were, and stated here rather than left to the
+   `pointer: coarse` floor above: that query answers "is this a finger", and
+   this one answers "is there room". A 375px window on a desktop with a mouse
+   still gets the wrap, because the reason for the wrap is the width. */
+@media (max-width: 479px) {
+  /* Row 1 stays the wordmark and the account chip; the nav drops beneath
+     them. `order` rather than source order because the nav must keep coming
+     BEFORE `.site-auth` in the DOM — the centring script and the tab order
+     both read it there. */
+  .site-header-inner { flex-wrap: wrap; row-gap: var(--s2); }
+  .site-auth { margin-left: auto; }
+  .site-nav {
+    order: 3; flex: 1 0 100%; min-width: 0;
+    flex-wrap: wrap; justify-content: center;
+    /* Undo the scroller: no overflow means no fade to explain it, and no
+       fade means the last pill is not sitting at 18% opacity. */
+    overflow-x: visible; padding: 4px;
+    mask-image: none; -webkit-mask-image: none;
+  }
+  /* `flex: 1 1 auto` so the three pills on a row share the width instead of
+     leaving a ragged tail, and `min-height` never `height` — OPPORTUNITIES is
+     one letterspaced word that wraps on the narrowest phones, and a fixed
+     height clips it. */
+  .site-nav a {
+    flex: 1 1 auto; min-height: 44px;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 7px var(--s3); text-align: center;
+  }
 }
 
 /* ---- 17. Reduced motion ---------------------------------------------------- */

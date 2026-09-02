@@ -165,7 +165,7 @@ this file is not redundant with it — see the note there.
     color: var(--accent); margin: 0 0 var(--s2);
   }
   .ob-head h1 {
-    font: var(--w-black) clamp(24px, 3vw, 32px)/1.12 var(--font-display);
+    font: var(--w-black) clamp(var(--fs-display-3), 3vw, var(--fs-display-2))/1.12 var(--font-display);
     letter-spacing: -0.012em; margin: 0; color: var(--ink);
   }
   .ob-lede { color: var(--ink-2); font-size: var(--fs-m);
@@ -459,7 +459,7 @@ this file is not redundant with it — see the note there.
     margin: 0 0 var(--s3); flex-wrap: wrap; }
   .ob-pv-num {
     font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: clamp(28px, 4.4vw, 38px); line-height: 1;
+    font-size: clamp(var(--fs-figure), 4.4vw, var(--fs-display-1)); line-height: 1;
     font-weight: var(--w-bold); color: var(--accent-ink);
   }
   .ob-pv-unit { font-size: var(--fs-s); color: var(--ink-2); }
@@ -604,7 +604,7 @@ this file is not redundant with it — see the note there.
   @media (max-width: 560px) {
     .ob-step--profile .grid-2 { grid-template-columns: 1fr; }
     .ob-firms { grid-template-columns: 1fr; max-height: 40vh; }
-    .ob-pv-num { font-size: 30px; }
+    .ob-pv-num { font-size: var(--fs-display-2); }
     /* Four board columns in 375px is four unreadable slivers. */
     .ob-pv-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     /* The rail's four labels get tight at 375px. Letter-spacing gives back
