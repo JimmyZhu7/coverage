@@ -73,6 +73,20 @@ tap, and (c) about a FACT of the record rather than the shape of the network:
                  alternate address. The primary is NEVER overwritten — the
                  standing rule that only the user replaces an address holds.
 
+  RECORDS, without owning the write:
+  - hard bounce -> a `bounced` row naming the dead address and the person it
+                 belonged to. The address-clear itself stays where it has
+                 always been (`capture.gmail.apply_findings`' bounce block,
+                 which also writes the contact note); this row is the
+                 STRUCTURED trace that block never left, and it is what the
+                 Today queue reads to stop asking for an email follow-up to
+                 an address the receiving server has already rejected. It
+                 lands `pending`, never `applied`: an `applied` row offers an
+                 Undo, and this module did not do the thing there is to undo.
+                 A SOFT bounce is not this and never becomes this — a full
+                 mailbox writes `routing_address` above, because that address
+                 works.
+
   PROPOSES, never creates:
   - a referral ("please contact Salima at salima@...") writes a pending
     `ContactProposal` with evidence_kind "referral" — through the same
@@ -555,12 +569,22 @@ def consider_finding(
     finding, before contact matching — whether the sender is in the contact
     book has nothing to do with whether their mailbox stated a fact."""
     out = Outcome()
-    if not finding.get("found") or finding.get("outreach_sent") or finding.get("bounced"):
+    if not finding.get("found") or finding.get("outreach_sent"):
         return out
 
     sender = normalize_email(str(finding.get("email") or ""))[:254]
     if not sender or "@" not in sender:
         return out
+
+    # A HARD BOUNCE IS READ BEFORE THE TEXT IS, because there is no text to
+    # read: the fact is the DSN's own failure code, and `_finding_text` would
+    # only ever hand back the subject line. This branch used to be an early
+    # RETURN at the top of the function — the module saw every permanent
+    # delivery failure in the mailbox and wrote down none of them.
+    if finding.get("bounced"):
+        _record_bounce(user, sender, finding, out, dry_run=dry_run)
+        return out
+
     text = _finding_text(finding)
 
     if finding.get("soft_bounce"):
@@ -940,6 +964,59 @@ def _extend_snooze(user, contact: Contact, return_on: date):
     return target
 
 
+def _record_bounce(
+    user, failed_email: str, finding: dict, out: Outcome, *, dry_run: bool,
+) -> None:
+    """A HARD bounce: write down that this address is dead, and stop there.
+
+    THE DIVISION OF LABOUR, stated because it is the unusual one in this
+    module. Every other applier here does the thing and records it. This one
+    only records: `capture.gmail.apply_findings`' bounce block already clears
+    the address off the contact, banks the firm-format evidence and appends
+    the note, and it has done so since long before this module existed. Two
+    writers for one action is how a note gets appended twice and an undo puts
+    back half a change, so the write stays in one place and this row is the
+    trace it never left.
+
+    WHY THE TRACE IS NEEDED AT ALL. The clear left exactly one artifact: a
+    sentence in `Contact.notes`. Nothing can reason over that. The Today
+    queue therefore kept scheduling `follow_up` for people whose address the
+    receiving server had permanently rejected — on the founder's account,
+    read-only 2026-09-02, five live contacts with no address at all, four of
+    them cleared by a bounce on Aug 30, and the engine still producing an
+    email prompt for that shape. `crm.today` reads these rows now.
+
+    STATUS IS ALWAYS `pending`. `applied` means "this module made a
+    reversible change and offers an Undo", and it did not. `pending` is the
+    honest state: a fact, surfaced, for the student to act on by finding a
+    new address or parking the person.
+
+    NO QUOTE, deliberately — see `MailFact`'s own note. The grounding is the
+    DSN structure `capture.gmail_live` already typed, and the subject line
+    the row stores is the message's own words.
+    """
+    if _existing_fact(user, failed_email, MailFact.KIND_BOUNCED) is not None:
+        return
+    name = (finding.get("name") or "").strip() or failed_email.split("@", 1)[0]
+    contact = _contact_for(user, failed_email)
+    out.surfaced += 1
+    out.details.append(
+        f"{name}: {failed_email} bounced permanently — recorded as "
+        "undeliverable"
+    )
+    if dry_run:
+        return
+    _create_fact(
+        user, MailFact.KIND_BOUNCED, about_email=failed_email, finding=finding,
+        about_name=name[:255], status=MailFact.STATUS_PENDING,
+        contact=contact,
+        action_note=(
+            f"{failed_email} is undeliverable. Coverage will not ask you to "
+            "email it again."
+        )[:300],
+    )
+
+
 def _apply_routing(
     user, failed_email: str, finding: dict, text: str, out: Outcome,
     *, dry_run: bool,
@@ -1047,6 +1124,54 @@ def address_is_departed(user, email: str) -> bool:
     return MailFact.objects.for_user(user).filter(
         about_email=email, kind=MailFact.KIND_DEPARTED,
     ).exclude(status=MailFact.STATUS_UNDONE).exists()
+
+
+def dead_addresses(user, *, contact_id: int | None = None) -> dict[int, MailFact]:
+    """Every contact this user's mail has proved unreachable at, as
+    `{contact_id: the fact that proves it}`. `contact_id` narrows it to one
+    person for the callers that only have one on screen — same rows, same
+    rule, one row read instead of all of them.
+
+    ONE DEFINITION OF "UNDELIVERABLE" (P5). Two kinds qualify and they are
+    listed on the model (`MailFact.DEAD_ADDRESS_KINDS`), not here: a hard
+    `bounced` (the server rejected the address permanently) and a `departed`
+    (the firm's own auto-responder said the person is gone, and
+    `_apply_departed` cleared the address on the strength of it). A soft
+    bounce is NOT one of them and must never become one — a full mailbox
+    writes `routing_address`, the address works, and the follow-up it earns
+    is a real follow-up.
+
+    UNDONE IS EXCLUDED, DISMISSED IS NOT, and the asymmetry is the same one
+    `address_is_departed` makes for the same reason. Undo is the user saying
+    the address stands. Dismiss is the user saying they have seen the card —
+    it is not a claim that the mail started being delivered.
+
+    Callers still have to check the address itself: a row names the address
+    that DIED (`about_email`), and a student who has since typed a different
+    one has a reachable contact again. `crm.today._mark_undeliverable` is
+    where that comparison lives, because "therefore do not ask for an email"
+    is a queue decision and this is only the fact.
+
+    One query, `contact`-joined rows only — a bounce off an address nobody in
+    the network holds is a real card in the "Your mail said" lane and no
+    business of the queue's.
+    """
+    rows = (
+        MailFact.objects.for_user(user)
+        .filter(kind__in=MailFact.DEAD_ADDRESS_KINDS, contact__isnull=False)
+        .exclude(status=MailFact.STATUS_UNDONE)
+        .order_by("created")
+    )
+    if contact_id is not None:
+        rows = rows.filter(contact_id=contact_id)
+    facts: dict[int, MailFact] = {}
+    for fact in rows:
+        # Last one wins. A person can carry both a departure and a bounce
+        # (the auto-reply first, the DSN when the next note goes out); the
+        # later row is the more recent account of the same dead address, and
+        # either answers the only question the callers ask.
+        facts[fact.contact_id] = fact
+    return facts
 
 
 def undo(fact: MailFact) -> None:
