@@ -217,7 +217,7 @@ def test_a_retired_chat_leaves_todays_queue(student, lily):
     assert ctx["chat_prep"] == [], "no prep for a meeting nobody is attending"
     assert all("Lily" not in r["title"] for r in ctx["schedule"]), (
         "and it is not coming up either — including via the untimed "
-        "'chat set up, no time yet' fallback, which `thread_state` would "
+        "'chat agreed, no time yet' fallback, which `thread_state` would "
         "otherwise hand it straight back to"
     )
 

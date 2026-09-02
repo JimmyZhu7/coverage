@@ -1217,7 +1217,7 @@ copy exactly once, and this is the once.
 
     ONE WIDGET, TWO HALVES (same instruction, second sentence: "Combine this
     with unsorted contacts, make into one widget"). What used to be the
-    "Where do they sit?" rail card is now an inset panel inside this one; the
+    "Contacts to place" rail card is now an inset panel inside this one; the
     block below carries the whole argument for how the two are told apart.
 
     What remains at the top of the card is two things that each say something
@@ -1271,13 +1271,37 @@ copy exactly once, and this is the once.
       the founder's own account (2026-08-31, every one of them from Gmail
       capture, 66 of them in two batches four days apart).
 
-      THE HEADING IS THE FOUNDER'S OWN, and so is the verb under it. "Where
-      do they sit?" replaced a heading that named a state ("Unplaced")
-      nobody could resolve unaided -- unplaced WHAT, and placed WHERE -- and
-      "Place them" is the same verb the Contacts caption on the Network page
-      already uses for this exact action, pointing at this exact tool. Both
-      words are fixed; every pass since has changed only how they are
-      presented, this one included.
+      THE VERB IS THE FOUNDER'S OWN AND IT IS FIXED. "Place them" is the
+      same verb the Contacts caption on the Network page already uses for
+      this exact action, pointing at this exact tool.
+
+      THE HEADING WAS HIS TOO, AND CHANGED ANYWAY (2026-09-02, "clear,
+      concise, straightforward"). "Where do they sit?" replaced a heading
+      that named a state ("Unplaced") nobody could resolve unaided --
+      unplaced WHAT, and placed WHERE -- and it fixed that by asking. Three
+      things say the question has stopped earning the slot:
+
+        It is a question this card never answers. Under it sit a count and a
+        button, so the reader is asked something and then handed a number.
+
+        "sit" is a trading floor's word for a DESK, and the field this block
+        is short of is a MARKET. Coverage stores no desk, and the tool the
+        button opens asks for a country. A student who reads the heading
+        literally goes looking for a field that does not exist.
+
+        It is the only interrogative heading in a rail of noun phrases
+        (Schedule, Deadlines, Recent Activity, Getting started), and a
+        heading that changes grammatical mood mid-rail costs a beat.
+
+      "Contacts to place" answers the WHAT that the 2026-08-31 rejection of
+      "Unplaced" was about, and it borrows the button's own verb so the
+      heading and the action are one word apart. The WHERE is answered by
+      the line directly under it, which says "no market set" -- and that
+      line is why this is not a relitigation of the 2026-08-31 call. Back
+      then the heading stood above a NOTE, and the heading was the only
+      thing on the block naming what was missing. The count line that
+      replaced the note carries the missing fact on its own face now, so the
+      heading does not have to.
 
       AN INSET PANEL, NOT A SECOND STACK OF BLOCKS. The two halves of this
       card are both "how your week is going" -- which is why the founder
@@ -1305,6 +1329,15 @@ copy exactly once, and this is the once.
       it opens. That is not a disagreement: this number is a week's arrivals
       and its face says "this week", while the tab counts every region-less
       contact under its own heading.
+
+      "WITH", NOT A COMMA (2026-09-02). The line carries two facts -- the
+      window they arrived in, and the field they arrived without -- and it
+      used to hang them off a comma: "89 new this week, no market set." That
+      is a splice, and a splice leaves the reader to work out which of "89
+      arrived and separately some things have no market" or "89 arrived and
+      all 89 have no market" was meant. "with" states the second fact as a
+      property of the first and the ambiguity goes. Nothing is dropped and
+      the line still renders on one line at both widths, checked at 999.
 
       ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
       asks the question in its answerable shape (grouped by firm, select-all
@@ -1337,8 +1370,8 @@ copy exactly once, and this is the once.
       {% endcomment %}
       {% if unplaced_arrival_count %}
         <div class="unplaced-card panel panel--inset panel--flat">
-          <h3 class="rail-title">Where do they sit?</h3>
-          <p class="unplaced-count" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one."><span class="unplaced-n">{{ unplaced_arrival_count }}</span> new this week, no market set.</p>
+          <h3 class="rail-title">Contacts to place</h3>
+          <p class="unplaced-count" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one."><span class="unplaced-n">{{ unplaced_arrival_count }}</span> new this week with no market set.</p>
           <a class="btn btn-primary unplaced-act" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
         </div>
       {% endif %}
@@ -1400,12 +1433,33 @@ copy exactly once, and this is the once.
         actionable half so it reads on the left with the market, and the
         avoid window sits right as a marker, which is the same
         content-left / meta-right row every other card in this rail uses.
+
+        "SEND", NOT "GOOD" (2026-09-02, "clear, concise, straightforward").
+        "HK desk good 9PM to 10:30PM" leads its clause with an adjective and
+        no verb, so the first three words parse as a judgement about the desk
+        until the time arrives to correct them. Worse, nothing on the row
+        said what the window was FOR: this is `_send_windows`, the answer to
+        "when is it worth writing", and a reader had to infer that from a
+        card titled Schedule. "send" is the verb the function is named for,
+        it is the same four characters "good" was, and it makes the pair two
+        imperatives in one register — send then, avoid then — instead of an
+        adjective answered by a command.
+
+        THE CLOCK IS THE READER'S, AND NOW THE TITLE SAYS SO. `_local_clock`
+        converts every one of these into the student's own timezone, which is
+        the entire point of the feature and was stated nowhere on the card. A
+        student reading "HK desk send 9PM" with no such note has every reason
+        to read 9PM as Hong Kong's 9PM and write at exactly the wrong hour.
+        It goes in the `title` rather than on the face because it is the same
+        class of fact as "around the close" — provenance, not a thing to act
+        on — and because the row has no room for it. Same words the Deadlines
+        card already uses for the same idea: "your own clock".
         {% endcomment %}
         {% if daybar.show_hints %}
           <ul class="daybar-hint">
             {% for h in daybar.hints %}
-              <li class="dbh" title="Lunchtime on the {{ h.market }} desk. The half hour either side of that market's close is the one to avoid.">
-                <span class="dbh-good"><b>{{ h.market }} desk</b> good {{ h.good }}</span>
+              <li class="dbh" title="On your own clock. The good window is lunchtime on the {{ h.market }} desk, and the half hour either side of that market's close is the one to avoid.">
+                <span class="dbh-good"><b>{{ h.market }} desk</b> send {{ h.good }}</span>
                 <span class="dbh-avoid">avoid {{ h.avoid }}</span>
               </li>
             {% endfor %}
@@ -1505,9 +1559,43 @@ copy exactly once, and this is the once.
                 countdown states its direction (`crm.today._next_deadlines`),
                 and everything else in this rail that prints a bare "Nd" —
                 here, and Recent Activity below — is elapsed time.
+
+                AND WHY THIS LINE NAMES ITS NOUN AND SAYS "OLDEST"
+                (2026-09-02, "clear, concise, straightforward"). "18 open,
+                longest 24d" was the most cryptic line on the rail: four
+                words carrying a census, a subject and an age, of which it
+                stated one. Two separate fixes, neither of which drops
+                anything:
+
+                  "18 open" named no noun, so the reader supplied one, and
+                  the only nouns in reach were the two the row had already
+                  used — applications and deadlines. "roles" is the word the
+                  Opportunities feed and every firm page use for exactly
+                  these rows ("See open roles", "No campus roles open right
+                  now"), so the line now borrows the vocabulary a student
+                  meets everywhere else instead of inventing a bare number.
+                  No `pluralize` and none needed: `firm_open_runs` drops any
+                  firm under `CYCLE_OBSERVATION_MIN_SAMPLE`, so this count is
+                  three or more or the span does not render.
+
+                  "longest" was the direction bug the fix above did not
+                  reach. A countdown one inch up now says "in 58d", but
+                  "longest 24d" still reads as a span of time a thing has
+                  LEFT — the same forward-pointing sense as "open longest",
+                  "lasts longest". "oldest" cannot point forward: it is a
+                  superlative of age and nothing else, so the elapsed reading
+                  is the only one available and the rail's bare-Nd rule is
+                  restated rather than relied on.
+
+                The zero branch gets the same treatment. "all today" beside a
+                row about closing dates could be read as "all closing today",
+                which is the one thing it does not mean; "all opened today"
+                cannot be. Widths checked at 236 roles and 124d, one line at
+                1280 and at 375, both schemes. "Campus" stays in the `title`,
+                where it already was.
                 {% endcomment %}
                 {% if d.open_run %}
-                  <span class="activity-run" title="Campus postings at this firm that Coverage watched open and that are still open. Not a forecast of when they close.">{% if d.open_run.longest_days %}{{ d.open_run.count }} open, longest {{ d.open_run.longest_days }}d{% else %}{{ d.open_run.count }} open, all today{% endif %}</span>
+                  <span class="activity-run" title="Campus postings at this firm that Coverage watched open and that are still open. Not a forecast of when they close.">{% if d.open_run.longest_days %}{{ d.open_run.count }} roles open, oldest {{ d.open_run.longest_days }}d{% else %}{{ d.open_run.count }} roles open, all opened today{% endif %}</span>
                 {% endif %}
               </span>
               <span class="activity-when{% if d.urgent %} is-urgent{% endif %}">{{ d.when }}</span>

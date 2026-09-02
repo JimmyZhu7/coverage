@@ -862,7 +862,13 @@ def test_a_scheduled_chat_with_no_event_still_shows_and_claims_no_time(client):
 
     body = _login_and_get(client, user)
     assert "Schedule" in body
-    assert "chat set up" in body
+    # "chat agreed", not "chat set up" (2026-09-02, fourth copy pass). The
+    # row sat beside "no time yet" and contradicted it: a chat that is set up
+    # is a chat with a time. "agreed" is all `thread_state="chat_scheduled"`
+    # asserts when no CalendarEvent exists for it, which is the entry
+    # condition for this branch of `_schedule`.
+    assert "chat agreed" in body
+    assert "chat set up" not in body
     # Nobody stated a time, so the page must not imply one.
     for invented in ("chat tomorrow", "Chat tomorrow", "chat at "):
         assert invented not in body
