@@ -76,23 +76,30 @@ values.
           {% include "crm/_contact_ai_brief.html" with contact=contact brief=None requested=False %}
         </div>
       </details>
-    </div>
+      {% comment %}
+      ---- What this relationship is, in words (AI-written) ----
 
-    {# ---- What this relationship is, in words (AI-written) ---- #}
-    {% comment %}Its OWN card, immediately under the one holding the angle
-    and notes, and deliberately not inside it: those two are the student's
-    own words about this person and this is not, so the two must never share
-    a box a reader could mistake for one authorship. Own htmx target too, for
-    the same reason the coffee-chat brief has one — rewriting a summary must
-    not discard an unsaved opener draft in the card above.
+      THE THIRD DISCLOSURE, folded in here 2026-09-01. It used to be a
+      `.cd-card` of its own, and the argument for that was authorship: the
+      angle and the notes are the student's own words and a summary a model
+      wrote must not share a box a reader could mistake for one voice.
 
-    Collapsed by default, open once written — the same rule the compose
-    draft below uses for the same reason: on the founder's own 223 contacts
-    nobody has ever written one yet, so an always-expanded card here was a
-    full-height "nothing to see" box on every single contact page. The
-    `.cd-opener` disclosure this reuses is the same control the coffee-chat
-    brief already uses one card over.{% endcomment %}
-    <div class="cd-card kin-reveal" style="--i:1">
+      The argument had already stopped being true of this card. "Coffee chat
+      brief", directly above, is model-written too and has lived in this card
+      the whole time — so the box was never the authorship boundary; the
+      disclosure's own label is, and both of these say what they are on their
+      summary line. What the separate card actually bought was a bordered,
+      shadowed, full-width panel holding one collapsed 19px line, on a page
+      whose whole virtue (per the audit: the best page on the site) is that
+      it has ONE card primitive and uses it sparingly.
+
+      Everything else is unchanged. It stays collapsed until a summary exists
+      — on the founder's 223 contacts nobody has written one yet, so an
+      always-open version was a full-height "nothing to see" block on every
+      contact page — and it keeps its OWN htmx target, which is the part that
+      matters functionally: rewriting a summary must never discard an unsaved
+      opener draft in the textarea above it.
+      {% endcomment %}
       <details class="cd-opener"{% if contact.ai_summary %} open{% endif %}>
         <summary>Relationship summary</summary>
         <div id="contact-ai-summary" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
@@ -102,7 +109,10 @@ values.
     </div>
 
     {# ---- Where this stands, and moving it ---- #}
-    <div class="cd-card kin-reveal" style="--i:2">
+    {# --i renumbered after the relationship summary folded into the card #}
+    {# above: the stagger counts CARDS, so a gap here would have delayed #}
+    {# the whole left column by one step for a card that no longer exists. #}
+    <div class="cd-card kin-reveal" style="--i:1">
       <div class="cd-state">
         <h2 class="cd-h">Warmth</h2>
         {% comment %}state_line is the WHOLE sentence — the view already
@@ -173,7 +183,7 @@ values.
     </div>
 
     {# ---- History, newest first ---- #}
-    <div class="cd-card kin-reveal" style="--i:3">
+    <div class="cd-card kin-reveal" style="--i:2">
       <h2 class="cd-h">History <span class="cd-count">{{ touch_rows|length }}</span></h2>
       {% if touch_rows %}
         <ol class="cd-log">

@@ -446,3 +446,74 @@ def test_the_activity_rail_does_not_render_a_negative_day_count():
 
     row = next(a for a in ctx["activity"] if a["name"] == "Future Chat")
     assert row["ago"] == "today", row["ago"]
+
+
+# ---------------------------------------------------------------------------
+# The rail is the student's work, not the system's bookkeeping (2026-09-01).
+#
+# Measured on the demo board: six of the six rows this rail rendered read
+# "<name> · Updated manually" -- `manual_override` rows, the audit kind
+# `crm.pipeline` writes when the SYSTEM changes a contact's state so the log
+# has no gap. A card titled Recent Activity was presenting those as the
+# week's relationship work, three cards below a pace ring reading 0/17 for
+# the same week. Spec E1/C2: audit rows are not the student's work, and the
+# ring already excludes this kind structurally (`PACE_TOUCH_KINDS`). The rail
+# now agrees with the ring instead of contradicting it.
+#
+# The full log, with the richer note-aware wording from
+# `crm.views._override_label`, is still on the contact's own History page,
+# which is where an audit trail belongs.
+# ---------------------------------------------------------------------------
+def test_the_activity_rail_leaves_out_the_systems_own_audit_rows():
+    from crm.today import _cockpit_context
+
+    user = get_user_model().objects.create_user(
+        email="audit-rail@example.com", password="pw12345!",
+    )
+    now = timezone.now()
+    bookkeeping = Contact.all_objects.create(user=user, name="Audit Row")
+    real = Contact.all_objects.create(user=user, name="Real Work")
+    # The audit rows are NEWER, so a rail that did not filter would show
+    # nothing else: six of them fill a six-row feed on their own.
+    for i in range(6):
+        Touch.all_objects.create(
+            user=user, contact=bookkeeping, kind="manual_override",
+            channel="other", ts=now - timedelta(hours=i + 1),
+        )
+    Touch.all_objects.create(
+        user=user, contact=real, kind="outreach", channel="email",
+        ts=now - timedelta(days=3),
+    )
+
+    with mock.patch("django.utils.timezone.now", return_value=now):
+        ctx = _cockpit_context(user)
+
+    names = [a["name"] for a in ctx["activity"]]
+    assert names == ["Real Work"], names
+    assert all(a["kind"] != "manual_override" for a in ctx["activity"])
+
+
+def test_the_activity_rail_still_reports_mail_it_did_not_send():
+    """`bulk_received` stays in: the rail reports what happened.
+
+    The pace ring excludes it because a newsletter landing is not work the
+    student did -- but this rail answers a different question ("what moved on
+    my relationships since I last looked"), and a blast arriving is a real
+    answer to it. Only the SYSTEM's own writes are silent here.
+    """
+    from crm.today import _cockpit_context
+
+    user = get_user_model().objects.create_user(
+        email="blast-rail@example.com", password="pw12345!",
+    )
+    now = timezone.now()
+    contact = Contact.all_objects.create(user=user, name="Newsletter Sender")
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="bulk_received", channel="email",
+        ts=now - timedelta(days=1),
+    )
+
+    with mock.patch("django.utils.timezone.now", return_value=now):
+        ctx = _cockpit_context(user)
+
+    assert [a["name"] for a in ctx["activity"]] == ["Newsletter Sender"]

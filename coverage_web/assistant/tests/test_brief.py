@@ -977,3 +977,110 @@ def test_the_staleness_fingerprint_records_the_plans_order():
     )
 
     assert DailyBrief.objects.for_user(user).get().contact_ids == [90, 11]
+
+
+# House style: no em dashes (2026-09-01).
+#
+# The founder's copy rule holds on every hand-written string in the product
+# and leaked on the one surface a model writes. Measured live on the Today
+# page: "she is your only advocate at Goldman Sachs—she has written to you",
+# one card above a queue whose reason lines already run through
+# `crm.today._sentenceize` for exactly this reason.
+#
+# Pinned on the finished text rather than on the prompt, on purpose. A rule
+# stated in a prompt is obeyed most of the time, and a daily card that keeps
+# house style "most of the time" is a defect waiting for someone's Tuesday.
+# ---------------------------------------------------------------------------
+def test_an_em_dash_in_the_models_answer_becomes_a_sentence_break():
+    user = _user()
+    client = FakeClient(_response(
+        "Priya Nair is your only advocate at Goldman Sachs—she has written "
+        "to you twice."
+    ))
+
+    text = brief.get_or_build(user, [_action()], client=client)
+
+    assert "—" not in text
+    assert text == (
+        "Priya Nair is your only advocate at Goldman Sachs. She has written "
+        "to you twice."
+    )
+
+
+def test_a_spaced_em_dash_and_an_en_dash_are_both_rewritten():
+    """Either character, spaced or not: a reader cannot tell them apart at
+    15px and both are doing the same clause-joining job."""
+    assert brief._no_em_dashes("Write to Ada — she replied Friday.") == (
+        "Write to Ada. She replied Friday."
+    )
+    assert brief._no_em_dashes("Two roles close Friday – act today.") == (
+        "Two roles close Friday. Act today."
+    )
+
+
+def test_the_rewrite_keeps_the_one_bold_span_the_prompt_asks_for():
+    """The prompt asks for exactly one `**bold**` span and it can open the
+    clause after the dash. The marker travels through untouched, and the
+    capital lands on the word rather than on the asterisks."""
+    assert brief._no_em_dashes("Two things today—**Priya Nair** replied.") == (
+        "Two things today. **Priya Nair** replied."
+    )
+    assert brief._no_em_dashes("Two things today—**priya** replied.") == (
+        "Two things today. **Priya** replied."
+    )
+
+
+def test_a_dash_that_is_not_a_sentence_break_becomes_a_space_not_a_full_stop():
+    """A trailing dash, or one against punctuation, is a fragment. Turning it
+    into a full stop would invent a sentence out of nothing."""
+    assert brief._no_em_dashes("Nothing urgent today —") == "Nothing urgent today"
+    assert brief._no_em_dashes("She replied — .") == "She replied ."
+
+
+def test_text_with_no_dash_is_returned_unchanged():
+    """The pass runs on every generated brief, so the no-op case has to be a
+    true no-op: no re-capitalisation, no whitespace surprises."""
+    original = "Follow up with Ada Lovelace today. She replied on Friday."
+    assert brief._no_em_dashes(original) == original
+    assert brief._no_em_dashes("") == ""
+
+
+def test_an_abbreviation_is_not_recapitalised_by_the_rewrite():
+    """The capital is applied by consuming the character after the break this
+    function itself made, never by a blanket pass over every full stop —
+    which would also rewrite the word after "e.g."."""
+    assert brief._no_em_dashes("Try one, e.g. bain, first.") == (
+        "Try one, e.g. bain, first."
+    )
+
+
+def test_the_stored_brief_is_the_rewritten_one():
+    """The rewrite runs before the cache write, so tomorrow's reader of
+    today's row sees the same sentence this student saw."""
+    user = _user()
+    client = FakeClient(_response("Act now—two roles close Friday."))
+
+    brief.get_or_build(user, [_action()], client=client)
+
+    row = DailyBrief.objects.for_user(user).get(date=timezone.localdate())
+    assert row.text == "Act now. Two roles close Friday."
+
+
+def test_a_row_written_before_the_style_rule_is_cleaned_on_the_way_out():
+    """`get_cached` rewrites too, not just `get_or_build`.
+
+    The cache is one row per student per calendar day, so a brief generated
+    an hour before this rule landed would otherwise have kept its em dash on
+    screen until midnight. The rewrite is idempotent, so a row written after
+    the rule passes through untouched; this is the only thing standing
+    between an already-cached sentence and the house style.
+    """
+    user = _user()
+    DailyBrief(
+        user=user, date=timezone.localdate(),
+        text="Priya Nair is your advocate at Goldman Sachs—she wrote twice.",
+    ).save()
+
+    assert brief.get_cached(user) == (
+        "Priya Nair is your advocate at Goldman Sachs. She wrote twice."
+    )

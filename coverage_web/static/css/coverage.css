@@ -217,6 +217,14 @@
   --r-ctl:   10px;  /* buttons, inputs */
   --r-panel: 12px;
 
+  /* The edge rule: the 3px left border that says "this row is claimed" —
+     an act card's priority, a gap row's tier, the feed's scope line, an undo
+     strip's accent. Eleven surfaces hand-set `border-left: 3px` and one hand-
+     set 4px; the value is a signature, not a coincidence, so it gets a name.
+     Width only. The COLOUR is per-surface and must stay so: it is the thing
+     the edge is actually saying. */
+  --edge-w: 3px;
+
   /* Motion */
   --t-fast: 120ms ease;
   --t-med:  180ms cubic-bezier(0.2, 0.6, 0.2, 1);
@@ -894,18 +902,11 @@ main { flex: 1 0 auto; }
   .wa-col-short { display: inline; }
 }
 
-/* v2: stat strip — ledger figures for a page's key counts (Today, home). */
-.stats { display: flex; gap: var(--s5); flex-wrap: wrap; margin: var(--s4) 0 0; }
-.stat { display: flex; flex-direction: column; gap: 2px; min-width: 72px; }
-.stat .num {
-  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 24px; font-weight: var(--w-med); line-height: 1.1; color: var(--ink);
-}
-.stat .lbl {
-  font-size: var(--fs-micro); color: var(--ink-3);
-  text-transform: uppercase; letter-spacing: 0.05em;
-}
-.stat .num a { color: inherit; }
+/* The v2 `.stats`/`.stat` strip is gone: zero uses in any template. Today's
+   figures are `.ribbon-stat` (crm/_styles.html), the feed's are `.stat-strip`
+   (directory/_styles.html) and the hero's are `.kin-hero-stat` above — three
+   live components, none of them this one, and its 24px figure was one of the
+   fourteen off-scale display sizes the type audit counted. */
 .subnav { display: flex; gap: var(--s2); font-size: var(--fs-s); margin: var(--s3) 0 0; flex-wrap: wrap; }
 /* These two rules keep 999px on purpose, and the control-radius sweep that
    squared `.btn`, the nav and the filter bar deliberately stopped short of
@@ -1006,7 +1007,11 @@ main { flex: 1 0 auto; }
   margin-bottom: var(--s4); box-shadow: var(--shadow-1);
   transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med);
 }
-.panel:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); transform: translateY(-2px); }
+/* 1px, per the hover-lift rule in §15b (M3). It was 2px, which is the height
+   at which the shadow reads as the card climbing rather than as the pointer
+   being acknowledged — and `.btn`, `.act-card` and `.chipset` were all
+   already at 1px, so the panel was the odd one out on pages carrying both. */
+.panel:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); transform: translateY(-1px); }
 .empty {
   border: 1px dashed var(--line-strong); border-radius: var(--r-panel);
   padding: var(--s7) var(--s5); text-align: center; color: var(--ink-2);
@@ -1014,13 +1019,13 @@ main { flex: 1 0 auto; }
 .empty h2 { margin: 0 0 var(--s2); font-size: var(--fs-l); color: var(--ink); }
 .empty p { margin: 0 0 var(--s2); }
 
-.honesty {
-  background: var(--accent-soft); border: 1px solid var(--accent-line);
-  border-radius: var(--r-panel); padding: var(--s3) var(--s5);
-  font-size: var(--fs-s); color: var(--ink-2); margin: 0 auto var(--s5);
-  max-width: 64ch; text-align: center;
-}
-.honesty strong { color: var(--accent-ink); }
+/* `.honesty` — the tinted centred banner — is gone. `git grep` finds the word
+   fourteen times across the templates and not once as this class: every hit is
+   prose in a comment, or `.price-honesty`, which draws its own thing on the
+   pricing page. Nothing has rendered this rule since the July header system
+   was replaced. `--accent-soft`'s own token comment still names it ("honesty
+   banner") because the tint is still used, by `.src-panel` hover, the drop
+   target on the tier board and the palette's active row. */
 
 /* The app-wide flash zone (base.html). Was an inline banner at the top of
    the page, above every page's own content -- reported "ugly", and on
@@ -1090,7 +1095,27 @@ code.addr { padding: 1px 6px; font-size: var(--fs-xs); }
      buttons as what it is FOR, and a hardcoded pill here overrode it on every
      button in the app — which also spent the badge shape (`--r-badge`) on
      actions, leaving nothing to distinguish a thing you press from a thing
-     that merely reports state. Status chips keep the pill; controls don't. */
+     that merely reports state. Status chips keep the pill; controls don't.
+
+     THE CONTROL-SHAPE RULE, written down once so the next pass has something
+     to check against instead of a habit to copy. A 2026-09-01 measurement
+     found twelve pressable classes at 999px against a `.btn` at 10px, and a
+     student meeting both shapes on one screen learns nothing from either.
+
+       1. Everything pressable takes `--r-ctl`. Buttons, icon buttons, undo
+          strips, "clear the filters", the tier adders, the calendar's arrows.
+       2. ONE exception: a capsule is allowed for a SEGMENTED CHOICE among
+          peers — `.subnav.scope-tabs`, `.seg-pill`, the theme picker — where
+          the round is the shape of the group's track, not of one control's
+          edge, and the tabs inside take `--r-ctl` minus the track's padding
+          (see the scope-tabs comment in §4).
+       3. Status chips (`.pill`, `--r-badge`) stay pills. A chip reports; it
+          is not pressed. That is the whole distinction the two shapes carry.
+       4. A breadcrumb wash is neither: see `.subnav a` for why 4px of padding
+          round a text link cannot take a 10px corner.
+
+     Anything that wants a capsule and is not case 2 or 3 is asking for the
+     badge shape to mean two things at once, which is how this drifted. */
   padding: 10px 20px; border-radius: var(--r-ctl);
   border: 1px solid var(--line-strong);
   background: var(--surface); color: var(--ink);
@@ -1570,11 +1595,10 @@ a.pill:hover { text-decoration: underline; }
   font-size: var(--fs-xs); min-width: 96px; padding-top: 1px; }
 .touches .kind { font-weight: var(--w-med); }
 
-.deflist { margin: var(--s3) 0; }
-.deflist > div { display: flex; justify-content: space-between; gap: var(--s3);
-  padding: var(--s2) 0; border-top: 1px solid var(--line); font-size: var(--fs-s); }
-.deflist > div:first-child { border-top: 0; }
-.deflist .v { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* `.deflist` is gone: zero uses. It was the label-left/figure-right row this
+   file's section heading still advertises, and every surface that wants one
+   now draws its own denser version (`.cd-row` on the contact page, `.set-row`
+   on Settings, `.touches li` above). */
 
 table.summary { border-collapse: collapse; width: 100%; margin: var(--s3) 0; font-size: var(--fs-s); }
 table.summary td { padding: var(--s2) var(--s2); border-bottom: 1px solid var(--line); }
@@ -1957,7 +1981,33 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    One motion system across every page: content reveals on load, sections
    stagger in, interactive things give tactile feedback. No layout changes —
    only transform/opacity, so nothing reflows. All of it is switched off by
-   the reduced-motion block (§17). */
+   the reduced-motion block (§17).
+
+   THE MOTION RULES. Written down 2026-09-01 after a count found 21 entrance
+   keyframes, 3 sheens looping forever on cards that change once a day, 10
+   pulse rings on a state that is not a change, and 23 checkmarks popping on
+   a Settings page that had just loaded unchanged. The vocabulary was fine;
+   nothing said when a piece of it was earned. These four do:
+
+     M1. An INFINITE animation is allowed only while it is bound to a live
+         state — loading, generating, listening, running. The state ends, the
+         animation ends. "This role is rolling" and "this brief exists" are
+         conditions, not events, and a condition is drawn with colour.
+     M2. An ENTRANCE fires once per node, and never on a reload of unchanged
+         state. A page a student opens twenty times a day must not perform
+         its arrival twenty times. Where the markup cannot tell "new" from
+         "was already here", gate it (`body.is-settling`, `:focus-within`)
+         rather than letting it fire on load.
+     M3. A HOVER LIFT is at most 1px. `.btn`, `.act-card` and `.chipset`
+         already are; anything at 2px is a card asking to be a bigger card.
+     M4. A NUMBER moves only when it changes in response to the reader. The
+         onboarding preview's count as a chip is ticked, a lane count after
+         a swap: yes. A digit scaling itself on page load: no — E7 of the
+         Today spec ("numbers never animate through false values") is the
+         same rule read from the other end.
+
+   `prefers-reduced-motion` (§17) is not one of these four. It is the floor
+   under all of them and it is already honoured everywhere. */
 
 /* Page-load reveal: the page head drops in, then each direct section of the
    main content rises in a gentle downward stagger. `main > .page > *` covers
@@ -1974,6 +2024,45 @@ main > .page { animation: page-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 }
 .net-coverage { animation-delay: 90ms; }
 @keyframes rise-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* ---- The settling gate ----------------------------------------------------
+   Motion rule M2: an entrance fires once per node, never on a reload of
+   unchanged state. `chip-check` is the spring that rewards a thing BECOMING
+   true — a checkbox ticked, a chip added — and CSS cannot tell "just became
+   checked" from "was already checked when the page loaded", because both are
+   simply `:checked` when the stylesheet is applied.
+
+   Measured on Settings: 23 of these fired on every load, so a page a student
+   opens to change one setting performed 23 confirmations of settings they
+   changed weeks ago. The animation says "done" about nothing that was just
+   done, which is exactly the case rule M2 exists for.
+
+   THE GATE. A page that wants it sets `is-settling` on the root element
+   before first paint and removes it once the first frame is on screen (see
+   accounts/settings.html for the pattern). Anything checked at load is
+   inside that window and animates nothing; anything checked afterwards is a
+   real change by a real person and springs as before.
+
+   On the ROOT element, not `<body>`: the class has to be set in the head, in
+   the same synchronous parse as the stylesheet, or the first paint has
+   already happened by the time it lands and the pop is what it was gating.
+   `<body>` does not exist yet at that point; `document.documentElement`
+   does. With JavaScript off nothing sets the class, and the pops on load
+   come back — which is the correct degradation, since the alternative is a
+   page that never animates a real change either.
+
+   Listed by selector rather than by animation name because CSS has no way to
+   say "whatever runs chip-check". Every rule below has a `chip-check`
+   counterpart above or in a page's own style block; the two lists have to be
+   kept together. */
+html.is-settling .chipset > div > div > label:has(:checked)::before,
+html.is-settling .wa-row > div > div label:has(:checked)::before,
+html.is-settling .se-chip,
+html.is-settling .tf-chip,
+html.is-settling .adv-socket.is-filled,
+html.is-settling .cal-dayv.is-today .cal-num {
+  animation: none;
+}
 
 /* Tactile press: everything clickable dips slightly when pressed, so the
    whole UI feels responsive to touch, not just the hover-lift cards. */
@@ -2134,15 +2223,15 @@ select:focus-visible, input:focus-visible {
    keyframe it is a 14px circle drawn around an 8px dot, which reads as a
    target, not a marker. The dot alone still says live.
 
-   `kin-pulse-ring` stays defined below — the Today board's `.lane-dot`
-   (crm/_styles.html) is a different component and still uses it. */
+   `kin-pulse-ring` went with it (2026-09-01). Today's `.lane-dot` was the
+   one component still running it, and it lost the ring for the same reason
+   this one did: "critical" is the state the lane is IN, and motion rule M1
+   (§15b) reserves an infinite animation for a state that is actually live.
+   Nothing references the keyframe now, so it is gone rather than kept warm
+   for a caller that no longer exists. */
 .live-dot {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--ok); position: relative; flex: none;
-}
-@keyframes kin-pulse-ring {
-  0%   { transform: scale(0.55); opacity: 0.9; }
-  100% { transform: scale(2); opacity: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .live-dot::after { animation: none; } }
 
@@ -2299,6 +2388,26 @@ select:focus-visible, input:focus-visible {
   .site-user { display: none; }
   .touches .when { min-width: 78px; }
   h1 { font-size: var(--fs-xl); }
+}
+
+/* ---- 16b. The touch floor -------------------------------------------------
+   `.btn` is 38px tall (10px padding on 13px/1.2 type) and was floored at 44
+   in exactly one place, Settings, by a rule that only Settings could see. A
+   2026-09-01 pass across eight pages counted the same 38px button on every
+   one of them, plus icon buttons at 24-36px on Talk and the calendar.
+
+   The query is `pointer: coarse`, not a width: a 44px target is owed to a
+   finger, and a finger is what the media feature actually reports. Phones in
+   landscape and tablets at desktop widths get the floor; a narrow desktop
+   window does not, and nothing about the desktop layout moves.
+
+   `min-height` only, never a fixed height — every one of these buttons wraps
+   its label on some phone, and this codebase has shipped clipping from fixed
+   heights twice. `.btn` is already `inline-flex` + `align-items: center`, so
+   the extra height centres its text instead of stranding it at the top (the
+   failure that rule's own comment records). */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
 }
 
 /* ---- 17. Reduced motion ---------------------------------------------------- */

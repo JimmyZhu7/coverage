@@ -106,9 +106,30 @@
      calendar now all carry the real .btn class in the markup; what's left
      here is only what .btn does not already give a circular icon button —
      the fixed 36px square and centred glyph size. */
+  {% comment %}
+  The last of that pass, finished 2026-09-01: the arrows kept `--r-ctl` too.
+  The rewrite above put the real `.btn` class on them and then immediately
+  re-rounded them to 999px, which left three control shapes on one 44px-tall
+  bar — a circle, a capsule (the Month/Week/Day segment) and three squared
+  `.btn`s — measured as the most shape variety in any single row on the site.
+
+  The segment stays a capsule and that is not an inconsistency: the
+  control-shape rule now written into coverage.css §6 allows exactly one
+  exception, a segmented choice among peers, where the round belongs to the
+  group's track rather than to any one control's edge. An arrow is not a
+  segmented choice. It is a button that happens to be square, so it takes a
+  button's corner.
+
+  On a coarse pointer it grows to 44 in both directions. `.btn`'s shared
+  floor (coverage.css §16b) only sets `min-height`, and a 44x36 target is
+  still a miss on the axis a thumb travels along a month bar.
+  {% endcomment %}
   .cal-nav { display: flex; gap: var(--s1); }
-  .cal-nav a.btn { width: 36px; height: 36px; padding: 0; border-radius: 999px;
-    font-size: var(--fs-m); }
+  .cal-nav a.btn { width: 36px; height: 36px; padding: 0;
+    border-radius: var(--r-ctl); font-size: var(--fs-m); }
+  @media (pointer: coarse) {
+    .cal-nav a.btn { width: 44px; height: 44px; }
+  }
   /* Legend doubles as the month's counts — the key and the summary are the
      same three facts, so they are one row rather than two. */
   .cal-legend { display: flex; gap: var(--s3); margin-left: auto; flex-wrap: wrap;
@@ -125,7 +146,24 @@
     color: var(--ink); }
 
   .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
-    overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
+    overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1);
+    {% comment %}
+    220ms `settle`, the keyframe coverage.css §15 already defines for htmx's
+    own swaps. Every navigation on this page — a month arrow, Today, the
+    Month/Week/Day segment — is a full page load, so the grid was replaced
+    between two frames with nothing connecting the old month to the new one:
+    the one place on the site where content changes on purpose and says
+    nothing about it. Motion rule M2 (§15b) is satisfied by construction
+    here, since a load IS the change; there is no unchanged-reload case for
+    this element to fire wrongly on.
+
+    On `.cal-grid` and not on the page: `main > .page` already runs `page-in`
+    for the whole document, and the grid is the part that actually differs
+    between one month and the next. The 4px rise reads as the new month
+    arriving under the bar that stayed put.
+    {% endcomment %}
+    animation: settle 220ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
+  @media (prefers-reduced-motion: reduce) { .cal-grid { animation: none; } }
   /* minmax(0, 1fr), NOT 1fr. Every week is its own grid container, and a bare
      `1fr` is `minmax(auto, 1fr)` — the auto floor lets content set a column's
      minimum width. So a long firm-and-event title widened the Saturday column
@@ -225,7 +263,7 @@
      ellipses. Every card in the grid is the same 22px. */
   .cal-ev { display: flex; align-items: center; gap: 5px; height: 22px; flex: none;
     text-align: left; width: 100%; border: 0;
-    background: var(--paper); border-left: 3px solid var(--line-strong);
+    background: var(--paper); border-left: var(--edge-w) solid var(--line-strong);
     border-radius: 5px; padding: 0 6px; font-size: var(--fs-xs);
     color: var(--ink); line-height: 1; list-style: none;
     transition: transform var(--t-fast), box-shadow var(--t-med),
@@ -302,6 +340,17 @@
      tall to stand beside a 36px arrow button. */
   .cal-views { margin: 0; flex: none; }
   .cal-views a { padding: 7px 14px; font-size: var(--fs-xs); }
+  {% comment %}
+  The segment is the one control on this bar that keeps a capsule, and it
+  earns it under the single exception in the control-shape rule
+  (coverage.css §6): a segmented choice among peers, where the round belongs
+  to the group's track. It still owes a finger 44px, which its 30px tabs
+  were not giving — `.btn`'s shared floor cannot reach these, since they are
+  `.subnav` links rather than buttons.
+  {% endcomment %}
+  @media (pointer: coarse) {
+    .cal-views a { min-height: 44px; display: inline-flex; align-items: center; }
+  }
 
   /* ---- Week: the month's own cell, given the room ----------------------
      Every other property comes from `.cal-day` above, deliberately: same
@@ -376,6 +425,14 @@
     font-size: var(--fs-xs); color: var(--ink-3); text-align: right;
     padding-top: 4px; }
   .cal-dayv-lane { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  {% comment %}
+  The one row that stands in for a rail with nothing on it (see
+  _calendar_day.html). It keeps the rail's own two-column shape so it reads
+  as the same axis collapsed rather than as a different kind of row, and its
+  text is the quietest on the view: it reports an absence, and an absence
+  should not be the loudest thing on a day.
+  {% endcomment %}
+  .cal-dayv-none { margin: 0; font-size: var(--fs-xs); color: var(--ink-3); }
   @media (max-width: 560px) {
     /* The gutter is the first thing to give: "12:30pm" still fits, and the
        lane needs every pixel it can get on a phone. */

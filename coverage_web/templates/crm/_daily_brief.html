@@ -22,6 +22,22 @@ feature itself is dark (no key set). Never an empty card, never an error.
         <span class="daily-brief-eyebrow"><span class="live-dot"></span> Today's move</span>
       </div>
       <p class="daily-brief-text">{{ daily_brief|chat_format }}</p>
+      {% comment %}
+      The same caveat the Talk composer carries, in the same words
+      (`assistant/_thread.html`'s `.as-meta-note`), because it is the same
+      claim: a model wrote this sentence out of the student's own rows.
+
+      This card needed it MORE than Talk does, not less. Talk is a page you
+      go to and type into, so the machine is obvious; this arrives unasked
+      at the top of the page a student opens every morning, in the product's
+      own voice, under the product's own mark. Everything else on Today is
+      deterministic — the ribbon counts, the queue's reasons, the situation
+      cards all say so in their own comments — and this one card is not, so
+      it is the one card that has to say which it is.
+
+      One vocabulary: if the wording changes, both surfaces change together.
+      {% endcomment %}
+      <p class="daily-brief-note">AI-drafted from your own data. Check it before you rely on it.</p>
     </div>
     {% comment %}
     A real button, not a bare link — on a wide screen the sentence caps

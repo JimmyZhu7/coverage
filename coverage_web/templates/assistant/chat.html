@@ -64,16 +64,23 @@ materials.
     align-items: center; justify-content: center; }
   .as-sidebar-close:hover { background: var(--accent-soft); color: var(--ink); }
   .as-sidebar-close svg { width: 13px; height: 13px; }
-  /* A dedicated shape, not the sitewide pill `.btn` gives every other
-     button: full-width and 999px-rounded read as an odd stretched capsule
-     in a 248px column. ChatGPT's own sidebar button is the reference —
-     a soft rounded rectangle, a quiet border, filling in on hover rather
-     than announcing itself. */
-  .as-new-btn { flex: none; width: 100%; justify-content: flex-start; gap: var(--s2);
-    border-radius: var(--r-ctl); border-color: var(--line); background: var(--surface);
-    box-shadow: none; padding: 9px 14px; font-weight: var(--w-med); }
-  .as-new-btn:hover { background: var(--accent-soft); border-color: var(--accent-line);
-    color: var(--ink); box-shadow: none; transform: none; }
+  {% comment %}
+  The bespoke shape is gone (2026-09-01). Its own comment above said it was
+  "a dedicated shape, not the sitewide pill `.btn` gives every other button"
+  — and that reason expired: `.btn` has not been a pill since the control-
+  radius pass squared it to `--r-ctl`, which is the exact "soft rounded
+  rectangle" this rule then re-declared by hand. What was left was a third
+  button treatment on a page that already had five, differing from `.btn`
+  only in the two things a sidebar genuinely needs.
+
+  So those two survive and nothing else does: full width (the column is
+  248px and a shrink-to-fit button in it reads as a stray) and a left-
+  aligned label with room for its icon. The border, the radius, the padding,
+  the weight, the hover and the press all come from `.btn` now, which means
+  this button follows the system instead of shadowing it.
+  {% endcomment %}
+  .as-new-btn { flex: none; width: 100%; justify-content: flex-start;
+    gap: var(--s2); }
   .as-new-btn svg { width: 15px; height: 15px; color: var(--ink-3); }
   .as-sidebar-new-row { flex: none; display: flex; gap: var(--s1); align-items: stretch; }
   .as-sidebar-new-form { flex: 1; min-width: 0; }
@@ -251,8 +258,30 @@ materials.
     align-items: center; justify-content: center; cursor: pointer; }
   .as-sidebar-toggle:hover { border-color: var(--line-strong); color: var(--ink); }
   .as-sidebar-toggle svg { width: 16px; height: 16px; }
-  .as-title { margin: 0; font: var(--w-black) var(--fs-xl)/1.08 var(--font-display);
-    letter-spacing: -0.01em; }
+  {% comment %}
+  `.as-title` now rides on `.pagehead-title`, so the type, the weight and the
+  clamp all come from coverage.css and this rule only says what is different
+  about wearing the shared header inside an app shell: no bottom margin and
+  no hairline, because the chat column below owns its own separation and a
+  rule across the top of a thread would read as the thread's first divider.
+
+  `.as-title`'s own font declaration is gone rather than overridden. Two
+  declarations of one title is how a shared header stops being shared: the
+  page would go on rendering 22px Fraunces while every other page moved with
+  the token, and nobody would notice until an audit measured it.
+  {% endcomment %}
+  .as-pagehead { margin: 0; padding: 0; border: 0; flex: 1 1 auto; min-width: 0; }
+  .as-pagehead::after { display: none; }
+  .as-title { margin: 0; }
+
+  {% comment %}
+  Visually hidden, not `display: none`: a hidden element is removed from the
+  accessibility tree entirely and a live region inside one never announces.
+  The clip-rect technique is the same one `.f-cap` uses on the feed.
+  {% endcomment %}
+  .as-live { position: absolute; width: 1px; height: 1px; margin: -1px;
+    padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+    border: 0; }
 
   .as-off { flex: none; border: 1px solid var(--line); background: var(--accent-soft);
     border-radius: var(--r-ctl); padding: var(--s3) var(--s4);
@@ -621,7 +650,33 @@ materials.
 
   @media (max-width: 640px) {
     .as-page { padding-left: var(--s3); padding-right: var(--s3); }
-    .as-title { font-size: var(--fs-l); }
+    {% comment %}
+    The phone size override is gone with the bespoke desktop one: the shared
+    `.pagehead-title` is a `clamp()`, so it has already shrunk itself by the
+    time this breakpoint is reached, and hard-setting a size here would put
+    this page back off the scale every other page shares.
+    {% endcomment %}
+  }
+
+  {% comment %}
+  The composer's three icon buttons, the sidebar's close and the thread's
+  kebab measured 34, 34, 34, 28 and 24px on a phone. They are round, which is
+  correct — the control-shape rule (coverage.css §6) is about a pressable
+  thing's CORNER, and a circular icon button whose whole shape is the target
+  is not a capsule pretending to be a chip. What is not correct is the size:
+  a 24px kebab is a target a finger cannot reliably hit, and this is the page
+  a student uses one-handed.
+
+  Grown on `pointer: coarse` only, so the desktop composer keeps its compact
+  row. Written once against every one of them rather than five times inline,
+  because the next icon button added here should inherit the floor without
+  anyone remembering to.
+  {% endcomment %}
+  @media (pointer: coarse) {
+    .as-attach-btn, .as-mic, .as-send, .as-sidebar-toggle,
+    .as-sidebar-close, .as-history-kebab {
+      min-width: 44px; min-height: 44px;
+    }
   }
 </style>
 {% endblock %}
@@ -710,12 +765,42 @@ materials.
             <path d="M2 4.5h12M2 8h12M2 11.5h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
           </svg>
         </button>
-        <h1 class="as-title">Talk to Coverage</h1>
+        {% comment %}
+        The shared page header, not a bespoke one. Every other page behind
+        the nav opens with the same three marks — an 18px accent stroke, a
+        mono eyebrow, a Fraunces title — and that repetition is most of what
+        makes six separate pages read as one product. This page opened with
+        a 22px title beside a hamburger and was the only nav destination that
+        did not, measured: first content at y=86 where the shared datum is
+        118.
+
+        `.pagehead-sub` is deliberately not used. The chat needs its vertical
+        room and the sub-line is the part of the header that costs the most
+        of it; the eyebrow carries the same "where am I" job in one line.
+        "Advisor" rather than "Talk", because the eyebrow names the ROLE and
+        the title names the page — the same split as the eyebrow/title pairs
+        on the other five.
+        {% endcomment %}
+        <div class="pagehead as-pagehead">
+          <div class="pagehead-text">
+            <p class="pagehead-eyebrow">Advisor</p>
+            <h1 class="pagehead-title as-title">Talk to Coverage</h1>
+          </div>
+        </div>
       </header>
 
       {% if not configured %}
         <p class="as-off">This page needs an Anthropic API key on the server. Nothing else in Coverage is affected.</p>
       {% endif %}
+
+      {% comment %}
+      The live region the stream writes one finished reply into — see
+      `announceReply`. It lives OUTSIDE the thread fragment on purpose:
+      `#as-thread` is swapped whole by htmx on send, and a live region that
+      is replaced between the announcement being set and the screen reader
+      picking it up announces nothing at all.
+      {% endcomment %}
+      <p id="as-live" class="as-live" role="status" aria-live="polite" aria-atomic="true"></p>
 
       {% include "assistant/_thread.html" %}
     </div>
@@ -1554,6 +1639,33 @@ element by the next turn.
       // The common reply has no fence in it at all, so that case keeps
       // writing into the single `.as-body` div it always did — the rebuild
       // path only runs for a turn that actually carries a draft.
+      {% comment %}
+      THE REPLY, ANNOUNCED ONCE, WHEN IT IS FINISHED.
+
+      A screen reader was told nothing when the advisor answered: the bubble
+      is built by script and a node appearing in the DOM announces nothing on
+      its own, so a student using one asked a question and then had to go
+      looking for whether anything had happened.
+
+      The live region is a separate, visually-hidden node rather than
+      `aria-live` on the log itself, and that is the whole design. The log is
+      written to on every streamed token; a polite region over it would queue
+      a partial sentence per frame and read the answer as a stutter, which is
+      worse than silence. This is set exactly once, from the "done" frame, so
+      it announces one complete reply.
+
+      Trimmed to the first 400 characters. The full answer is on screen and
+      navigable — a live region is a notification that the answer arrived and
+      what it opens with, not a substitute for reading it, and an
+      uninterruptible three-minute announcement is its own accessibility bug.
+      {% endcomment %}
+      function announceReply(text) {
+        var live = document.getElementById("as-live");
+        if (!live || !text) return;
+        var clean = String(text).replace(/\s+/g, " ").trim();
+        live.textContent = clean.length > 400 ? clean.slice(0, 400) + "…" : clean;
+      }
+
       function renderTurnBody(turn, text, meta) {
         var segments = splitDraftSegments(text);
         if (segments.length === 1 && segments[0].type === "prose" && turn.body.parentNode) {
@@ -1904,6 +2016,7 @@ element by the next turn.
             // without waiting for a page reload.
             attachAssistantActions(assistantTurn, event.message_id, event.user_message_id);
             if (pending) attachUserActions(pending.turn, event.user_message_id, pending.text);
+            announceReply(accumulated);
           }
         }
         function handleFrame(frame) {

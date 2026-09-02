@@ -244,6 +244,15 @@ def test_a_covered_firm_is_still_never_drawn():
 # 4. The advocate aggregate.
 # ---------------------------------------------------------------------------
 def test_advocate_summary_counts_across_tiered_firms_only():
+    """The line spells the two yardsticks out rather than hyphenating them.
+
+    It read "aim for 2-20", which is one range: somewhere between two and
+    twenty advocates, total. `ADVOCATE_RANGE` is not a range — `low` is the
+    per-firm target and `high` is the total across every target firm — so
+    the hyphen was stating a number the research never claimed. Both figures
+    still come from the constant; these assertions pin the wording, not the
+    arithmetic, which the `low`/`high` assertion below covers separately.
+    """
     rows = [
         _firm("A", 1, ["advocate", "advocate", "cold"]),
         _firm("B", 2, ["advocate", "chatted"]),
@@ -256,7 +265,7 @@ def test_advocate_summary_counts_across_tiered_firms_only():
     assert s["covered"] == 1
     assert s["target"] == 2
     assert (s["low"], s["high"]) == coverage.ADVOCATE_RANGE == (2, 20)
-    assert s["line"] == "Advocates: 3 across 3 target firms · aim for 2-20"
+    assert s["line"] == "Advocates: 3 across 3 target firms · aim for 2 per firm, 20 in all"
 
 
 def test_advocate_summary_on_the_founders_board_reads_zero_honestly():
@@ -264,14 +273,14 @@ def test_advocate_summary_on_the_founders_board_reads_zero_honestly():
     that is not a UserFirm row: the line says 0, not 2."""
     rows = [_firm(f"Firm {i:02d}", 1 + i % 3, ["cold"] * (i % 4)) for i in range(54)]
     s = coverage.advocate_summary(rows, target=2)
-    assert s["line"] == "Advocates: 0 across 54 target firms · aim for 2-20"
+    assert s["line"] == "Advocates: 0 across 54 target firms · aim for 2 per firm, 20 in all"
 
 
 def test_advocate_summary_singular_and_empty():
     assert coverage.advocate_summary([_firm("A", 1, [])], target=2)["line"] == \
-        "Advocates: 0 across 1 target firm · aim for 2-20"
+        "Advocates: 0 across 1 target firm · aim for 2 per firm, 20 in all"
     s = coverage.advocate_summary([], target=2)
-    assert s["line"] == "Advocates: 0 across 0 target firms · aim for 2-20"
+    assert s["line"] == "Advocates: 0 across 0 target firms · aim for 2 per firm, 20 in all"
     assert s["advocates"] == s["firms"] == s["covered"] == 0
 
 
@@ -317,7 +326,7 @@ def test_network_page_ranks_with_tracks_and_style_and_exposes_the_aggregate(clie
     assert gaps["HSBC"]["sourcing_note"] == sourcing.DISCLOSURE
 
     summary = resp.context["advocate_summary"]
-    assert summary["line"] == "Advocates: 0 across 3 target firms · aim for 2-20"
+    assert summary["line"] == "Advocates: 0 across 3 target firms · aim for 2 per firm, 20 in all"
     assert summary["firms"] == 3 and summary["advocates"] == 0
 
 

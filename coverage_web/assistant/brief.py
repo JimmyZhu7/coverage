@@ -100,6 +100,59 @@ def _fact(value, limit: int = _MAX_FACT_CHARS) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+# The em dash, and the en dash it gets mistaken for. Both, because the model
+# reaches for either and a reader cannot tell them apart at 15px.
+#
+# The first pattern is the one that does the work: a dash, however it is
+# spaced, standing in front of something that starts a clause. The optional
+# `**` is the bold span the prompt asks for, which can open that clause and
+# must survive the rewrite. The second catches whatever is left — a dash
+# against punctuation, or a trailing one — which is not a sentence break and
+# must not be turned into one.
+_DASH_CLAUSE = re.compile(r"\s*[—–]\s*(\*{0,2})([0-9A-Za-z])")
+_DASH_OTHER = re.compile(r"\s*[—–]\s*")
+
+
+def _no_em_dashes(text: str) -> str:
+    """Rewrite the model's em dashes into the punctuation the product uses.
+
+    THE RULE: Coverage's copy has no em dashes. It is the founder's own,
+    stated for every surface, and every hand-written string in this codebase
+    obeys it — the one place it leaked is the surface a model writes. Live
+    on the Today page: "she is your only advocate at Goldman Sachs—she has
+    written to you", one card above a queue whose reason lines were put
+    through `crm.today._sentenceize` for exactly this reason.
+
+    Asking the prompt nicely was the other option and it is not one: a
+    generation is a sample, so a rule stated in a system prompt is obeyed
+    most of the time, and "most of the time" on a daily card is a defect
+    that shows up on some student's Tuesday. This runs on the finished text,
+    where the outcome is not probabilistic.
+
+    A dash in front of a clause becomes a full stop and a capital, the same
+    move `_sentenceize` makes on the cadence engine's reason fragments,
+    because a sentence break is what the dash was standing in for. Spacing
+    is irrelevant to that: the model writes " — she has" and "Sachs—she has"
+    interchangeably and both mean the same join.
+
+    Anything else — a dash against punctuation, a trailing one — collapses to
+    a single space instead, because a fragment is not a sentence and this
+    function's job is not to invent one.
+
+    The capital is applied by CONSUMING the first character rather than by a
+    second pass over the text, so it can only ever touch a letter this
+    function itself put at the start of a sentence. A blanket
+    "capitalise after a full stop" would also rewrite "e.g. this", and the
+    bold marker is carried through untouched so `**priya` cannot become
+    `**Priya`.
+    """
+    if not text:
+        return text
+    out = _DASH_CLAUSE.sub(lambda m: f". {m.group(1)}{m.group(2).upper()}", text)
+    out = _DASH_OTHER.sub(" ", out)
+    return _WHITESPACE.sub(" ", out).strip()
+
+
 def _as_date(value) -> _date | None:
     """A `closes_on`/`new_value` back to a real date, or None. Both shapes
     reach here: the cadence queue hands a `date`, an `OpportunityChange`
@@ -511,7 +564,16 @@ def get_cached(
         return None
     if actions is not None and _is_stale(row, actions, silenced_ids):
         return None
-    return row.text
+    # House style on the way out as well as on the way in. `get_or_build`
+    # already rewrites before it writes, so a row generated since 2026-09-01
+    # passes through this untouched — `_no_em_dashes` is idempotent and a
+    # no-op on text with no dash in it. What this catches is every row
+    # written BEFORE that: the cache is once per student per day, so without
+    # it the founder's Today page would have gone on reading "at Goldman
+    # Sachs—she has written to you" until midnight, and every student's would
+    # have kept whatever it was already holding. Cheaper than a data
+    # migration over a table that expires daily on its own.
+    return _no_em_dashes(row.text)
 
 
 def is_pending(
@@ -637,7 +699,11 @@ def get_or_build(
 
     if not text:
         return None
-    text = text[:MAX_BRIEF_CHARS]
+    # House style, applied to the finished sentence rather than requested in
+    # the prompt — see `_no_em_dashes`. It runs BEFORE the length cap, so a
+    # rewrite can never be cut in half by the truncation, and before the
+    # cache write, so a brief is stored the way it will be read.
+    text = _no_em_dashes(text)[:MAX_BRIEF_CHARS]
     # The queue slice `_summarize_actions` actually read from, capped the
     # same way — the staleness fingerprint `_is_stale` compares against later
     # today, and (since it is now the cockpit's own ordered plan, not the
