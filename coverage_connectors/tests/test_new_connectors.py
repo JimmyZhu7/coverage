@@ -844,8 +844,10 @@ def test_talnet_table_layout_is_untouched_by_card_support(monkeypatch):
     assert result.ok and len(result.opportunities) == 2
     assert result.opportunities[0].location == "Hong Kong"
     assert result.truncated is False
-    # Card-only pagination: a table board issues exactly the one request it
-    # always did.
+    # This fixture carries no next_links nav, so the walk ends on page one
+    # and the board issues exactly the one request it always did. Table
+    # boards that DO advertise a next page are walked — see
+    # test_talnet_pagination.py, which is where that behaviour is pinned.
     assert calls == [BOFA_JOBS.board_url]
 
 
