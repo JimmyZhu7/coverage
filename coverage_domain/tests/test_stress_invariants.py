@@ -476,12 +476,24 @@ def test_every_touch_kind_has_a_reachable_transition_and_no_unreachable_state():
         assert warmth is None or warmth in pipeline.WARMTH_RANK, kind
         assert state is None or state in pipeline.THREAD_STATES, kind
     reachable = {s for _, s in pipeline.TOUCH_TRANSITIONS.values() if s}
-    # These four can only be entered by `set_state`. If that stops being true,
-    # the cadence engine's branch 4 (the parked/quiet exit) becomes reachable
-    # from the automatic path, which is a product change, not a refactor.
+    # These three can only be entered by `set_state`, and that is what keeps
+    # the cadence engine's branch 4 (the parked/quiet exit) a decision the
+    # student made rather than something a touch can do to them.
+    #
+    # `advocate` USED TO BE IN THIS LIST and was moved out deliberately on
+    # 2026-09-02 (WS-CRM-12). The comment here already said that removing a
+    # state from this set is "a product change, not a refactor", and this is
+    # that product change, made on purpose: advocacy is an EVENT (somebody
+    # pushed for you) and was reachable only as a hand override, which is why
+    # three of the founder's debriefs answered "would advocate: yes" and none
+    # of them became anything countable. `referral` is now the one automatic
+    # door into it, it is still terminal once entered (apply_touch's
+    # `thread_state != 'advocate'` guard), and `crm.debrief.promote` is still
+    # the only writer — a recorded opinion never writes the row by itself.
     assert set(pipeline.THREAD_STATES) - reachable == {
-        "advocate", "no_reply", "parked", "quiet"
+        "no_reply", "parked", "quiet"
     }
+    assert pipeline.TOUCH_TRANSITIONS[pipeline.REFERRAL_KIND][1] == "advocate"
 
 
 def test_clock_silent_kinds_are_a_subset_of_the_known_vocabulary():

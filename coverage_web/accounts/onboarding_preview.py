@@ -199,6 +199,29 @@ def _phrase(items: list[str]) -> str:
 # ---------------------------------------------------------------------------
 # Step 1 — Profile: the feed, narrowing
 # ---------------------------------------------------------------------------
+# How many matched rows the blocked count is allowed to walk.
+#
+# WHY A CAP AT ALL. `_eligibility` is a Python pass per row over the posting's
+# own extracted facts, and this panel re-queries on every chip toggle. The
+# matched set is 357 rows for the founder and 2,723 at its widest (no answers
+# at all), so an uncapped walk would be a 2,723-row Python pass on the first
+# server render of the wizard's first step, for a number nobody has narrowed
+# yet.
+#
+# WHY 400. It clears the realistic answered profile — the founder's 357, and
+# every two-track two-region shape measured alongside it — while sitting well
+# under the unnarrowed set, so the cap only ever bites on a profile that has
+# said almost nothing and whose blocked count would be meaningless anyway.
+#
+# WHAT HAPPENS PAST IT: the count is NOT shown. It is not scaled up, not
+# estimated, and not shown as "at least N" — a proportion measured on the
+# first 400 of a 2,700-row set ordered by deadline is a fact about early
+# deadlines, not about the set (P1). `blocked` comes back None and the footer
+# renders nothing, which is the same silence every other unsourceable number
+# in this product gets.
+BLOCKED_SCAN_LIMIT = 400
+
+
 def profile_preview(user, answers) -> dict:
     qs = _matching(answers)
     match_count = qs.count()
@@ -208,7 +231,7 @@ def profile_preview(user, answers) -> dict:
     if match_count:
         # Local import: `directory.views` imports plenty and this module is
         # loaded by `accounts.urls` at startup.
-        from directory.views import _eligibility, _eligibility_profile
+        from directory.views import _eligibility, _eligibility_profile, _row_tracks
 
         profile = _eligibility_profile(user)
         # `deadline` ascending with nulls last, then newest — the partial
@@ -225,9 +248,19 @@ def profile_preview(user, answers) -> dict:
                 "firm": o.firm.name,
                 "title": o.title,
                 "region": REGION_LABELS.get(o.region, ""),
-                # The firm's tracks, labelled, capped at two — a firm carrying
-                # five would push the title off the row.
-                "tracks": [TRACK_LABELS[t] for t in (o.firm.tracks or [])
+                # THE ROW'S tracks, not the FIRM's, labelled and capped at two
+                # (a row carrying five would push the title off).
+                #
+                # It used to read `o.firm.tracks` straight, which is the
+                # employer's verticals — and `_matching` above counts these
+                # rows through `_row_tracks`, the feed's own role-level rule.
+                # So the panel counted a row under `am` and then printed the
+                # firm's `ib, st` pills beside it: eleven of the preview rows
+                # measured on 2026-09-01 showed pills that did not include the
+                # track they had been counted under. One definition per fact
+                # (P5) — the count and the pill now read the same function.
+                "tracks": [TRACK_LABELS[t]
+                           for t in _row_tracks(o.firm.tracks or [], o.title or "")
                            if t in TRACK_LABELS][:2],
                 "deadline": o.deadline,
                 # None on most rows, and that is the honest common case: a
@@ -235,12 +268,46 @@ def profile_preview(user, answers) -> dict:
                 "verdict": verdict,
             })
 
+    # HOW MANY OF THOSE THE FEED WILL BLOCK ANYWAY.
+    #
+    # `_matching` applies the DECIDABLE half of the feed's eligibility rule —
+    # the title-stated class year — and stops there, because the rest is a
+    # JSON walk per row. So the count above is honest about what it filtered
+    # and silent about what happens next, and what happens next is large:
+    # measured on the founder's profile 2026-09-01, 141 of the 357 rows the
+    # panel counted (39%) carry a BLOCKING `_eligibility` verdict on the feed
+    # he is about to land on. A signup number the product then fails to
+    # reproduce is the exact over-claim this module's docstring forbids.
+    #
+    # Only blocking verdicts count. A positive year match earns a chip and
+    # blocks nothing; a firm-policy sponsorship warning is deliberately
+    # non-blocking (docs/founder-decisions-2026-08-20.md, Decision 3), and
+    # counting either would inflate the number in the direction that
+    # discourages a student for no reason.
+    #
+    # None whenever there is nothing to say (no profile, no matches, or a set
+    # past `BLOCKED_SCAN_LIMIT`) and the footer renders nothing then.
+    blocked = None
+    if match_count and match_count <= BLOCKED_SCAN_LIMIT:
+        from directory.views import _eligibility, _eligibility_profile
+
+        profile = _eligibility_profile(user)
+        if profile:
+            blocked = sum(
+                1 for o in qs.select_related("firm")
+                if (_eligibility(o, profile) or {}).get("blocking")
+            )
+
     dims = _narrowed_by(answers)
     return {
         "kind": "profile",
         "count": match_count,
         "total": total,
         "rows": rows,
+        # `N of which your Settings rule out`, or None. Named `blocked`
+        # rather than `ineligible` because the feed's own word for it is
+        # "blocking" and the two must stay greppable together.
+        "blocked": blocked,
         "dims": _phrase(dims),
         # Which chip to suggest when nothing matches. Naming the missing
         # answer beats "no results": the student can act on it.

@@ -384,7 +384,17 @@ def test_an_unknown_step_falls_back_instead_of_erroring(client, user, world):
     # still guards what this test exists to guard. The alternative was keeping
     # the fast filter and letting the panel promise a count the feed would not
     # honour, which is the one thing this panel must never do.
-    ("profile", 6),
+    # Raised 6 -> 7 on 2026-09-02 (WS-OPP-12), and the extra query is the
+    # blocked count: `profile_preview` now walks the matched rows through
+    # `directory.views._eligibility` so the footer can say how many of them
+    # the feed will rule out. ONE flat query with the firm pre-joined,
+    # capped at `BLOCKED_SCAN_LIMIT` rows — not an N+1 and not the feed
+    # pipeline, so what this ceiling exists to guard is unchanged. Measured
+    # on the founder's live profile 2026-09-02: 5 queries and 60 ms warm for
+    # 308 matched rows, of which 123 (40%) carry a blocking verdict. Without
+    # the count the panel promised 308 and the feed delivered 185, which is
+    # the over-claim this module's docstring forbids.
+    ("profile", 7),
     # work_auth's budget is 4, not 3: `firm_policy_map()` (see
     # directory/sponsorship.py) adds one small, bounded scan of firms
     # carrying policy data (58 on live data) so the panel can answer with

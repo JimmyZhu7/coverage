@@ -15,6 +15,10 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
          within `pre_deadline_reping_days`, REGION-SCOPED       -> reping
       4. parked / quiet                                         -> (skip)
       5. advocate idle >= advocate_touch_min_weeks             -> maintain
+     5a. chatted with an OPEN PROMISE on record (they said they
+         would do something), promised >= promised_followup_after_days
+         days ago                                    -> promised_followup
+         (NOT ported — see the 2026-09-02 C6 divergence below)
      5b. chatted (any thread_state except 'replied', which
          branch 7 owns), idle >= chatted_touch_min_weeks      -> keep_warm
          (NOT ported — see the 2026-07-30 C1 / 2026-08-22 C1b
@@ -204,6 +208,27 @@ the storage adapter changed, per docs/build-plan.md §4's port table):
     shuffled 50 times, produced 48 distinct outputs, and the web layer's fetch
     carries no ORDER BY. Nothing the ported keys already separated moves.
 
+  - DIVERGENCE from the original (deliberate, 2026-09-02, "C6"): branch 5a,
+    the post-chat promised-action follow-up. The original had exactly one
+    post-chat clock and this port had two (advocate, chatted); neither
+    distinguished "we had a nice chat" from "they said they would introduce
+    me to somebody". The sources make that the ONLY cadence split they
+    support: cold with no reply is about two weeks, post-chat WITH A PROMISED
+    ACTION is about one week and is the one interval anybody counted (70 to
+    80% reply), post-chat with nothing promised is six weeks or more and
+    event-triggered (`research-networking-norms.md §8d`). So the split is on
+    relationship state, not on who the contact is — there is deliberately no
+    seniority, track or region term here, because §8a and §8f of the same
+    file looked for one and found none.
+
+    `chatted_touch_min_weeks` is UNTOUCHED at either end. It already sits at
+    the aggressive end of the evidenced range (§1d), the non-target sources
+    do not contradict it (`research-nontarget-access.md` Verdict §4), and it
+    is the founder's own recorded dial. Branch 5a does not shorten it; it
+    fires on a DIFFERENT FACT (an open promise) that the keep-warm clock
+    cannot see, and a contact with no promise reaches 5b at exactly the day
+    it always did.
+
   - `tasks_from_change()`: the backward planner. Fires ONLY on
     `confirmed_official` changes (rumor / reported never spawn a task).
     `app_open` -> advocates-in-place task 14d before; `app_close` ->
@@ -297,6 +322,39 @@ CADENCE_DEFAULTS: dict[str, int] = {
     # `_target_window` below is the one place that has to cope with it.
     "chatted_touch_min_weeks": 3,        # keep chatted contacts warm every 3-5 weeks
     "chatted_touch_max_weeks": 5,
+    # Branch 5a's clock: how long a PROMISE sits before the queue asks the
+    # student to chase it. Calendar days, measured from the day the promise
+    # was recorded, not from the last touch — the promise is the fact, so it
+    # is the thing that gets aged.
+    #
+    # WHAT 7 ENCODES. This is the one post-chat interval anybody in the
+    # corpus actually counted: a contact who left a chat having promised
+    # something replies at 70 to 80% when chased at about a week, and the
+    # sources split cadence on relationship state and on nothing else — cold
+    # with no reply about two weeks, promised-action about one week, nothing
+    # promised six weeks or more and event-triggered
+    # (`research-networking-norms.md §8d`).
+    #
+    # WHY THAT MAGNITUDE AND NOT SHORTER. The one-week-after-a-cold-note
+    # number that circulates in this domain is a business-to-business sales
+    # import with no evidential basis (§1b, Grade D) and is explicitly not
+    # what this is: the difference is that a promise creates a legitimate
+    # reason to write, and the week is the interval on which the promiser
+    # still remembers making it. Shorter reads as chasing a favour; longer
+    # and the intro has gone cold in the promiser's inbox.
+    #
+    # WHY IT IS A PRODUCT CONSTANT AND NOT A SETTINGS KNOB. Every key in
+    # `crm.today.TUNABLE_CADENCE_PARAMS` is a preference about how hard the
+    # student wants to be pushed. This is not a preference — it is how long
+    # a person remembers a promise — and the Settings page's own cadence
+    # diagram narrates the tunable set as a sentence, so a seventh spinner
+    # would have to claim a taste question this is not.
+    #
+    # WHAT WOULD CHANGE IT: a counted reply-rate curve against days-to-chase
+    # on real Coverage sends. There is none yet; the 70 to 80% figure is a
+    # single practitioner count, so this number is evidence-shaped, not
+    # measured here.
+    "promised_followup_after_days": 7,
     "pre_deadline_reping_days": 14,      # re-ping warm contacts when a CONFIRMED app_close is this near
     # `stale_thread_days: 21` used to sit here, carried over from
     # campaign/cadence.yaml and labelled "kept for parity; used by status-style
@@ -669,6 +727,7 @@ def due_actions(
     chat_min_weeks = int(p["chatted_touch_min_weeks"])
     chat_min_days = chat_min_weeks * 7
     chat_max_weeks = int(p["chatted_touch_max_weeks"])
+    promised_days = int(p["promised_followup_after_days"])
     reping_days = int(p["pre_deadline_reping_days"])
 
     today = as_of.date()
@@ -979,6 +1038,47 @@ def due_actions(
         # thread_state 'replied', which this branch has already excluded), so
         # falling through would only walk two tests that can't fire.
         if warmth == "chatted" and thread_state != "replied":
+            # 5a (C6). THE PROMISE, WHICH THE KEEP-WARM CLOCK CANNOT SEE.
+            # `promised_action` is a short phrase naming what this person said
+            # they would do ("an intro to Jane Doe"), and it is present ONLY
+            # while the promise is still open — the caller stops passing it the
+            # moment the student sends anything that chases it. Absent or blank
+            # on every contact by default, which is why every golden fixture is
+            # byte-identical and why a student who has never written a debrief
+            # never meets this branch at all (P3).
+            #
+            # Aged off `promised_action_at`, the day the promise was RECORDED,
+            # not off `lt_date`. The two diverge as soon as the student does
+            # the thing the cadence already asked for: sending the thank-you
+            # resets the last-touch clock while the promise keeps aging, and
+            # this module has now been bitten twice by rendering one clock as
+            # a different fact (the confirm-chat card, 2026-08-31; the
+            # keep-warm card, 2026-09-01). The sentence says what it measures.
+            #
+            # `continue` unconditionally, exactly as 5b does: a chatted contact
+            # with an open promise has no later branch that could match (6
+            # needs cold, 7 needs thread_state 'replied', already excluded
+            # above), so falling through would only walk two tests that cannot
+            # fire — and would let a not-yet-due promise be answered by the
+            # slower keep-warm card, which is the wrong ask about the same
+            # person.
+            promised = str(c.get("promised_action") or "").strip()
+            if promised:
+                p_date = _as_date(c.get("promised_action_at"))
+                p_days = (today - p_date).days if p_date else None
+                if p_days is None or p_days >= promised_days:
+                    reason = (
+                        f"they offered {promised}, no date on record — chase it"
+                        if p_days is None else
+                        f"they offered {promised} {p_days}d ago — chase it "
+                        f"(target {promised_days} days)"
+                    )
+                    add(
+                        "promised_followup", reason, 1,
+                        promised=promised, days_since=p_days,
+                        target_days=promised_days,
+                    )
+                continue
             days = (today - lt_date).days if lt_date else None
             if days is None or days >= chat_min_days:
                 # Range rendered from the params, never hardcoded — the same

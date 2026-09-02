@@ -77,8 +77,10 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+from directory import estimates
 from directory.classify import TARGET_BUCKETS
 from directory.models import Opportunity
+from directory.open_runs import CYCLE_OBSERVATION_MIN_SAMPLE
 
 from .models import UserFirm
 from .utils import FIRM_DATE_LABELS, confirmed_firm_dates
@@ -92,6 +94,10 @@ REL_TIERED = "tiered"        # at a firm on the student's own target list
 REL_SCHOOL = "school"        # shares the student's school, any employer
 REL_INBOUND = "inbound"      # neither, but they wrote and are still waiting
 REL_NONE = None
+
+# A verdict on ONE CARD, not on a contact: this person is fine, this ASK is
+# not available at this firm. See `apply_only` below.
+REL_APPLY_ONLY = "apply_only"
 
 # Relevance weight per reason, used by `expected_value`. A tier is the
 # student's own ranking of how much a firm matters, so it is read straight off
@@ -313,6 +319,110 @@ def is_recruiting_contact(contact: dict) -> bool:
 # Cadence actions whose whole content is "ask this person for a conversation".
 # These are the ones a recruiting contact must never receive.
 CHAT_PROPOSING_ACTIONS = frozenset({"advance", "keep_warm", "maintain"})
+
+
+# ---------------------------------------------------------------------------
+# 2b. Apply-only firms — where the process is a test, not a conversation.
+# ---------------------------------------------------------------------------
+# `Firm.recruiting_style == "assessment"`, spelled here so this module keeps
+# its no-model-imports posture (the same convention `crm/coverage.py` and
+# `crm/sourcing.py` already hold to for the identical constant).
+ASSESSMENT = "assessment"
+
+# The two cold NETWORKING asks. Everything else a card can be — an owed reply,
+# a thank-you, a confirm-chat, a re-ping against a real deadline — is either
+# answering somebody or acting on a date, and neither of those is networking.
+_APPLY_ONLY_ACTIONS = frozenset({"first_outreach", "follow_up"})
+
+# The card copy. It says what the firm's process IS and stops.
+#
+# WHAT IT MAY NEVER SAY, and this is a limit the source itself sets: no
+# evidence anywhere shows networking is counterproductive at these firms
+# (`research-st-quant.md` Q3 notes this explicitly). Jane Street's own FAQ
+# declines one-to-one chats by policy and Citadel Securities' campus funnel is
+# entirely competitions and events — that is a fact about how the firm hires,
+# not a warning about the student's behaviour, and the copy has to stay on the
+# right side of that line.
+APPLY_ONLY_LABEL = "Apply"
+APPLY_ONLY_REASON = (
+    "This firm hires by assessment. The application and the test are the "
+    "process here, so put the time there instead of into a first note."
+)
+
+
+def apply_only(action: dict) -> bool:
+    """True when this card is a cold networking ask at an assessment firm.
+
+    Gated on the ACTION and not on the contact, which is the whole design.
+    Marking the person would silence every card they can produce; marking the
+    ask silences exactly the one the firm's process has no room for and leaves
+    the rest untouched. Concretely, at the same firm and on the same person:
+    an owed reply still fires, a thank-you inside its window still fires, a
+    `confirm_chat` on a chat that is already booked still fires, and a re-ping
+    against a confirmed close still fires. Answering somebody who wrote to you
+    is not networking, and `contact_relevance`'s own inbound override already
+    makes that argument.
+
+    Reads `recruiting_style` off the contact dict, which
+    `crm.today._build_actions` carries in from the firm row alongside `tier`,
+    so this stays a pure function testable with no database.
+    """
+    if action.get("owed_reply"):
+        return False
+    if action.get("action") not in _APPLY_ONLY_ACTIONS:
+        return False
+    contact = action.get("contact") or {}
+    if (contact.get("warmth") or "") != "cold":
+        return False
+    return (contact.get("recruiting_style") or "") == ASSESSMENT
+
+
+# ---------------------------------------------------------------------------
+# 2c. Seniority — how far up a cold ask may reach.
+# ---------------------------------------------------------------------------
+# Matched case-insensitively against `Contact.role`, highest rung first
+# because the titles nest ("Managing Director" contains "Director", "Associate
+# Director" is a director). Same conservative doctrine as
+# `_RECRUITING_ROLE_MARKERS` above: every pattern names a rank, never a word
+# that merely co-occurs with one.
+#
+# `\bMD\b` is in and `\bED\b` is not, and that asymmetry is deliberate. "MD"
+# in a `Contact.role` on a finance board is a managing director; "ED" is a
+# two-letter string that appears inside nothing useful and names an executive
+# director only in a handful of European banks' conventions, so it is left to
+# the spelled-out form. Erring here costs half a point on a cold card's rank,
+# never a silenced card, which is why the list can afford to be short.
+_SENIORITY_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("md", r"\bmanaging director\b|\bmd\b|\bpartner\b|\bhead of\b"
+           r"|\bchair(?:man|woman|person)?\b|\bchief \w+ officer\b"),
+    ("director", r"\bexecutive director\b|\bdirector\b"),
+    ("vp", r"\bvice[- ]president\b|\bvp\b|\bsvp\b|\bevp\b"),
+    ("associate", r"\bassociate\b"),
+    ("analyst", r"\banalyst\b"),
+)
+_SENIORITY_RES = tuple((name, re.compile(p, re.IGNORECASE))
+                       for name, p in _SENIORITY_PATTERNS)
+
+# The rungs a cold note should not be aimed at.
+SENIOR_RUNGS = frozenset({"director", "md"})
+
+
+def seniority(role: str | None) -> str:
+    """The rung `role` names, or "" when the text names none.
+
+    "" is the overwhelmingly common answer and the one that must cost
+    nothing: 137 of the founder's 265 live rows have no role text at all, and
+    99 of 226 in the audit's own count. A blank role is not a junior contact
+    and not a senior one; it is a contact whose seniority nobody has recorded,
+    and every rule downstream degrades to 1.0 on it (P3).
+    """
+    text = (role or "").strip()
+    if not text:
+        return ""
+    for name, rx in _SENIORITY_RES:
+        if rx.search(text):
+            return name
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -607,6 +717,38 @@ _NOW_THANK_YOU = 2.6
 # today as a message still sitting unanswered.
 _NOW_ADVANCE = 1.8
 _NOW_COLD_DUE = 1.0
+
+# THE COLD ASK'S SENIORITY CEILING (WS-CRM-10).
+#
+# WHAT IT ENCODES. Referrals flow downward, and a cold note aimed above the
+# level that fields them is not a stronger version of the same move, it is a
+# weaker one. A bulge-bracket VP described referring nearly every networking
+# email he received to an analyst, and the flat statement from the same
+# corpus is "No MD at a BB ever would have responded to a networking
+# pre-analyst if they weren't already in process"
+# (`research-networking-norms.md §2b`, Grade A). The ceiling is a function of
+# connection strength rather than of the contact alone: cold goes to analysts
+# and associates, an alum can go to any level (`§2d`, Grade B).
+#
+# WHY 0.5 AND NOT 0. The evidence says low-probability, not impossible, and
+# nothing in this codebase may silence a card invisibly (P4). A half is a
+# demotion a student can see and override by writing the note anyway; a zero
+# would be a hidden filter wearing a weight's clothes. It is also one
+# multiplier on one axis, deliberately: the sources discuss track and
+# seniority at length and none of them conditions CADENCE on either
+# (`§8a`, `§8f`), so splitting this into a matrix would be inventing four
+# more numbers nobody measured.
+#
+# WHY IT LIFTS FOR AN ALUM OR A WARM THREAD. That is §2d's rule verbatim, and
+# it is the reason this is a multiplier on the COLD ask specifically: a
+# shared school or a reply already received is exactly the connection the
+# source says raises the ceiling.
+#
+# WHAT WOULD CHANGE IT: a counted reply rate by rung on real Coverage sends.
+# There is none; §2b is a practitioner account, strong on the mechanism and
+# silent on the magnitude, so 0.5 is a direction with a size attached rather
+# than a measurement.
+_SENIOR_COLD_PENALTY = 0.5
 # The floor: a keep-warm nudge with no event behind it. Not zero, because a
 # genuinely long silence with an advocate is still worth something; low enough
 # that anything real outranks it.
@@ -669,7 +811,158 @@ def expected_value(action: dict, user=None, affiliations=()) -> float:
         if opening:
             now = max(now, _OPENING_WEIGHT.get(opening["kind"], _NOW_NOTHING))
 
-    return round(rel * strength * now, 4)
+    return round(rel * strength * now * senior_cold_factor(action), 4)
+
+
+def senior_cold_factor(action: dict) -> float:
+    """`_SENIOR_COLD_PENALTY` for a cold ask aimed above the rung that fields
+    them, 1.0 for everything else. See that constant for the whole argument.
+
+    A separate function rather than four lines inside `expected_value`
+    because it is the one term in that product with a citation behind it, and
+    because a caller (a card, a test, an explanation) that wants to say WHY a
+    row sits where it does needs to be able to ask.
+    """
+    if action.get("action") not in _APPLY_ONLY_ACTIONS:
+        return 1.0
+    contact = action.get("contact") or {}
+    # A recruiter is the one senior person a cold note is SUPPOSED to reach:
+    # fielding them is the job. `is_recruiting_contact` is the existing
+    # definition of that (P5) and reads the student's own answer first.
+    if is_recruiting_contact(contact):
+        return 1.0
+    # §2d's ceiling-raisers, both of them.
+    if contact.get("school_affiliation"):
+        return 1.0
+    if (contact.get("warmth") or "cold") != "cold":
+        return 1.0
+    if seniority(contact.get("role")) in SENIOR_RUNGS:
+        return _SENIOR_COLD_PENALTY
+    return 1.0
+
+
+# ---------------------------------------------------------------------------
+# 4c. Season — which move the calendar favours, derived and never named.
+# ---------------------------------------------------------------------------
+# THE MECHANISM, WHICH IS MODE-SWITCHING AND NOT INTENSITY. The practitioner
+# rule is not "email harder in season": it is that first contact belongs in
+# the low-competition window, and once the wave is on you "circle back with
+# people to ask about timelines instead of reaching out for the first time"
+# (`research-networking-norms.md §4a`, Grade A on the mechanism, Grade B on
+# the prescription). Underneath it is a saturation fact, measured twice from
+# the receiving side a year apart: inbound volume swings about tenfold, from
+# roughly 10 emails a week off-peak to about 25 a day at peak (`§3a`, Grade
+# A). A cold note is worth less when it lands in a pile of twenty-five.
+#
+# NO MONTH APPEARS ANYWHERE IN THIS FILE, and that is not a stylistic choice.
+# The peak demonstrably MOVED by roughly eight months between 2021 and 2026,
+# out of one half of the year and into the other (`§4d`) — the two windows are
+# named in the source and deliberately not repeated here, because a month
+# spelled in a comment is one careless edit away from being a month spelled in
+# a condition. McKinsey's undergraduate deadline moved 3.5 months
+# between consecutive cycles while its full-time deadline moved the other way,
+# and any hardcoded constant is therefore wrong for at least one firm-role
+# pair within twelve months (`research-consulting-forums.md §7`;
+# `SYNTHESIS-PLAN.md` Part C item 6). So the season is read off Coverage's own
+# board: what fraction of the firms it watches have already been observed
+# opening for this cycle.
+#
+# TWO MODES, NOT A CURVE. The evidence supports a switch between two moves;
+# it does not support a continuous intensity dial, and a curve would be five
+# invented numbers wearing one measured one's clothes.
+SEASON_EARLY = "early"
+SEASON_CROWD = "crowd"
+
+# The share of watched (firm, region) pairs that must have been observed
+# opening before the queue calls it a crowd.
+#
+# WHY A HALF. It is the only threshold on this axis that does not need its own
+# justification: "more of the market has started than has not" is the
+# statement, and any other number would be a guess about how much of a wave
+# constitutes a wave. The mechanism it stands in for is saturation, and
+# saturation is about the median recipient's inbox, so the median firm is the
+# right place to put the line.
+#
+# WHAT WOULD CHANGE IT: a measured reply-rate curve against board-open share.
+# Coverage will be able to compute one from its own sends; it cannot yet.
+SEASON_CROWD_SHARE = 0.5
+
+# The weights each mode puts on the two cold moves and on the warm one.
+#
+# WHAT THEY ENCODE, AND WHY THEY ARE THIS SMALL. In `early`, a first note is
+# worth more than a follow-up because the window is exactly when a stranger's
+# note is read; in `crowd`, that inverts and the warm moves — advancing a live
+# thread, a keep-warm with a real opening behind it — carry the day, which is
+# §4a's "circle back instead of reaching out for the first time" stated as a
+# multiplier. 1.25 and 0.8 are reciprocal to within rounding, so the mode
+# reorders cards WITHIN a lane and cannot lift one lane over another: a cold
+# stranger in `early` still sits below somebody who wrote back, because
+# `crm.today._TODAY_CLASS` is a structural rung and this is a weight. That
+# containment is the point — the tenfold saturation swing is a real effect on
+# the margin, not a reason to hand a whole morning to strangers.
+#
+# WHAT WOULD RETIRE THE RULE: Coverage measuring its own reply rate by mode.
+# If the two modes do not separate, this comes out entirely rather than being
+# tuned, because its whole claim is that they do.
+_SEASON_WEIGHTS: dict[str, dict[str, float]] = {
+    SEASON_EARLY: {"first_outreach": 1.25, "follow_up": 0.8,
+                   "advance": 1.0, "keep_warm": 1.0},
+    SEASON_CROWD: {"first_outreach": 0.8, "follow_up": 1.25,
+                   "advance": 1.25, "keep_warm": 1.25},
+}
+
+
+def season_mode(user, today=None) -> str | None:
+    """`"early"`, `"crowd"`, or None when the board cannot say.
+
+    Reads the measured opening activity for the firms the student targets,
+    through `directory.estimates.observations_for` — the one observation
+    reader (P5) — and asks a single question: of the (firm, region) pairs
+    Coverage watches for this student, what share have already been observed
+    opening postings for the target buckets?
+
+    None is a real and common answer, and it degrades to exactly today's
+    behaviour: a student with no tiered firms, or whose firms have no
+    observation clearing the sample floor, gets `_SEASON_WEIGHTS` applied not
+    at all and the queue order they had before this function existed (P3).
+    """
+    del today  # the board's own state answers this; no calendar is consulted
+    firm_ids = set(tiered_firm_tiers(user))
+    if not firm_ids:
+        return None
+    rows = estimates.observations_for(firm_ids)
+    if not rows:
+        return None
+    watched = 0
+    opened = 0
+    for (_firm_id, _region), obs in rows.items():
+        # A row that has never cleared the sample floor on either side is not
+        # evidence of a quiet market, it is evidence of a board Coverage has
+        # barely watched. Counting it as "not yet open" would read a thin
+        # sample as an early season.
+        if (obs.opened_count < CYCLE_OBSERVATION_MIN_SAMPLE
+                and obs.closed_count < CYCLE_OBSERVATION_MIN_SAMPLE
+                and not obs.currently_open_count):
+            continue
+        watched += 1
+        if obs.opened_count >= CYCLE_OBSERVATION_MIN_SAMPLE:
+            opened += 1
+    if not watched:
+        return None
+    return SEASON_CROWD if opened / watched >= SEASON_CROWD_SHARE else SEASON_EARLY
+
+
+def season_factor(action: dict, mode: str | None) -> float:
+    """The mode's weight for this card's action, or 1.0.
+
+    Applied by `crm.today._gate_and_rank` alongside `ev` rather than inside
+    `expected_value`, because the mode is a fact about the student's whole
+    board and `expected_value` is deliberately a pure function of one action
+    dict with no route back to the database.
+    """
+    if not mode:
+        return 1.0
+    return _SEASON_WEIGHTS.get(mode, {}).get(action.get("action"), 1.0)
 
 
 # ---------------------------------------------------------------------------

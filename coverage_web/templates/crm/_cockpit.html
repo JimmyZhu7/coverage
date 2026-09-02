@@ -1155,6 +1155,23 @@ copy exactly once, and this is the once.
             <div class="daybar-scale"><span>8a</span><span>2p</span><span>8p</span></div>
           </div>
         {% endif %}
+        {% comment %}
+        Send-window hints, on your clock, for the markets you actually have
+        contacts in. S&T only, and only where a contact states a region: see
+        `crm.today._send_windows`. NOT aria-hidden, unlike the track above it,
+        because this is the sole carrier of what it says. It renders whether
+        or not anything is on the track, since "when is it worth writing" is a
+        question about an empty day too.
+        {% endcomment %}
+        {% if daybar.show_hints %}
+          <p class="daybar-hint">
+            {% for h in daybar.hints %}
+              <span class="dbh">
+                <b>{{ h.market }} desk</b> good {{ h.good }}, avoid {{ h.avoid }} around the close
+              </span>
+            {% endfor %}
+          </p>
+        {% endif %}
         <ul class="activity">
           {% for r in schedule %}
             <li class="activity-row{% if r.is_today %} is-now{% endif %}">

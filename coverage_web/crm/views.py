@@ -32,7 +32,7 @@ from analytics.models import UserOpportunity
 from billing import credits as billing_credits
 from billing.models import CreditLedger
 from coverage_domain import cadence, scoring
-from coverage_domain.pipeline import CHANNELS, MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
+from coverage_domain.pipeline import MANUAL_OVERRIDE_KIND, TOUCH_TRANSITIONS
 from crm.forms import ChatDebriefForm, ContactForm
 from directory.classify import REGION_LABELS, TARGET_BUCKETS
 from directory.models import Firm, FirmDate, Opportunity
@@ -2507,7 +2507,12 @@ def log_touch(request: HttpRequest, pk: int) -> HttpResponse:
 
     if kind not in TOUCH_TRANSITIONS:
         error = "Pick an interaction type."
-    elif channel not in CHANNELS:
+    # Validated against the PRODUCT's vocabulary (`crm.utils.CHANNEL_LABELS`),
+    # not the ported `pipeline.CHANNELS`. The engine's own docstring says
+    # channel validation "is a caller concern"; this is the caller, and having
+    # the form offer one list while the guard checked another is how "wechat"
+    # could be in the <select> and still be rejected on POST (P5).
+    elif channel not in dict(CHANNEL_LABELS):
         error = "Pick a channel."
     else:
         updates = services.log_touch(request.user.id, contact.id, kind, channel, note)

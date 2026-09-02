@@ -578,6 +578,10 @@ this file is not redundant with it — see the note there.
   }
   .ob-pv-foot { font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.5;
     margin: 0; padding-top: var(--s3); border-top: 1px solid var(--line); }
+  /* The part of the matched count the feed will block anyway. Its own line
+     under the narrowing sentence and slightly darker than it, because it is
+     a subtraction from the number above and has to be read, not skimmed. */
+  .ob-pv-blocked { display: block; margin-top: 2px; color: var(--ink-2); }
   .ob-pv-src { font-family: var(--font-mono); font-size: var(--fs-nano);
     text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
     margin: var(--s3) 0 0; }

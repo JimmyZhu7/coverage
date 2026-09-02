@@ -32,6 +32,8 @@ from typing import Any
 from django.db import transaction
 from django.utils import timezone
 
+from coverage_domain.pipeline import REFERRAL_KIND
+
 from . import services
 from .models import ChatDebrief, Contact, Task, Touch
 from .utils import _calendar_days_ago
@@ -258,20 +260,60 @@ def record(
 
 
 def promote(debrief: ChatDebrief) -> dict[str, str]:
-    """Take the offered advocate promotion. Goes through
-    `crm.services.set_contact_state` (never a direct UPDATE) so the move
-    lands in the touches audit trail with a note saying where it came
-    from. Idempotent: a second call is a no-op."""
+    """Take the offered advocate promotion. Idempotent: a second call is a
+    no-op.
+
+    THE ADVOCATE IS AN EVENT, NOT ONLY A RUNG (2026-09-02). This used to go
+    through `services.set_contact_state`, i.e. a hand override: it moved the
+    warmth column and wrote a `manual_override` audit row saying so. That
+    made the one metric the research says predicts an outcome — the advocate
+    COUNT, "how many people actually pushed for me", which holds at 2 to 20
+    whether 80 or 2,200 emails went out
+    (`research-nontarget-access.md §3` and Verdict, Grade B) — a thing the
+    product could only reconstruct by parsing override notes. It also meant
+    every advocate on the board was undated: the founder's two advocates are
+    both hand overrides, and nothing on the row says when either of them
+    actually did anything for him.
+
+    It now logs a `referral` touch through the ratchet
+    (`pipeline.TOUCH_TRANSITIONS[REFERRAL_KIND]` is `("advocate",
+    "advocate")`), which changes three things and no others:
+
+      - the promotion is COUNTABLE, as a row with a kind, not as prose;
+      - it is DATED AT THE CHAT (`debrief.touch.ts`), not at the click,
+        because that is when the person actually offered to push. Backdating
+        is safe precisely because the event-order guard exists: a park or a
+        correction dated after the chat REFUSES the move, the row is still
+        inserted, and the contact keeps the state its newest event gave it;
+      - the audit trail says "they referred you" instead of "updated
+        manually", which is the whole difference between a record and a
+        label.
+
+    `promoted` is set either way. The student took the offer and the ledger
+    now carries the referral; whether the ratchet moved the column is a
+    separate question, and the returned dict is empty when it did not, so a
+    caller reporting off the return value still tells the truth.
+
+    STILL NEVER SILENT. `record()` only stores the "would they advocate?"
+    answer; nothing calls this function except the user pressing the button
+    (`crm.views.debrief_promote`). An opinion recorded in a debrief is not a
+    referral, and the two must not be the same write.
+    """
     if debrief.promoted:
         return {}
-    updates = services.set_contact_state(
+    updates = services.log_touch(
         debrief.user_id,
         debrief.contact_id,
-        warmth="advocate",
+        REFERRAL_KIND,
+        # No channel: a referral is not a message anybody sent. `Touch.channel`
+        # is nullable for exactly this shape (the override rows use it too),
+        # and CHANNEL_LABELS has no value that would be true here.
+        "",
         note=(
-            "Promoted to advocate from the chat debrief on "
+            "Advocate from the chat debrief on "
             f"{debrief.created:%Y-%m-%d} (they said they'd advocate for you)."
         ),
+        now=debrief.touch.ts,
     )
     debrief.promoted = True
     debrief.save(update_fields=["promoted"])

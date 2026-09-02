@@ -66,6 +66,7 @@ from directory.deadlines import (
     is_closing_soon,
     is_posting_closed,
 )
+from directory import estimates
 from directory.dupes import fold_duplicates
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
@@ -993,6 +994,9 @@ def _firm_date_row(fd, *, today):
     confirmed = ((fd.confidence or 0.0) >= _CONFIRMED_FIRM_DATE_CONFIDENCE
                  and prec in _CONFIRMED_FIRM_DATE_PRECISIONS)
     return {
+        # The row's own id, so `_timeline` can hang `directory.estimates`'
+        # annotations off it without this function needing to know they exist.
+        "id": fd.id,
         "cycle": cycle_label(fd.cycle, fd.track),
         # The stored slug rides along beside its label so `_timeline` can match
         # it against the cycles the student STATED without re-parsing prose.
@@ -1219,6 +1223,20 @@ def _timeline(firm, *, today, user=None):
     rows = _drop_contradicted_openings([_firm_date_row(fd, today=today) for fd in rows])
     rows = _flag_conflicting_closes(rows)
 
+    # WHAT THE BOARD ITSELF SAYS ABOUT THESE DATES (`directory.estimates`).
+    #
+    # Three annotations, none of which can change a row: `found_on` on every
+    # estimate (25 rows on file all carry 2026-07-03 and the page printed no
+    # date at all, so nothing said the guess was two months old or that it was
+    # the same guess on all 25); `superseded` where an observed opening wave
+    # has overtaken an estimate; `contradicted` where a stated date sits on
+    # the wrong side of everything the scraper watched. The two facts render
+    # side by side with their provenances — an observation never overwrites an
+    # assertion (P1).
+    notes = estimates.annotate(firm)
+    for row in rows:
+        row.update(notes.get(row["id"], {}))
+
     wanted = _stated_cycle_slugs(user)
     for row in rows:
         if row["cycle_slug"] and row["cycle_slug"] in wanted:
@@ -1245,6 +1263,63 @@ def _timeline(firm, *, today, user=None):
 # agreeing by coincidence is exactly how they stop agreeing. The reasoning
 # for the number itself travels with the definition.
 CYCLE_OBSERVATION_MIN_SAMPLE = _CYCLE_OBSERVATION_MIN_SAMPLE
+
+
+# ---------------------------------------------------------------------------
+# Role-level pagination (WS-OPP-17).
+#
+# WHAT THE MEASUREMENT ACTUALLY SAID, and where the plan's diagnosis was
+# wrong. `audit-perf-tests.md §1` measured `/opportunities/?role=all` at 7.5 MB
+# and 1.76 s and the item proposed "page the columns for role=all the way the
+# campus scope already does". Re-measured 2026-09-02 before touching anything:
+# BOTH scopes were already column-paged at `COLS_PAGE` = 12, and the page was
+# still 5.27 MB and 2.5 s warm. The weight was never the column count. It was
+# the roles INSIDE the columns: 4,077 top-level cards across those 12 at
+# `role=all`, and the two heaviest columns alone held 1,382 and 1,173. Campus
+# is the same defect one size down, 1,114 cards over 12 columns with 656 of
+# them in one. So the fix is the one the item is named after and not the one
+# its body describes, and it applies to both scopes rather than only to
+# `role=all`.
+#
+# WHY 24. It is twice `COLS_PAGE`, which is the shape the page wants: one
+# column should be able to say more about a firm than the board says about
+# firms. It is roughly two screens of scrolling inside a single column at
+# 1280px, which is past the point where a student is reading and into the
+# point where they should be filtering. And everything past it is one click
+# away on the firm page, which is the surface whose entire job is listing one
+# firm's whole board.
+#
+# MARKED, NEVER DROPPED (P4). A capped column says how many roles it is not
+# showing and links to the page that shows them. The column header's "N open"
+# is untouched and still counts every role, and so do the stat strip and the
+# facet counts, which are computed over the full list well before this runs —
+# a student is never told a smaller number, only shown fewer cards.
+ROLES_PER_COLUMN = 24
+
+
+def _cap_roles_per_column(clusters) -> None:
+    """Trim each column to `ROLES_PER_COLUMN` top-level cards, in place.
+
+    City-variant siblings are NOT counted or trimmed separately: they render
+    inside their family head's disclosure (`_group_city_variants`), so a head
+    that survives brings its whole family with it and a head that does not
+    takes its family with it. Counting them here would make the cap depend on
+    how many cities a programme happens to run in, which is not a fact about
+    how long the column is.
+
+    Mutates the dicts, which are shared with `cluster_list` — deliberate, and
+    safe only because every count this page states is already computed: `total`
+    off `open_count`, the stat strip and the facets over the unsliced rows.
+    """
+    for cl in clusters:
+        heads = [r for r in cl["roles"] if not r.get("in_group")]
+        if len(heads) <= ROLES_PER_COLUMN:
+            cl["roles_hidden"] = 0
+            continue
+        kept = heads[:ROLES_PER_COLUMN]
+        shown = len(kept) + sum(len(r.get("variants") or []) for r in kept)
+        cl["roles"] = kept
+        cl["roles_hidden"] = max(cl["open_count"] - shown, 0)
 
 
 def _window_text(first, last) -> str:
@@ -3351,6 +3426,7 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     total = sum(c["open_count"] for c in cluster_list)
     cols_next = cols_from + COLS_PAGE if len(cluster_list) > cols_from + COLS_PAGE else None
     cluster_page = cluster_list[cols_from:cols_from + COLS_PAGE]
+    _cap_roles_per_column(cluster_page)
     personalized = bool(tier_by_firm or user_regions or user_tracks)
 
     # Annotate each role with the user's own track status (saved / applied /
