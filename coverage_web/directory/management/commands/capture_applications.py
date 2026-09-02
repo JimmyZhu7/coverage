@@ -94,7 +94,13 @@ class Command(BaseCommand):
         raw = sys.stdin.read() if opts["findings"] == "-" else None
         if raw is None:
             try:
-                raw = open(opts["findings"], encoding="utf-8").read()
+                # `with`, not a bare `open(...).read()`: the handle on the
+                # discarded file object is closed by refcounting on CPython
+                # and by nothing at all under `-W default::ResourceWarning`,
+                # where this line was the only ResourceWarning the whole suite
+                # produced (3 per run, 2026-09-01).
+                with open(opts["findings"], encoding="utf-8") as fh:
+                    raw = fh.read()
             except OSError as exc:
                 raise CommandError(f"cannot read findings: {exc}") from exc
         try:

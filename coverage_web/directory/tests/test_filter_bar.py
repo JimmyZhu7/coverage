@@ -523,3 +523,70 @@ def test_a_year_stated_only_in_prose_counts_and_filters(client):
     none = client.get(reverse("opportunities"), {"year": YEAR_NONE})
     assert none.context["total"] == 1
     assert "Quiet Intern" in none.content.decode()
+
+
+# --------------------------------------------------------------------------- #
+# The providers list is a VOCABULARY, so it has one entry per provider
+# (2026-09-01)
+#
+# `open_qs.values_list("source").distinct()` looks like a vocabulary query and
+# was not one. `Opportunity.Meta.ordering` is `["-first_seen"]`, and Django
+# adds every ordering column to the SELECT list of a `.distinct()`, so it
+# compiled to `SELECT DISTINCT source, first_seen ... ORDER BY first_seen
+# DESC` — distinct over PAIRS, which for a per-row timestamp means distinct
+# over rows. On the live board that returned all 16,029 open rows in 37 ms
+# instead of the 18 providers in 5 ms, and `sorted()` does not dedupe, so the
+# list the template received held every duplicate.
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.django_db
+def test_the_providers_list_holds_each_provider_once(client):
+    """Four rows, two providers, two entries. The row count is the assertion:
+    the old query returned one entry per ROW, so this reads 4 without the
+    `.order_by()`."""
+    firm = _firm(slug="prov", name="Provider Co")
+    for i in range(3):
+        _opp(firm, f"https://prov.com/gh{i}", source="greenhouse")
+    _opp(firm, "https://prov.com/wd", source="workday")
+
+    providers = client.get(reverse("opportunities")).context["facets"]["providers"]
+    assert providers == ["greenhouse", "workday"]
+
+
+@pytest.mark.django_db
+def test_the_providers_query_does_not_carry_the_default_ordering(client):
+    """The mechanism, pinned where it is visible.
+
+    A row-count assertion alone would go green again the moment someone
+    "restored" the ordering on a fixture small enough that every row has a
+    distinct provider. What must hold is that the query asks for sources and
+    nothing else — no `first_seen` riding along in the DISTINCT."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    firm = _firm(slug="prov-sql", name="Provider SQL")
+    _opp(firm, "https://prov-sql.com/1", source="greenhouse")
+
+    with CaptureQueriesContext(connection) as captured:
+        client.get(reverse("opportunities"))
+    distinct = [q["sql"] for q in captured.captured_queries
+                if "SELECT DISTINCT" in q["sql"] and '"source"' in q["sql"]]
+    assert distinct, "the providers facet no longer runs a DISTINCT on source"
+    for sql in distinct:
+        assert "first_seen" not in sql, sql
+
+
+@pytest.mark.django_db
+def test_a_provider_with_no_open_rows_is_not_in_the_vocabulary(client):
+    """The list describes the OPEN board, which is what `?provider=` filters.
+    A closed-only provider offering a filter that returns nothing would be a
+    control that lies."""
+    firm = _firm(slug="prov-closed", name="Provider Closed")
+    _opp(firm, "https://prov-closed.com/1", source="greenhouse")
+    Opportunity.objects.create(
+        firm=firm, title="Gone", bucket="internship", status="closed",
+        url="https://prov-closed.com/2", source="lever", region="us",
+    )
+
+    providers = client.get(reverse("opportunities")).context["facets"]["providers"]
+    assert providers == ["greenhouse"]

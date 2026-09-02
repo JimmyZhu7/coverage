@@ -231,3 +231,105 @@ def test_a_stated_year_always_outranks_a_derived_one():
     v = _eligibility(o, {"class_year": 2029, "work_auth": {}})
     assert v["kind"] == "year_ok"
     assert v["why"] == "graduating in 2029"
+
+
+# --------------------------------------------------------------------------- #
+# All five sources, read through ONE JSONB extraction (2026-09-01)
+#
+# `_year_facet` used to select `raw__facts__grad__years` and
+# `raw__facts__start__years` as two separate JSON paths over one column, which
+# is two Postgres detoasts of a TOASTed `raw` per row: 76 ms over the founder's
+# 2,723 campus rows and 100 ms over all 16,029 open ones, against 52/72 ms for
+# the single `raw__facts` read it does now. The counting is Python either way.
+#
+# The risk of moving the navigation from SQL into Python is silently losing a
+# source, and it would be invisible — a facet that under-counts still renders.
+# So this fixture states every one of the five sources the facet reads, and
+# one row that states two of them at once, and pins the numbers exactly.
+# --------------------------------------------------------------------------- #
+
+@pytest.fixture
+def five_sources(db):
+    """One row per source the facet reads, plus one row carrying two."""
+    f = _firm(slug="five-sources", name="Five Sources")
+    _opp(f, "https://y/1", "2027 Summer Analyst", cohort="2027")
+    _opp(f, "https://y/2", "Class of 2028 Analyst", class_year="2028")
+    o3 = _opp(f, "https://y/3", "2026 Summer Analyst")
+    o3.class_year_derived = "2026"
+    o3.save(update_fields=["class_year_derived"])
+    # Body-stated graduation window, the source `refresh_grad_facts` repairs.
+    o4 = _opp(f, "https://y/4", "Analyst, silent title")
+    o4.raw = {"facts": {"grad": {"value": "2029", "years": ["2029"],
+                                 "phrase": "graduating in 2029"}}}
+    o4.save(update_fields=["raw"])
+    # Body-stated programme START year — the twin the title never carries.
+    o5 = _opp(f, "https://y/5", "Analyst, silent title too")
+    o5.raw = {"facts": {"start": {"value": "2030", "years": ["2030"],
+                                  "phrase": "Start Date: Jun 2030"}}}
+    o5.save(update_fields=["raw"])
+    # BOTH body windows on one row, and a cohort as well: it belongs under
+    # three years and must be counted once under each.
+    o6 = _opp(f, "https://y/6", "2031 Summer Analyst", cohort="2031")
+    o6.raw = {"facts": {"grad": {"value": "2032", "years": ["2032"],
+                                 "phrase": "graduating in 2032"},
+                        "start": {"value": "2033", "years": ["2033"],
+                                  "phrase": "starts 2033"}}}
+    o6.save(update_fields=["raw"])
+    # States nothing at all: the "No Year Stated" bucket.
+    _opp(f, "https://y/7", "Investment Banking Summer Analyst")
+    return f
+
+
+@pytest.mark.django_db
+def test_every_year_source_still_reaches_the_facet(client, five_sources):
+    """The exact facet, source by source. `2031`/`2032`/`2033` all come off
+    the same row, which is why the counts sum past the total — see the
+    docstring on `_year_facet`."""
+    facet = _facet(_get(client))
+    assert facet == {
+        "": 7,            # every row
+        "2033": 1,        # raw.facts.start.years
+        "2032": 1,        # raw.facts.grad.years
+        "2031": 1,        # cohort, on the same row as the two above
+        "2030": 1,        # raw.facts.start.years, alone
+        "2029": 1,        # raw.facts.grad.years, alone
+        "2028": 1,        # class_year
+        "2027": 1,        # cohort
+        "2026": 1,        # class_year_derived
+        "none": 1,        # states nothing
+    }
+
+
+@pytest.mark.django_db
+def test_a_row_stating_both_body_windows_is_counted_under_both(
+        client, five_sources):
+    """The regression the single read could have caused: navigating to
+    `facts["grad"]` and stopping there, or reading `facts` as a flat dict,
+    would drop the start year and this row would count under two years
+    instead of three."""
+    facet = _facet(_get(client))
+    for year in ("2031", "2032", "2033"):
+        assert facet[year] == 1, year
+        assert _get(client, year=year).context["total"] == 1, year
+
+
+@pytest.mark.django_db
+def test_the_facet_reads_raw_once_per_row(five_sources):
+    """One JSON extraction in the SELECT, not two.
+
+    Pinned on the compiled SQL rather than on a clock, because what this
+    change removes is a second Postgres detoast of the same TOASTed column
+    and nothing about the facet's OUTPUT can see it — the previous
+    implementation returned exactly the numbers the tests above assert. A
+    future edit that goes back to selecting `grad` and `start` as separate
+    paths would be invisible except here."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from directory.models import Opportunity
+    from directory.views import _year_facet
+
+    with CaptureQueriesContext(connection) as captured:
+        _year_facet(Opportunity.objects.filter(status="open"), "")
+    sql = " ".join(q["sql"] for q in captured.captured_queries)
+    assert sql.count('"raw"') == 1, sql

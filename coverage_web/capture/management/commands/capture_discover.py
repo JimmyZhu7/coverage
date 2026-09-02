@@ -133,7 +133,10 @@ class Command(BaseCommand):
         raw = sys.stdin.read() if opts["findings"] == "-" else None
         if raw is None:
             try:
-                raw = open(opts["findings"], encoding="utf-8").read()
+                # `with`, not a bare `open(...).read()` — the same handle leak
+                # `capture_applications` carried; see its note.
+                with open(opts["findings"], encoding="utf-8") as fh:
+                    raw = fh.read()
             except OSError as exc:
                 raise CommandError(f"cannot read findings: {exc}") from exc
         try:

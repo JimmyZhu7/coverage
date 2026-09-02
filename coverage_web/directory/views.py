@@ -1788,14 +1788,38 @@ def _year_facet(qs, selected=""):
     # about, and a student filtering to their own graduating class wants the
     # summer internships that hire it. It only ever exists on rows that state
     # no year of their own, so it cannot displace a stated one.
-    for cohort, class_year, derived, grad_years, start_years in qs.values_list(
-            "cohort", "class_year", "class_year_derived",
-            "raw__facts__grad__years", "raw__facts__start__years"):
+    #
+    # ONE JSONB READ PER ROW, NOT TWO. This used to select the two windows as
+    # two separate paths — `raw__facts__grad__years` and
+    # `raw__facts__start__years` — which compiles to two `raw #> '{...}'`
+    # expressions over one column, and Postgres detoasts the whole `raw`
+    # datum once per expression rather than caching it across the target
+    # list. `raw` is TOASTed on this table (927-byte average rows, 72 MB
+    # including the toast relation), so the second path was pure duplicated
+    # I/O: measured on the founder's live board 2026-09-01, two paths cost
+    # 76 ms over 2,723 campus rows and 100 ms over all 16,029 open rows,
+    # against 52 ms and 72 ms for the single `raw__facts` read below. The
+    # extra bytes on the wire (the whole facts dict rather than two arrays)
+    # are cheaper than the second detoast by a wide margin.
+    #
+    # The remaining ~50 ms IS the detoast, and no query shape removes it —
+    # the three plain columns alone cost 2 ms for the same 2,723 rows. Only a
+    # materialised column (the audit's own recommendation, at ingest in
+    # `enrich_postings`) would, and no such column exists today:
+    # `refresh_grad_facts` writes this fact back into `raw["facts"]["grad"]`,
+    # not into a field. That is a schema change, and it is not this one.
+    for cohort, class_year, derived, facts in qs.values_list(
+            "cohort", "class_year", "class_year_derived", "raw__facts"):
         total += 1
         years = {y for y in (cohort or "", class_year or "", derived or "") if y}
-        for y in (*(grad_years or ()), *(start_years or ())):
-            if isinstance(y, str) and y.isdigit():
-                years.add(y)
+        facts = facts if isinstance(facts, dict) else {}
+        for key in ("grad", "start"):
+            window = facts.get(key)
+            if not isinstance(window, dict):
+                continue
+            for y in window.get("years") or ():
+                if isinstance(y, str) and y.isdigit():
+                    years.add(y)
         for y in years:
             counts[y] += 1
         if years:
@@ -1848,12 +1872,17 @@ _UNCONFIRMED_AFTER_DAYS = 3
 _ROLLING_FEED_CAP = 30
 
 
-def _unconfirmed_note(o) -> dict:
+def _unconfirmed_note(o, *, as_of_date=None) -> dict:
     """Whether Coverage's own most recent check of this posting actually
     reconfirmed it is live, as something a template can render honestly. {}
     when it did (or there is nothing to compare — every open row carries
     both timestamps from ingest, so in practice this is only {} on a clean
     confirmation).
+
+    `as_of_date` is the request's own local today, supplied by the per-row
+    caller (`_urgency_item`) so the staleness clock is read once for the page
+    rather than once per card; omitted, it reads the clock itself, exactly as
+    the three one-shot callers do. See `crm.utils._calendar_days_ago`.
 
     `last_checked` moves on every check outcome; `last_verified` moves ONLY
     on a positive liveness signal (ingest's own list-presence stamp, or a
@@ -1902,7 +1931,7 @@ def _unconfirmed_note(o) -> dict:
     # days" off a page last read 6 days earlier. `health.py` was already
     # printing "stale data being presented as fresh" to an operator-only
     # channel for that firm; nothing said it to the student looking at it.
-    stale_days = _calendar_days_ago(o.last_verified)
+    stale_days = _calendar_days_ago(o.last_verified, as_of_date=as_of_date)
     if not check_failed and stale_days < _UNCONFIRMED_AFTER_DAYS:
         return {}
     return {
@@ -2390,8 +2419,22 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
     # elapsed-openness bar — so the drift was invisible in the text (both
     # readings are close) but silently flipped the Fresh pill's verdict on
     # rows sitting right at the `_FRESH_DAYS` boundary.
-    seen_days = _calendar_days_ago(o.first_seen, as_of=now) if o.first_seen else None
+    #
+    # `as_of_date=today` rather than `as_of=now`: `today` IS `local_date(now)
+    # .date()` — every caller of this function derives the pair from one
+    # instant (`now = timezone.now(); today = timezone.localdate()`), which is
+    # already required for `open_run_days` and the deadline branches below to
+    # agree with this number. Handing the converted day in skips one
+    # `timezone.localtime` per row; see `_calendar_days_ago`'s own note.
+    seen_days = (_calendar_days_ago(o.first_seen, as_of_date=today)
+                 if o.first_seen else None)
     place = _place(o)
+    # ONE VERDICT PER ROW. `facts` and `verdict` below are the same call —
+    # `_eligibility` walks the visa, language and graduation branches over
+    # `raw.facts` — and asking it twice per card doubled that walk for
+    # nothing: the two answers are equal by construction (pure function, same
+    # arguments) and the chip builder wants exactly the one the card carries.
+    verdict = _eligibility(o, profile)
     item = {
         "id": o.id,
         "firm_name": o.firm.name,
@@ -2428,16 +2471,16 @@ def _urgency_item(o, *, now, today, my_firm_ids, profile=None, cutoffs=None):
         "open_run_days": (
             None if cutoffs is None else open_run_days(o, today, cutoffs)
         ),
-        "facts": _fact_chips(o, verdict=_eligibility(o, profile)),
+        "facts": _fact_chips(o, verdict=verdict),
         "reported": deadline_provenance(o),
-        "verdict": _eligibility(o, profile),
+        "verdict": verdict,
         # Whether the Read control has anything to open. Checked here, not in
         # the template, so the card never offers a drawer that would come back
         # empty.
         "has_text": bool((o.raw or {}).get("detail_text")),
         # {} on a clean confirmation; a label+why when our last check of this
         # URL could not reconfirm it — see `_unconfirmed_note`.
-        "unconfirmed": _unconfirmed_note(o),
+        "unconfirmed": _unconfirmed_note(o, as_of_date=today),
     }
     # Three states, not two. "Rolling" must mean "no posted deadline" (it is
     # tested that way at my_applications, views.py's `rolling` lens above) —
@@ -2604,10 +2647,28 @@ def _group_city_variants(items, opps):
             head["variants"].append(item)
 
 
-def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None, cutoffs=None):
+def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None, cutoffs=None,
+                  items=None):
     """Rank the filtered set into the Closing-Soon and Fresh-&-Rolling bands.
     Dated roles sort by nearest deadline; rolling roles sort by your-firm
-    first, then freshest-seen, then this-cycle cohort."""
+    first, then freshest-seen, then this-cycle cohort.
+
+    `items` is an optional `{id: item}` map the caller has ALREADY built with
+    `_urgency_item` over these same rows — the same caller-supplies-the-batch
+    posture `cutoffs` holds one line down, and for the same reason. The
+    `opportunities` view renders this band and the firm clusters off one
+    `rows` list, and used to build a card per row twice: 5,166 `_urgency_item`
+    calls at campus scope and 30,068 at `?role=all`, each one re-running
+    `_calendar_days_ago`, `_place` and the chip builders over a row whose
+    answer was already sitting in the other loop's dict.
+
+    The band takes a SHALLOW COPY of each supplied item rather than the item
+    itself, which is what keeps this a pure speed-up. The cluster loop mutates
+    its own dicts after this call — `_group_city_variants` writes `variants` /
+    `in_group`, and the save-star pass writes `track_status` — and every one
+    of those is a top-level key on a card the band never showed before. Handing
+    the band the same objects would have quietly given its cards the clusters'
+    stars and grouping."""
     closing, rolling = [], []
     # One grouped aggregate for the whole band, scoped to the firms actually
     # in it — see `_urgency_item`'s `cutoffs` note. The `opportunities` view
@@ -2619,8 +2680,10 @@ def _urgency_feed(qs, *, now, today, my_firm_ids, profile=None, cutoffs=None):
     if cutoffs is None:
         cutoffs = onboarding_cutoffs({o.firm_id for o in qs})
     for o in qs:
-        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
-                             profile=profile, cutoffs=cutoffs)
+        prebuilt = items.get(o.id) if items is not None else None
+        item = dict(prebuilt) if prebuilt is not None else _urgency_item(
+            o, now=now, today=today, my_firm_ids=my_firm_ids,
+            profile=profile, cutoffs=cutoffs)
         (closing if item["dated"] else rolling).append(item)
 
     # Passed-deadline rows are "dated" (see `_urgency_item`) but are neither
@@ -2804,8 +2867,20 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # URL-only filter (?provider=): no student thinks in ATS providers, so
         # it earns no control in the bar and therefore no counts. The option
         # list still travels so the vocabulary is inspectable.
+        #
+        # `.order_by()` IS THE DISTINCT. `Opportunity.Meta.ordering` is
+        # `["-first_seen"]`, and Django adds every ordering column to the
+        # SELECT list of a `.distinct()` — so this compiled to `SELECT
+        # DISTINCT source, first_seen ... ORDER BY first_seen DESC`, which is
+        # distinct over PAIRS and therefore not distinct at all. Measured on
+        # the live board 2026-09-01: 16,029 rows and 37 ms, and because
+        # `sorted()` does not dedupe, the list handed to the template held
+        # every duplicate — 16,029 entries of an 18-value vocabulary. Clearing
+        # the ordering the facet never wanted gives 18 rows in 5 ms.
         "providers": sorted(
-            s for s in open_qs.values_list("source", flat=True).distinct() if s
+            s for s in
+            open_qs.order_by().values_list("source", flat=True).distinct()
+            if s
         ),
     }
     year_facet = _year_facet(
@@ -3010,9 +3085,24 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # clusters further down — both build their items off this same `rows`.
     cutoffs = onboarding_cutoffs({o.firm_id for o in rows})
 
+    # Every feed item by role id, built ONCE for the page. The urgency band
+    # below and the firm clusters further down both render a card per row, and
+    # each used to build its own: two `_urgency_item` calls per row, 30,068 of
+    # them at `?role=all`, for an identical dict. The band now takes copies of
+    # these (see `_urgency_feed`'s `items`), the clusters take them by
+    # reference and annotate them in place, and `_bulk_save_peek` reads the
+    # annotated ones — which is the same reference contract the map already
+    # had, just established a few lines earlier.
+    item_by_id: dict[int, dict] = {
+        o.id: _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
+                            profile=elig_profile, cutoffs=cutoffs)
+        for o in rows
+    }
+
     feed = (None if cols_fragment else
             _urgency_feed(rows, now=now, today=today, my_firm_ids=my_firm_ids,
-                          profile=elig_profile, cutoffs=cutoffs))
+                          profile=elig_profile, cutoffs=cutoffs,
+                          items=item_by_id))
 
     # Firm clusters are the page: one firm, all its open roles listed below it
     # in its own scroll window. Each role keeps its honest urgency signal (a
@@ -3108,11 +3198,12 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # their cards are collected during the same pass rather than re-queried.
     pick_ids = {p["id"] for p in picks}
     pick_items: dict[int, dict] = {}
-    # Every feed item by role id, so the bulk-save peek can show the rows the
-    # banner is offering without building or querying a second set. The dicts
-    # here are the SAME objects the firm columns render, held by reference —
-    # see `_bulk_save_peek`, which is the only reader.
-    item_by_id: dict[int, dict] = {}
+    # `item_by_id` — every feed item by role id — is built above the urgency
+    # band now, so the band and these columns share one build per row. The
+    # dicts are still the SAME objects the firm columns render, held by
+    # reference, which is what lets the bulk-save peek show the rows the
+    # banner is offering without building or querying a second set; see
+    # `_bulk_save_peek`, which is the only reader.
     for o in rows:
         cl = clusters.get(o.firm_id)
         if cl is None:
@@ -3160,11 +3251,9 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             and (not user_tracks
                  or bool(user_tracks & set(_row_tracks(o.firm.tracks, o.title))))
         )
-        item = _urgency_item(o, now=now, today=today, my_firm_ids=my_firm_ids,
-                             profile=elig_profile, cutoffs=cutoffs)
+        item = item_by_id[o.id]
         cl.setdefault("_opps", []).append(o)
         cl["roles"].append(item)
-        item_by_id[o.id] = item
         # Kept by reference here; the Picked column takes its COPY further
         # down, after the track-status annotation has run over these dicts.
         # Copying at this point would freeze a pre-annotation snapshot and

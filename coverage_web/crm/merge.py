@@ -11,9 +11,13 @@ lives here — a third opinion about who is a duplicate must not grow.
 
 WHY SUGGESTIONS ARE COMPUTED LIVE AND NEVER STORED. A stored suggestion can
 go stale three ways (either contact edited, archived, or deleted) and every
-staleness is a wrong card. The scan is a few thousand cheap string
-comparisons over a personal CRM (the founder's 171 rows: ~15k pairs), so
-Settings just computes it on render. Only ANSWERS persist, as
+staleness is a wrong card, so Settings computes it on render. It stays cheap
+enough to do that because the scan is BLOCKED rather than exhaustive: rows
+are grouped by the two equalities the suggestive rung requires (same
+multi-word name, or same mailbox localpart) and only rows sharing one are
+compared. Unblocked it was every unordered pair — the founder's 306 rows
+made 45,844 comparisons on every GET, and 600 rows would have made 180,000.
+See `_blocking_keys`. Only ANSWERS persist, as
 `crm.models.ContactMerge` rows — and any answer (merged, undone, rejected)
 suppresses the pair forever, the same remembered-forever contract a
 dismissed ContactProposal holds.
@@ -92,33 +96,109 @@ def _answered_pairs(user) -> set[frozenset[int]]:
     }
 
 
+def _blocking_keys(contact) -> set:
+    """The keys under which this row can possibly be somebody's duplicate.
+
+    A BLOCKING KEY, not an opinion. `discovery.duplicate_evidence` — the one
+    suggestive rung, and still the only thing that decides a pair — returns
+    something non-empty in exactly two shapes, and both of them are an
+    equality:
+
+      the name rung     requires `names_equivalent(a.name, b.name)`, which
+                        requires the two canonical token sequences to carry
+                        the SAME multi-letter words in the same order (see
+                        `names_equivalent`: `ta == tb`, or `words_a ==
+                        words_b` once agreeing initials are set aside, and
+                        never fewer than two words a side).
+      the mailbox rung  requires `la and la == lb` — an identical, non-empty
+                        mailbox localpart.
+
+    Everything else those two branches consult (domain relatedness, shared
+    firm, name shortening, personal-localpart) only ever NARROWS what they
+    already agree on. So two rows sharing neither key cannot be a pair, and
+    comparing them is wasted work.
+
+    The keys are computed BY `discovery`'s own canonicalisers rather than
+    re-derived here, which is the module docstring's rule: no matching logic
+    lives in this file, and a blocking key that spelled "same name" its own
+    way would be exactly the third opinion that rule forbids. If the rung
+    ever widens beyond these two equalities the blocking goes blind, so the
+    necessary condition is pinned by a test that runs the full O(n²) scan
+    against the blocked one over a matrix of contact shapes
+    (`crm/tests/test_merge.py`, `test_blocking_finds_every_pair_the_full_scan_finds`).
+    """
+    from capture import discovery
+
+    keys = set()
+    words = tuple(
+        t for t in discovery._name_tokens(getattr(contact, "name", "") or "")
+        if len(t) > 1
+    )
+    if len(words) >= 2:
+        keys.add(("name", words))
+    localpart, _ = discovery._mailbox_parts(getattr(contact, "email", "") or "")
+    if localpart:
+        keys.add(("mailbox", localpart))
+    return keys
+
+
 def candidate_pairs(user) -> list[MergeCandidate]:
     """Every pair of this user's contact rows the suggestive rung would call
     one person, primary-first, minus pairs already answered. Read-only.
 
     Pairs where BOTH rows are archived are skipped — two cards the user has
     already put away ask for no decision. One archived row still suggests:
-    the live card's history is split from something real."""
+    the live card's history is split from something real.
+
+    BLOCKED, NOT SCANNED. This ran `duplicate_evidence` over every unordered
+    pair, which is O(n²) in a page render: measured on the founder's live
+    account 2026-09-01, 45,844 comparisons and 597 ms of Python on every GET
+    of Settings, to reach one suggestive pair he had already answered. Rows
+    are grouped by `_blocking_keys` first and only rows sharing a key are
+    compared — the keys being the two equalities the rung itself requires,
+    so the blocked scan cannot miss a pair the full scan would have found.
+    Same account, blocked: 19 ms and 0 comparisons, and the one pair the full
+    scan can see (rows 707/706, the AWS account manager tracked twice) shares
+    the `("mailbox", "ebbakler")` key, so it is still reachable the moment
+    the answer that suppresses it is undone.
+
+    The candidate index pairs are then walked in the ORIGINAL `(i, j)` order,
+    not bucket by bucket, because `MAX_SUGGESTIONS` truncates: a different
+    visit order would return a different 25 to a page whose whole promise is
+    that the same board renders the same cards."""
     rows = list(Contact.objects.for_user(user))
     answered = _answered_pairs(user)
     counts = _touch_counts(user, [c.id for c in rows])
     from capture import discovery
 
+    buckets: dict[tuple, list[int]] = {}
+    for idx, row in enumerate(rows):
+        for key in _blocking_keys(row):
+            buckets.setdefault(key, []).append(idx)
+
+    # Indices land in each bucket ascending, so `(members[a], members[b])` is
+    # already `(i, j)` with `i < j` — the same orientation the old nested loop
+    # produced. A row can share both keys with another, hence the set.
+    candidates: set[tuple[int, int]] = set()
+    for members in buckets.values():
+        for a in range(len(members)):
+            for b in range(a + 1, len(members)):
+                candidates.add((members[a], members[b]))
+
     out: list[MergeCandidate] = []
-    for i in range(len(rows)):
-        for j in range(i + 1, len(rows)):
-            a, b = rows[i], rows[j]
-            if a.archived and b.archived:
-                continue
-            if frozenset((a.id, b.id)) in answered:
-                continue
-            evidence = discovery.duplicate_evidence(a, b)
-            if not evidence:
-                continue
-            primary, duplicate = _pick_primary(a, b, counts)
-            out.append(MergeCandidate(primary, duplicate, evidence))
-            if len(out) >= MAX_SUGGESTIONS:
-                return out
+    for i, j in sorted(candidates):
+        a, b = rows[i], rows[j]
+        if a.archived and b.archived:
+            continue
+        if frozenset((a.id, b.id)) in answered:
+            continue
+        evidence = discovery.duplicate_evidence(a, b)
+        if not evidence:
+            continue
+        primary, duplicate = _pick_primary(a, b, counts)
+        out.append(MergeCandidate(primary, duplicate, evidence))
+        if len(out) >= MAX_SUGGESTIONS:
+            return out
     return out
 
 

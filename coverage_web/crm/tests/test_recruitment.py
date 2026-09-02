@@ -313,3 +313,85 @@ def test_campus_housing_staff_are_still_campus(role):
     These are the USC housing titles the word was added for."""
     verdict = recruitment.classify_person(role=role, notes="")
     assert verdict.code == "campus", f"{role!r} is campus housing staff"
+
+
+# ---------------------------------------------------------------------------
+# The classifier is memoised on the role string (2026-09-01)
+#
+# `_track_signal` asks `directory.recommend.role_function` — a regex sweep —
+# and it runs once per contact per render. Measured on the founder's live
+# account, 15 ms of every Today and every Network render went to re-answering
+# the same question about the same 265 role strings, and `crm.views.
+# contact_list` pays it twice on one request (`_build_actions` again).
+#
+# The cache is only sound because the classifier is PURE on its argument, and
+# only bounded because a role is a `CharField(max_length=255)`. Both of those
+# are load-bearing and both are pinned below.
+# ---------------------------------------------------------------------------
+
+class TestTrackSignalCache:
+    def _calls(self, monkeypatch):
+        """Every string that reaches `role_function` this test."""
+        from directory import recommend
+
+        seen = []
+        real = recommend.role_function
+
+        def counting(text):
+            seen.append(text)
+            return real(text)
+
+        monkeypatch.setattr(recommend, "role_function", counting)
+        recruitment._cached_role_function.cache_clear()
+        return seen
+
+    def test_one_classification_per_distinct_role(self, monkeypatch):
+        seen = self._calls(monkeypatch)
+        for _ in range(50):
+            recruitment._track_signal("Investment Banking Analyst")
+            recruitment._track_signal("Equity Research Associate")
+        assert seen == ["Investment Banking Analyst",
+                        "Equity Research Associate"]
+
+    def test_the_answer_is_the_same_answer(self, monkeypatch):
+        """A cache that changed a verdict would hide a banker or surface a
+        professor — the two errors this whole module exists to trade off. Warm
+        and cold must agree on every title the rule distinguishes."""
+        from directory.recommend import role_function
+
+        titles = [
+            "Investment Banking Summer Analyst",
+            "Equity Research Associate",
+            "Credit Sales",
+            "Prime Brokerage Sales",
+            "Internal Audit Analyst",
+            "Residential Advisor",
+            "Trojan Investing Society",
+            "",
+        ]
+        recruitment._cached_role_function.cache_clear()
+        cold = [recruitment._track_signal(t) for t in titles]
+        warm = [recruitment._track_signal(t) for t in titles]
+        assert cold == warm
+        for title, answer in zip(titles, cold):
+            named = role_function(title) if title else ""
+            if named and named != "none":
+                assert answer == named, title
+
+    def test_free_prose_is_never_keyed(self, monkeypatch):
+        """`contact_verdict` hands this function `notes` and `angle` too, and
+        those are TextFields — unbounded in length and never repeated, so
+        caching them buys nothing and would park a student's writing in a
+        process-local dict. Over the cap the classifier is called straight
+        through, which is what it did before the cache existed."""
+        seen = self._calls(monkeypatch)
+        prose = "met at the info session, " * 40
+        assert len(prose) > recruitment._TRACK_SIGNAL_CACHE_MAX_CHARS
+        recruitment._track_signal(prose)
+        recruitment._track_signal(prose)
+        assert seen == [prose, prose]
+        assert recruitment._cached_role_function.cache_info().currsize == 0
+
+    def test_the_cache_is_bounded(self):
+        """A per-process cache with no ceiling is a leak with a nice name."""
+        assert recruitment._cached_role_function.cache_info().maxsize == 4096

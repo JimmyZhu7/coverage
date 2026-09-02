@@ -79,6 +79,40 @@ cd ..
 uv run pytest
 ```
 
+## Running the suite
+
+**`uv run pytest` is the gate, and it runs everything.** ~9,300 tests, about
+7 minutes on a quiet machine and 20-30 with sibling worktrees sharing the same
+Postgres. Nothing below changes what a bare `pytest` runs — a default that
+quietly skipped tests would mean "pytest passed" no longer means what every
+commit in this repo has meant by it.
+
+Two ways to make the inner loop shorter while you work. Both are opt-out, and
+neither is a substitute for a full run before you commit:
+
+```bash
+# Same tests, four processes. xdist gives each worker its own database
+# (test_coverage_gw0..gw3), so this does NOT reintroduce the two-runs-on-one-
+# database contention that has caused mass failures here before.
+uv run pytest -n 4
+
+# The fast subset: everything except page renders and generated matrices.
+uv run pytest -m "not slow and not stress"
+```
+
+The two markers are applied by SHAPE in the repo-root `conftest.py`, so
+nothing has to be remembered when a test is added:
+
+| marker | what carries it | why it is skippable |
+|---|---|---|
+| `stress` | any `test_stress_*.py` module | 4,006 of the 9,296 cases, 54 s — a generated matrix over one pure function; it inflates the count far more than the clock |
+| `slow` | any test taking the `client` fixture | 1,369 tests, 251 s — full page renders with a fixture world built per test, which is where the suite's time actually goes |
+| `live` | hand-written, `coverage_connectors` only | hits a real ATS over the network; deselected by its own conftest unless a network run is asked for |
+
+`coverage_web/core/tests/test_suite_hygiene.py` pins all three: an
+unregistered marker is a warning rather than an error, so it is the kind of
+thing that decays silently.
+
 ## Verifying a change by hand — use the demo account, not the shared tables
 
 The `coverage` database above is a **shared, standing dev database** — every

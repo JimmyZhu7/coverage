@@ -315,3 +315,163 @@ class TestMergeViews:
         body = resp.content.decode()
         assert "Duplicate Contacts" in body
         assert "ebbakler@amazon.es" in body
+
+
+# --------------------------------------------------------------------------- #
+# The blocked scan (2026-09-01)
+#
+# `candidate_pairs` used to run `duplicate_evidence` over every unordered pair
+# of the user's contacts. Measured on the founder's live account that is
+# 45,844 comparisons and 175 ms on every GET of Settings, and Settings
+# computes the scan on render by design (see the module docstring), so the
+# page paid it every time. It is now blocked: rows are grouped by the two
+# equalities the suggestive rung itself requires — the same multi-word name,
+# or the same mailbox localpart — and only rows sharing one are compared.
+#
+# The whole risk of blocking is a pair the full scan would have found and the
+# blocked one never looks at. That risk is pinned three ways below: the two
+# shapes where the two keys DISAGREE and the pair is still found, and an
+# exhaustive equivalence over a matrix of contact shapes.
+# --------------------------------------------------------------------------- #
+
+class TestBlockedScan:
+    """A blocking key is an optimisation only while it is a NECESSARY
+    condition for the rung. These tests fail the moment it stops being one."""
+
+    def _full_scan(self, user):
+        """`candidate_pairs` as it was written before the blocking: every
+        unordered pair, in row order, same skips, same cap."""
+        from capture import discovery
+
+        rows = list(Contact.objects.for_user(user))
+        answered = merge_service._answered_pairs(user)
+        counts = merge_service._touch_counts(user, [c.id for c in rows])
+        out = []
+        for i in range(len(rows)):
+            for j in range(i + 1, len(rows)):
+                a, b = rows[i], rows[j]
+                if a.archived and b.archived:
+                    continue
+                if frozenset((a.id, b.id)) in answered:
+                    continue
+                evidence = discovery.duplicate_evidence(a, b)
+                if not evidence:
+                    continue
+                primary, duplicate = merge_service._pick_primary(a, b, counts)
+                out.append((primary.id, duplicate.id, evidence))
+                if len(out) >= merge_service.MAX_SUGGESTIONS:
+                    return out
+        return out
+
+    def _blocked(self, user):
+        return [(c.primary.id, c.duplicate.id, c.evidence)
+                for c in merge_service.candidate_pairs(user)]
+
+    def test_one_mailbox_two_domains_crosses_the_name_buckets(self, user, amazon):
+        """The founder's own suggestive pair, and the case the name key
+        cannot see: "Ebba af Klercker" and "Ebba Kler" are different word
+        sequences, so the two rows sit in two different name buckets. They
+        share `ebbakler`, which is the other key, and the mailbox rung is
+        exactly the rung that fires here."""
+        a = Contact.all_objects.create(
+            user=user, name="Ebba af Klercker", email="ebbakler@amazon.com",
+            firm=amazon,
+        )
+        b = Contact.all_objects.create(
+            user=user, name="Ebba Kler", email="ebbakler@amazon.es", firm=amazon,
+        )
+        shared = merge_service._blocking_keys(a) & merge_service._blocking_keys(b)
+        assert shared == {("mailbox", "ebbakler")}
+        pairs = merge_service.candidate_pairs(user)
+        assert [(p.primary.id, p.duplicate.id) for p in pairs] == [(a.id, b.id)]
+
+    def test_one_name_two_mailboxes_crosses_the_mailbox_buckets(self, user):
+        """The mirror image, and the shape `duplicate_evidence`'s own
+        docstring calls the hole it was fixed for: one person at one employer
+        domain under two addresses. `john.smith` and `j.smith` are two mailbox
+        buckets; the name is the key that holds them together."""
+        gs = Firm.objects.create(slug="gs-two-mailboxes", name="Goldman Sachs",
+                                 domains=["gs.com"])
+        a = Contact.all_objects.create(
+            user=user, name="John Smith", email="john.smith@gs.com", firm=gs,
+        )
+        b = Contact.all_objects.create(
+            user=user, name="John Smith", email="j.smith@gs.com", firm=gs,
+        )
+        shared = merge_service._blocking_keys(a) & merge_service._blocking_keys(b)
+        assert shared == {("name", ("john", "smith"))}
+        pairs = merge_service.candidate_pairs(user)
+        assert [(p.primary.id, p.duplicate.id) for p in pairs] == [(a.id, b.id)]
+
+    def test_blocking_finds_every_pair_the_full_scan_finds(self, user):
+        """The equivalence, over every shape the rung distinguishes.
+
+        The matrix deliberately mixes cases that MUST pair (same name at one
+        domain, same name with one address missing, same name with no address
+        at all, one localpart across related domains and across country TLDs)
+        with cases that must NOT (a namesake at an unrelated firm, two
+        colleagues at one employer, two freemail Janes, a middle initial that
+        disagrees, a one-word name) — because a blocking bug is only ever
+        visible as a MISSING pair, and a matrix of non-pairs would pass a
+        blocked scan that found nothing at all."""
+        gs = Firm.objects.create(slug="gs-matrix", name="Goldman",
+                                 domains=["gs.com"])
+        ubs = Firm.objects.create(slug="ubs-matrix", name="UBS",
+                                  domains=["ubs.com"])
+        shapes = [
+            ("John Smith", "john.smith@gs.com", gs),
+            ("John Smith", "j.smith@gs.com", gs),           # pairs with above
+            ("John Smith", "john.smith@ubs.com", ubs),      # namesake, refused
+            ("Vanessa A Nunley", "vnunley@gs.com", gs),
+            ("Vanessa B Nunley", "vbnunley@gs.com", gs),    # initials disagree
+            ("Nunley, Vanessa A", "vanessa.nunley@gs.com", gs),  # inverted form
+            ("Ebba af Klercker", "ebbakler@amazon.com", None),
+            ("Ebba Kler", "ebbakler@amazon.es", None),      # the mailbox rung
+            ("Priya Raman", "", gs),
+            ("Priya Raman", "priya.raman@gs.com", gs),      # one address missing
+            ("Tomas Novak", "", None),
+            ("Tomas Novak", "", None),                      # neither has one
+            ("Kevin", "kevin@nummo.com", None),             # one word, never pairs
+            ("Kevin", "kevin@other.com", None),
+            ("Jane Doe", "jane.doe@gmail.com", None),
+            ("Jane Doe", "jane.doe@yahoo.com", None),       # freemail, refused
+            ("Warren Zhang", "warren.zhang@gs.com", gs),
+            ("Yuxiang Zhang", "yuxiang.zhang@gs.com", gs),  # colleagues
+            ("Li Wei", "liwei@cmbi.com.hk", None),
+            ("Li Wei", "liwei@cmbi.com.cn", None),          # one org, two TLDs
+        ]
+        for name, email, firm in shapes:
+            Contact.all_objects.create(user=user, name=name, email=email,
+                                       firm=firm)
+
+        expected = self._full_scan(user)
+        assert expected, "the matrix must contain pairs or it proves nothing"
+        assert self._blocked(user) == expected
+
+    def test_the_scan_no_longer_compares_every_pair(self, user, monkeypatch):
+        """The point of the change, stated as a count rather than a clock.
+
+        Sixty rows sharing no name and no mailbox are 1,770 unordered pairs;
+        the blocked scan compares none of them. A wall-clock assertion would
+        flake on a busy machine, so this counts the calls into the rung."""
+        from capture import discovery
+
+        for i in range(60):
+            Contact.all_objects.create(
+                user=user, name=f"Person{i:03d} Surname{i:03d}",
+                email=f"person{i:03d}@firm{i:03d}.com",
+            )
+
+        calls = []
+        real = discovery.duplicate_evidence
+
+        def counting(a, b):
+            calls.append((a.id, b.id))
+            return real(a, b)
+
+        monkeypatch.setattr(discovery, "duplicate_evidence", counting)
+        assert merge_service.candidate_pairs(user) == []
+        assert calls == [], (
+            f"{len(calls)} comparisons for 60 rows that share neither a name "
+            f"nor a mailbox — the unblocked scan made 1,770."
+        )

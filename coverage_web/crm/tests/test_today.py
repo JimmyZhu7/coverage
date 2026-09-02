@@ -1865,6 +1865,90 @@ def test_today_does_not_run_more_queries_as_the_network_grows(client):
 
 
 # ---------------------------------------------------------------------------
+# The OTHER axis: open roles (2026-09-01)
+#
+# The guard above varies CONTACTS, and `_a_silent_today_does_not_grow_its_
+# query_count_with_target_firms` varies FIRMS. Today's real N+1 varied with
+# neither: the ribbon's "names your year and still unsaved" cell folds every
+# open campus role on the board and asks `directory.views._eligibility` about
+# each one, and that verdict reads `opp.firm.sponsors` for every posting whose
+# own text is silent on sponsorship. With no `select_related("firm")` on the
+# queryset that is one SELECT per ROLE.
+#
+# Measured on the founder's live board the morning this test was written:
+# 1,332 firm SELECTs, 1,397 queries for one Today render, 373 ms in that one
+# block. Both existing guards were green throughout, because their fixtures
+# keep the board at a handful of roles. This one grows the board instead.
+# ---------------------------------------------------------------------------
+def _today_query_count_for_roles(client, user, n_roles: int) -> int:
+    """Today's query count with `n_roles` open campus roles at the user's own
+    target firms, every one of them silent on sponsorship in a market the user
+    needs sponsored — which is exactly the shape that made `_eligibility`
+    reach for the firm row."""
+    from django.db import connection, reset_queries
+    from django.test import override_settings
+
+    from directory.models import Opportunity
+
+    user.class_year = 2028
+    user.work_authorization = {"us": "sponsorship"}
+    user.save(update_fields=["class_year", "work_authorization"])
+
+    firms = [
+        Firm.objects.create(slug=f"rf-{user.pk}-{i}", name=f"RF {i}",
+                            sponsors={"us": "no"})
+        for i in range(4)
+    ]
+    for f in firms:
+        UserFirm.all_objects.create(user=user, firm=f, tier=1)
+    for i in range(n_roles):
+        Opportunity.objects.create(
+            firm=firms[i % 4], url=f"https://rf.example/{user.pk}/{i}",
+            # Distinct titles: repeat listings at one firm fold into one row
+            # (`directory.dupes`), and a fixture that folded would grow the
+            # board without growing the loop under test.
+            title=f"2027 Summer Analyst {i:03d}", bucket="internship",
+            status="open", region="us", sponsorship="unknown",
+            class_year="2028",
+        )
+
+    client.force_login(user)
+    client.get(reverse("crm:week"))          # warm
+    with override_settings(DEBUG=True):
+        reset_queries()
+        client.get(reverse("crm:week"))
+        return len(connection.queries)
+
+
+def test_today_does_not_run_more_queries_as_the_board_grows(client):
+    """The budget on the axis the other two could not see.
+
+    Five roles against fifty. The count must not move at all: every extra
+    query here is a per-role database round trip, and the founder's board has
+    16,029 open rows to multiply it by."""
+    few = _today_query_count_for_roles(
+        client, _user("q-few-roles@example.com", weekly_touch_goal=14), 5)
+    many = _today_query_count_for_roles(
+        client, _user("q-many-roles@example.com", weekly_touch_goal=14), 50)
+    assert many == few, (
+        f"Today ran {few} queries for 5 open roles but {many} for 50 — "
+        f"{many - few} extra for 45 extra roles. That is the eligibility "
+        f"loop fetching a firm per posting; `campus` in `crm.today."
+        f"_dashboard_context` needs its `select_related(\"firm\")`."
+    )
+
+
+def test_the_eligible_unsaved_cell_still_counts_what_it_should(client):
+    """The join must not change the answer. Fifty roles, all stating the
+    user's own class year, none of them saved."""
+    user = _user("q-roles-count@example.com", weekly_touch_goal=14)
+    _today_query_count_for_roles(client, user, 50)
+    ctx = _dashboard_context(user)
+    assert ctx["dash"]["eligible_unsaved"] == 50
+    assert ctx["dash"]["at_your_firms"] == 50
+
+
+# ---------------------------------------------------------------------------
 # Staleness decay for the critical lane.
 #
 # THE MEASURED BUG (founder's live queue, 2026-08-24). Daily cap 3, and all

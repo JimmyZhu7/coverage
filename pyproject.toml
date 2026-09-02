@@ -18,6 +18,12 @@ dev = [
     "pytest>=8.3",
     "pytest-django>=4.9",
     "pytest-cov>=6.0",
+    # Pinned, not floated: xdist decides how tests are distributed across
+    # processes, and a resolver picking a different scheduler between two
+    # machines is exactly the kind of difference that turns "green here, red
+    # there" into a day of bisecting. It changes nothing unless `-n` is
+    # passed — see the test section of README.md.
+    "pytest-xdist==3.8.0",
 ]
 
 # This root project is a virtual workspace anchor, not an installable package.
@@ -44,4 +50,25 @@ python_files = ["test_*.py", "*_test.py", "tests.py"]
 # regression tests pin load-bearing behavior), connectors (ATS parsing).
 testpaths = ["coverage_web", "coverage_domain", "coverage_connectors"]
 pythonpath = ["coverage_web"]
+# NOT `-m "not slow and not stress"`. The gate is the FULL suite: a default
+# that quietly skipped 4,000 cases would mean "pytest passed" no longer means
+# what every commit in this repo has meant by it. The markers below are opt-
+# OUT, spelled on the command line by a developer who knows what they are
+# trading away (README.md, "Running the suite").
 addopts = "-ra"
+markers = [
+    # Auto-applied by the root conftest to every `test_stress_*` module — the
+    # parametrised matrices. 4,006 of the suite's 9,296 cases and 54 s of its
+    # 421 s, so they inflate the headline count far more than the clock.
+    "stress: a generated matrix over one pure function or invariant",
+    # Auto-applied by the root conftest to every test that takes the `client`
+    # fixture. Those are the full page renders with a per-test fixture world,
+    # and they are where the suite's time actually goes: 1,369 tests averaging
+    # ≥100 ms is 251 s of the run.
+    "slow: renders a page through the Django test client",
+    # Hand-applied, and the reason this list exists at all: the 12
+    # `PytestUnknownMarkWarning`s a plain run used to print came from
+    # `coverage_connectors/tests/test_live_smoke.py`, which is deselected by
+    # its own conftest unless a network run is asked for.
+    "live: hits a real ATS over the network; never runs in a normal suite",
+]

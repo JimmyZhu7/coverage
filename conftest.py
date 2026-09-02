@@ -31,6 +31,36 @@ def pytest_configure(config):
         settings.DATABASES[alias]["CONN_MAX_AGE"] = 0
 
 
+def pytest_collection_modifyitems(items):
+    """Apply `stress` and `slow` by shape, so nobody has to remember to.
+
+    Both markers exist to let a developer run `-m "not slow and not stress"`
+    for a fast inner loop (README.md), and both are DERIVED rather than hand-
+    written, because a hand-written marker is a marker that goes stale: a new
+    `test_stress_*` module or a new page-render test would silently land in
+    the fast run and make it slow again, and nothing would ever say so.
+
+    `stress` — the file is named `test_stress_*`. That is already this repo's
+    naming convention for a generated matrix over a pure function, and the
+    audit that motivated this counted 4,006 such cases (43% of the suite).
+
+    `slow` — the test takes the `client` fixture, i.e. it renders a page
+    through the Django test client with a fixture world built per test. That
+    is the suite's actual clock: the ≥100 ms bucket is 1,369 tests and 251 s
+    of a 421 s run, and it is very nearly the same set. `fixturenames` is the
+    resolved closure, so a test reaching the client through a wrapper fixture
+    (`logged_in`, `world`) is caught too — which is the point.
+
+    Marks are ADDED, never replaced: a test that already carries `slow` by
+    hand keeps it, and pytest ignores a duplicate.
+    """
+    for item in items:
+        if item.path is not None and item.path.name.startswith("test_stress_"):
+            item.add_marker(pytest.mark.stress)
+        if "client" in getattr(item, "fixturenames", ()):
+            item.add_marker(pytest.mark.slow)
+
+
 @pytest.fixture(autouse=True)
 def _no_live_anthropic_calls(settings):
     """Blank `ANTHROPIC_API_KEY` for every test in the suite.
