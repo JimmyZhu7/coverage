@@ -276,12 +276,42 @@ def _fetch_card_pages(first_url: str, first_html: str) -> tuple[list[dict], bool
     return rows, True
 
 
+#: The board's own header text for the location column, in the order it is
+#: trusted. Oleeo lets each tenant name its own columns, and they do not
+#: agree: Bank of America, Morgan Stanley and Evercore ship "City";
+#: nomuracampus ships "Location". Reading only "City" cost every Nomura row
+#: its location — measured 2026-09-01 on the founder's data, 56 rows carried
+#: a non-empty "Location" cell and a blank `location` field, and were charged
+#: `W_REGION_UNKNOWN` for our own ignorance rather than the board's silence.
+#: The worst of them was "2027 - Discover Nomura Programme - Insight
+#: Programme", the founder's number one pick at 90 points, sitting at region
+#: "" while its own row said London.
+#:
+#: This is a read of the board's own labelled column, not a guess: nothing
+#: here infers a location from prose, and a board that ships neither label
+#: still yields "" (P1 — the events boards carry no location column at all
+#: and must keep saying nothing).
+_LOCATION_COL_LABELS = ("City", "Location")
+
+
+def _location(cols: dict) -> str:
+    """The location the board itself stated, under whichever label it uses.
+
+    "City" stays first so the four tenants that ship it are bit-for-bit
+    unchanged; a tenant shipping both would still read as it does today."""
+    for label in _LOCATION_COL_LABELS:
+        value = (cols.get(label) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _normalize(row: dict, board: TalnetBoard) -> Opportunity:
     cols = row.get("cols", {})
     return Opportunity(
         firm=board.firm,
         title=row["title"],
-        location=cols.get("City", ""),
+        location=_location(cols),
         url=canonical_url(row["url"]),
         source="talnet",
         deadline=_dmy_to_iso(cols.get("Registration Deadline", "")),

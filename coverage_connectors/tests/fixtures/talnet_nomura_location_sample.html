@@ -1,0 +1,57 @@
+<!-- Trimmed, hand-reduced sample of the nomuracampus.tal.net jobs-board
+     response (.../candidate/jobboard/vacancy/1/adv/ shape).
+
+     Reconstructed from the rows this board actually delivered on
+     2026-07-23, the last run before the tenant switched on Oleeo Protect
+     (see docs/research/talnet-2026-09.md). The `id`, `url`, `title` and
+     `cols` of every row below are the verbatim values `_parse_table`
+     stored in `Opportunity.raw` on that run — including the Discover
+     Nomura row, id 1478, which is the founder's number one pick and which
+     carried "Location London" while its `location` column sat blank.
+
+     The point of this fixture is the header row. Nomura labels its
+     location column "Location"; Bank of America, Morgan Stanley and
+     Evercore label the same column "City" (see talnet_jobs_sample.html).
+     `_normalize` read only "City", so every row off this board lost its
+     location and was charged W_REGION_UNKNOWN for our own ignorance. -->
+<html>
+<body>
+<table class="search_results_list" summary="results match!">
+  <thead>
+    <tr class="opp_">
+      <th class="comm_list_thead">Title</th>
+      <th class="comm_list_thead">Location</th>
+      <th class="comm_list_thead">Application Deadline</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="opp_1478 search_res details_row" data-oppid="1478" data-lat="" data-lng="" data-distance="" data-title="2027 - Discover Nomura Programme - Insight Programme">
+      <td class="comm_list_tbody">
+        <a class="subject" href="https://nomuracampus.tal.net/vx/lang-en-GB/mobile-0/appcentre-1/brand-4/xf-d7800275960b/candidate/so/pm/1/pl/1/opp/1478-2027-Discover-Nomura-Programme-Insight-Programme/en-GB">
+          2027 - Discover Nomura Programme - Insight Programme
+        </a>
+      </td>
+      <td class="comm_list_tbody">
+        London
+      </td>
+      <td class="comm_list_tbody">
+        10 Jan 2027
+      </td>
+    </tr>
+    <tr class="opp_1528 search_res details_row" data-oppid="1528" data-lat="" data-lng="" data-distance="" data-title="2027 Investment Banking Graduate Program, Singapore">
+      <td class="comm_list_tbody">
+        <a class="subject" href="https://nomuracampus.tal.net/vx/lang-en-GB/mobile-0/appcentre-1/brand-4/xf-d7800275960b/candidate/so/pm/1/pl/1/opp/1528-2027-Investment-Banking-Graduate-Program-Singapore/en-GB">
+          2027 Investment Banking Graduate Program, Singapore
+        </a>
+      </td>
+      <td class="comm_list_tbody">
+        Singapore
+      </td>
+      <td class="comm_list_tbody">
+        31 Dec 2026
+      </td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>
