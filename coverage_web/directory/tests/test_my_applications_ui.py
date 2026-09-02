@@ -114,6 +114,31 @@ def test_every_stage_reaches_the_template_including_the_empty_ones(client, pipel
 
 
 @pytest.mark.django_db
+def test_the_view_toggle_sits_in_the_same_slot_opportunities_uses(client, pipeline):
+    """2026-09-02, the founder's own report: "this button should be at the
+    same spot on the screen if I click into my application." Before, this
+    page ran the Browse/My-Applications toggle as its own standalone,
+    centred band below a taller title block; Opportunities already put the
+    identical toggle beside its title, in `.pagehead-actions`, because it is
+    a page-level scope switch and that is the slot every other page-level
+    action uses. Same markup now, so the same CSS positions it the same way
+    on both pages -- this only has to prove the markup match, not measure
+    pixels a Django test client cannot render."""
+    body = client.get(reverse("my_applications")).content.decode()
+
+    header = re.search(r'<header class="pagehead">.*?</header>', body, re.S)
+    assert header, "the toggle is not inside the shared pagehead any more"
+    assert '<div class="pagehead-actions">' in header.group(0), (
+        "the toggle left the actions slot Opportunities' own header uses"
+    )
+    assert 'class="subnav scope-tabs standalone"' not in body, (
+        "the old standalone band is back — it centred where Opportunities "
+        "right-aligns, and cost the page an extra 42px above the toggle"
+    )
+    assert 'aria-current="page">My Applications<' in header.group(0)
+
+
+@pytest.mark.django_db
 def test_stage_bars_are_sized_against_the_busiest_stage(client, pipeline):
     """Hierarchy by size, not by colour: a stage holding twice as much gets
     twice the bar. An empty stage gets none of it."""

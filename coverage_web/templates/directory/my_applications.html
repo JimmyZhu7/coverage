@@ -5,6 +5,13 @@
 
 {% block head %}
 <style>
+  /* Same top gap as Opportunities, this page's twin above the tabs (see the
+     header's own comment). `.page` alone is --s7 (48px); Opportunities gets
+     --s5 (24px) from a rule scoped to directory/_styles.html, which this
+     page deliberately does not load elsewhere in this file. Restated here
+     rather than pulling that whole stylesheet in for one property. */
+  .page { padding-top: var(--s5); }
+
   /* ======================================================================
      MY APPLICATIONS — data-dense dashboard.
 
@@ -348,12 +355,30 @@
 
 {% block content %}
 <div class="page">
-  {% include "_pagehead.html" with eyebrow="Your pipeline" title="My Applications" sub="Every role you saved or applied to, moving through the stages." %}
-
-  <nav class="subnav scope-tabs standalone">
-    <a href="{% url 'opportunities' %}">Browse Openings</a>
-    <a href="{% url 'my_applications' %}" aria-current="page">My Applications</a>
-  </nav>
+  {% comment %}
+  Written out rather than {% include %}d, matching `opportunities.html`'s own
+  header exactly (2026-09-02, the founder's own report: "this button should
+  be at the same spot on the screen if I click into My Applications"). Both
+  pages carry the identical Browse/My-Applications toggle, so it belongs in
+  the identical slot -- `.pagehead-actions`, beside the title -- rather than
+  as a second, standalone band with its own centering and its own 42px-plus-
+  24px of vertical room. Measured before: the toggle sat 105px from the top
+  on Opportunities and 211px on My Applications, right-aligned on one page
+  and centred on the other. Same markup now, so the same measurement holds
+  on both. `eyebrow` and `sub` never rendered here -- `_pagehead.html`'s own
+  note says both are ignored -- so nothing that was visible is dropped.
+  {% endcomment %}
+  <header class="pagehead">
+    <div class="pagehead-text">
+      <h1 class="pagehead-title">My Applications</h1>
+    </div>
+    <div class="pagehead-actions">
+      <nav class="subnav scope-tabs" aria-label="Opportunities views">
+        <a href="{% url 'opportunities' %}">Browse Openings</a>
+        <a href="{% url 'my_applications' %}" aria-current="page">My Applications</a>
+      </nav>
+    </div>
+  </header>
 
   {% include "directory/_apps_body.html" %}
 
