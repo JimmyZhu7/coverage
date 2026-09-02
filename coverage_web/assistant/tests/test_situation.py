@@ -1,6 +1,12 @@
-"""Tests for `assistant.situation.build_situation`: the three event types,
+"""Tests for `assistant.situation.build_situation`: the two event types,
 the tenant-scoped join that decides which opportunities are even in play,
 the never-raises posture, and the caps.
+
+A third type, `role_closed`, existed until 2026-09-02 and led the flat
+list. The tests that pinned it are rewritten below rather than deleted:
+what used to assert that a close is reported now asserts that it is
+refused, because that is the behaviour the module owes the Today page.
+`assistant.situation`'s module docstring carries the four measurements.
 
 Cross-tenant isolation (another student's tracked-opportunity changes never
 leaking into this student's snapshot) is pinned in
@@ -64,7 +70,7 @@ def _change(opp, field, old, new, *, stage="reverify", observed_at=None):
 
 
 def _empty():
-    return {"deadline_moved": [], "role_closed": [], "new_role_at_known_firm": [], "events": []}
+    return {"deadline_moved": [], "new_role_at_known_firm": [], "events": []}
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +87,7 @@ def test_a_failure_degrades_to_the_same_empty_shape_never_raises(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(situation, "_role_closed_events", boom)
+    monkeypatch.setattr(situation, "_deadline_moved_events", boom)
 
     result = situation.build_situation(_user())
 
@@ -179,9 +185,62 @@ def test_deadline_moved_is_capped_at_max_per_type():
 
 
 # ---------------------------------------------------------------------------
-# role_closed
+# What the strip now REFUSES to say.
+#
+# These three replace `test_a_tracked_role_that_closed_is_reported`,
+# `test_a_role_that_closed_and_reopened_is_not_reported` and
+# `test_a_close_on_an_untracked_role_is_not_reported`, which pinned a
+# `role_closed` event kind that existed until 2026-09-02. Their premise was
+# that a confirmed close is news; the founder's screenshot and three
+# measurements say it is an obituary occupying a slot on a strip whose whole
+# job is to name what to do next (module docstring). The old assertions are
+# rewritten rather than deleted because the module still READS close rows —
+# `_deadline_moved_events` gates on them — so "closes reach this code and
+# produce no card" is a live guarantee that needs pinning, not an absence.
 # ---------------------------------------------------------------------------
-def test_a_tracked_role_that_closed_is_reported():
+def test_a_tracked_role_that_closed_produces_no_card_at_all():
+    """The exact row the founder screenshotted: a role he had APPLIED to,
+    confirmed closed by the scraper, printed above the openings. There is
+    nothing he can do about it, and `directory.views._posting_closed_note`
+    already marks it on the pipeline with copy that knows he applied."""
+    user = _user()
+    opp = _opp(_firm(), status="closed")
+    _track(user, opp, applied_status="submitted")
+    _change(opp, "status", "open", "closed")
+
+    result = situation.build_situation(user)
+
+    assert result == _empty(), (
+        "a confirmed close produced a card. The strip may only carry news "
+        "the student can act on today."
+    )
+
+
+def test_no_stage_of_the_pipeline_earns_a_close_a_card():
+    """The rescue that measurement retired. "Keep the kind, but only where
+    they APPLIED" is the obvious way to save a close, and the founder's one
+    complaint was about a role whose `applied_status` was `submitted` — the
+    population the rescue would have preserved is the population that
+    complained. So every stage is silent, not just the saved ones."""
+    user = _user()
+    firm = _firm()
+    for i, stage in enumerate(("", "saved", "submitted", "interview", "offer")):
+        opp = _opp(firm, url=f"https://example.com/closed-{i}", status="closed")
+        _track(user, opp, applied_status=stage)
+        _change(opp, "status", "open", "closed")
+
+    result = situation.build_situation(user)
+
+    assert result["events"] == [], (
+        f"a close produced a card for one of the pipeline stages: "
+        f"{[e.get('kind') for e in result['events']]}"
+    )
+
+
+def test_the_snapshot_has_no_role_closed_key_to_read_back():
+    """Not merely empty: absent. A key that is always `[]` invites a caller
+    to render it and a reader to wonder which branch fills it. The two kinds
+    the snapshot carries are the two it can defend."""
     user = _user()
     opp = _opp(_firm(), status="closed")
     _track(user, opp)
@@ -189,35 +248,8 @@ def test_a_tracked_role_that_closed_is_reported():
 
     result = situation.build_situation(user)
 
-    assert len(result["role_closed"]) == 1
-    assert result["role_closed"][0]["opportunity_id"] == opp.id
-    assert result["role_closed"][0]["firm"] == "Goldman Sachs"
-
-
-def test_a_role_that_closed_and_reopened_is_not_reported():
-    """`directory.deadlines.is_posting_closed` gates the row against the
-    posting's LIVE status: a role that closed and then reopened inside the
-    same window is not news the student needs to act on — the scraper
-    already resolved it on its own, and reporting it as closed would be
-    stale by the time the student reads the card."""
-    user = _user()
-    opp = _opp(_firm(), status="open")  # reopened: live status is open again
-    _track(user, opp)
-    _change(opp, "status", "open", "closed")
-
-    result = situation.build_situation(user)
-
-    assert result["role_closed"] == []
-
-
-def test_a_close_on_an_untracked_role_is_not_reported():
-    user = _user()
-    opp = _opp(_firm(), status="closed")
-    _change(opp, "status", "open", "closed")
-
-    result = situation.build_situation(user)
-
-    assert result["role_closed"] == []
+    assert "role_closed" not in result
+    assert set(result) == {"deadline_moved", "new_role_at_known_firm", "events"}
 
 
 # ---------------------------------------------------------------------------
@@ -426,17 +458,22 @@ def test_a_closed_new_role_is_not_reported():
 # ---------------------------------------------------------------------------
 # The flat `events` list: priority order and the overall cap.
 # ---------------------------------------------------------------------------
-def test_events_are_ordered_role_closed_then_deadline_moved_then_new_role():
-    """Stated once in the module docstring: a closed role wastes ongoing
-    effort, a moved deadline risks a missed window, a new role is upside —
-    in decreasing order of how much it costs the student to miss it."""
+def test_events_are_ordered_deadline_moved_then_new_role():
+    """Rewritten 2026-09-02. This asserted `role_closed` first, on the
+    argument that a close costs the student the most to miss. That premise
+    is retired: a close costs them nothing to miss because there is nothing
+    to miss, and leading with it pushed the openings down a three-card
+    strip. Both surviving kinds are actionable, so urgency alone orders
+    them — a moved deadline is a window closing on a role they already
+    want, a new role is upside they did not have. The closed role stays in
+    the fixture so the test also proves it earns no slot anywhere."""
     user = _user()
     firm = _firm()
     Contact(user=user, firm=firm, name="A Banker").save()
     _opp(firm, url="https://example.com/old", first_seen=timezone.now() - timedelta(days=60))
 
     closed = _opp(firm, url="https://example.com/closed", status="closed")
-    _track(user, closed)
+    _track(user, closed, applied_status="submitted")
     _change(closed, "status", "open", "closed")
 
     moved = _opp(firm, url="https://example.com/moved")
@@ -460,10 +497,11 @@ def test_events_are_ordered_role_closed_then_deadline_moved_then_new_role():
     result = situation.build_situation(user)
 
     assert [e["kind"] for e in result["events"]] == [
-        "role_closed", "deadline_moved", "new_role_at_known_firm",
+        "deadline_moved", "new_role_at_known_firm",
     ]
     ids = [e["opportunity_id"] for e in result["events"]]
     assert len(ids) == len(set(ids)), "the ordering fixture is reporting one role twice"
+    assert closed.id not in ids, "the closed role took a slot from an opening"
 
 
 # ---------------------------------------------------------------------------
@@ -475,9 +513,13 @@ def test_events_are_ordered_role_closed_then_deadline_moved_then_new_role():
 # itself.
 # ---------------------------------------------------------------------------
 
-def test_a_role_that_closed_and_moved_its_deadline_reports_once_as_closed():
-    """The exact shipped bug. Both rows were real; together they were
-    nonsense. Closed is the terminal fact and wins."""
+def test_a_role_that_closed_and_moved_its_deadline_says_nothing_at_all():
+    """Rewritten 2026-09-02. This asserted the pair collapsed to the single
+    `role_closed` card, "closed is the terminal fact and wins". With that
+    kind gone the same fixture must now go silent entirely: the close earns
+    no card, and `_deadline_moved_events` still refuses to advertise a
+    window on a dead posting. Both halves of the original contradiction are
+    still refused, which is what this test was always protecting."""
     user = _user()
     firm = _firm(name="Bank of America", slug="bank-of-america")
     opp = _opp(
@@ -485,20 +527,18 @@ def test_a_role_that_closed_and_moved_its_deadline_reports_once_as_closed():
         title="Campus Insight Forum: The Power to Lead - Fall 2026",
         status="closed",
     )
-    _track(user, opp)
+    _track(user, opp, applied_status="submitted")
     _change(opp, "status", "open", "closed")
     _change(opp, "deadline", "2026-08-21", "2026-08-31")
 
     result = situation.build_situation(user)
 
     kinds = [e["kind"] for e in result["events"]]
-    assert kinds == ["role_closed"], (
-        f"one role produced {len(kinds)} cards ({kinds}). A student saw the "
-        "same forum reported as closed and as having moved its deadline into "
-        "the future, side by side."
+    assert kinds == [], (
+        f"one dead role produced {len(kinds)} cards ({kinds}). A student saw "
+        "the same forum reported as closed and as having moved its deadline "
+        "into the future, side by side."
     )
-    ids = [e["opportunity_id"] for e in result["events"]]
-    assert len(ids) == len(set(ids)), "the flat events list repeats a role"
 
 
 def test_a_moved_deadline_on_a_closed_posting_is_not_reported_at_all():
@@ -533,22 +573,28 @@ def test_a_moved_deadline_on_a_still_open_posting_is_untouched():
 
 
 def test_the_per_kind_lists_are_not_pruned_by_the_merge():
-    """Only the flat `events` list is deduplicated. A caller asking for
-    `role_closed` wants every close, not the ones that survived a merge."""
+    """Rewritten 2026-09-02. The old fixture proved this with two closes,
+    the kind that no longer exists; the guarantee itself is untouched, so it
+    is restated on the kind that does. Only the flat `events` list is
+    deduplicated — a caller asking for `deadline_moved` wants every move,
+    not the ones that survived a merge. Here one role both appeared this
+    week and moved its deadline, so the merge drops it from `events` once,
+    and the per-kind lists still carry it twice."""
     user = _user()
     firm = _firm()
-    closed_and_moved = _opp(firm, url="https://example.com/both", status="closed")
-    _track(user, closed_and_moved)
-    _change(closed_and_moved, "status", "open", "closed")
+    Contact(user=user, firm=firm, name="A Banker").save()
+    _opp(firm, url="https://example.com/old",
+         first_seen=timezone.now() - timedelta(days=60))
 
-    other_closed = _opp(firm, url="https://example.com/other", status="closed")
-    _track(user, other_closed)
-    _change(other_closed, "status", "open", "closed")
+    both = _opp(firm, url="https://example.com/both", first_seen=timezone.now())
+    _track(user, both)
+    _change(both, "deadline", "2026-08-01", "2026-08-20")
 
     result = situation.build_situation(user)
 
-    assert len(result["role_closed"]) == 2
-    assert len(result["events"]) == 2
+    assert len(result["deadline_moved"]) == 1
+    assert len(result["new_role_at_known_firm"]) == 1
+    assert [e["kind"] for e in result["events"]] == ["deadline_moved"]
 
 
 # ---------------------------------------------------------------------------

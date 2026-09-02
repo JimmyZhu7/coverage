@@ -4048,7 +4048,16 @@ def week(request: HttpRequest) -> HttpResponse:
          # queue-card cap uses (assistant.brief.MAX_SITUATION_SUMMARIZED),
          # so the sentence above never references a 4th change nobody can
          # see a card for. `situation["events"]` is already priority-ordered
-         # (role_closed, then deadline_moved, then new_role_at_known_firm).
+         # (deadline_moved, then new_role_at_known_firm).
+         #
+         # THREE SLOTS, AND EVERY KIND THAT CAN FILL ONE IS ACTIONABLE. The
+         # cap is only defensible if the ranking above it is: a strip that
+         # spent a slot on news the student can do nothing about was
+         # screenshotted by the founder on 2026-09-02 doing exactly that,
+         # an obituary in the first of two cards. `assistant.situation` no
+         # longer emits that kind at all and says why in its docstring, so
+         # the number here can stay 3 without being a guess about which
+         # third of the news survives.
          "situation_events": situation.get("events", [])[:3],
          # Signup lands on the /welcome/ wizard, but nothing ever looked at
          # whether it was FINISHED: close the tab at step one and every later
