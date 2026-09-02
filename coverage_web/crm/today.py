@@ -2188,8 +2188,15 @@ def _recent_activity(user, *, as_of) -> list[dict]:
         # shape rather than assume it can't happen (a chat hand-logged with
         # tomorrow's date, or a caller whose clock runs behind the touch's),
         # so the rail matches that posture instead of trusting the query.
+        #
+        # "10d", NOT "10d ago" (2026-09-02). The card this renders in is
+        # titled Recent Activity, so "ago" restated the heading on every one
+        # of six rows and said nothing the heading had not. It also settles
+        # the rail's one shared reading rule, which `_next_deadlines` states
+        # from the other side: a bare "Nd" anywhere in this rail is elapsed
+        # time, and a future distance carries "in".
         days = _calendar_days_ago(ts, as_of=as_of)
-        return f"{days}d ago" if days and days > 0 else "today"
+        return f"{days}d" if days and days > 0 else "today"
 
     return [
         {
@@ -2541,7 +2548,14 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
             "event_kind": fd.event_kind,
             "date": fd.date,
             "days": days,
-            "when": "today" if days == 0 else ("1d" if days == 1 else f"{days}d"),
+            # "in 58d", NOT "58d" (2026-09-02). This row also carries
+            # `open_run`, whose "longest 24d" is an ELAPSED figure counting UP
+            # from a day in the past. Two bare day counts an inch apart,
+            # pointing in opposite directions of time, is the whole defect the
+            # founder saw on this card. The rail's rule now: a bare "Nd" is
+            # time already spent, and a future distance says "in". Nothing is
+            # dropped and no forecast is added; only the direction is spelt.
+            "when": "today" if days == 0 else f"in {days}d",
             # Mirrors the cadence engine's own urgency bar, so the colour here
             # and the lane a contact lands in cannot disagree.
             "urgent": days <= 7,

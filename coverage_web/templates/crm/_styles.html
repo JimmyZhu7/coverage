@@ -154,9 +154,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s5); align-items: start; transition: opacity var(--t-fast); }
   #today-cockpit.htmx-request .cockpit { opacity: 0.55; }
   .cockpit-main { min-width: 0; }
-  /* Four cards, bounded. Laying the pace ring sideways saved ~90px and the
-     activity feed was trimmed, but the rail still measures ~950px with a full
-     schedule and four deadlines — taller than a 900px viewport. A sticky
+  /* Four cards, bounded. Laying the pace ring sideways saved ~90px, deleting
+     it saved ~50px more, the 2026-09-02 copy pass took another ~90px out of
+     Schedule and the unplaced note, and the activity feed was trimmed — but
+     the rail still measures well past 800px with a full schedule and four
+     deadlines, taller than a 900px viewport once the header is off it. A sticky
      column taller than the viewport pins its top and leaves its bottom
      permanently unreachable, so the cap stays: `max-height` + `auto` means a
      scrollbar appears only on the viewports that actually need one, and tall
@@ -402,28 +404,34 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @media (pointer: coarse) { .act-ghost { min-width: 44px; } }
   .act-ghost:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
 
-  /* Pace — a weekly-goal donut that fills on load, laid out SIDEWAYS. The
-     ring was 132px square with the figure centred in it and a caption below,
-     which spent a third of the rail's height on one fraction and was what
-     pushed the rail past the viewport. Same ring, half the height. */
+  /* Pace — the week's count, its label, its ask, and eight weeks of memory.
+     NO RING as of 2026-09-02. It was 132px square, then 56px sideways, and
+     the size was never the complaint: it drew `done / goal` a second time,
+     less precisely than the figure beside it, and clamped at 100 — so a week
+     over goal closed the arc into a full circle indistinguishable from the
+     empty track behind it. The sparkline below carries eight weeks where the
+     ring carried one, so the sparkline is the picture that stayed and
+     `.pace-ring` / `.pace-track` / `.pace-fill` / `@keyframes pace-grow`
+     are deleted rather than left as dead rules.
+
+     The figure and the note are the card's direct children now; the flex row
+     that held the ring beside the text had one child left once the ring went
+     and was removed with it. */
   .pace-card { padding: var(--s4) var(--s5); }
-  .pace { display: flex; align-items: center; gap: var(--s4); }
-  .pace-ring { width: 56px; height: 56px; flex: none; transform: rotate(-90deg); }
-  .pace-track { fill: none; stroke: var(--band-cold-s); stroke-width: 12; }
-  .pace-fill { fill: none; stroke: var(--accent); stroke-width: 12; stroke-linecap: round;
-    stroke-dasharray: 327; stroke-dashoffset: calc(327 - 327 * var(--pct) / 100);
-    animation: pace-grow 950ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-  .pace-fill.is-hit { stroke: var(--ok); }
-  @keyframes pace-grow { from { stroke-dashoffset: 327; } }
-  .pace-text { min-width: 0; }
-  .pace-figure { margin: 0; display: flex; align-items: baseline; gap: var(--s1); }
+  .pace-figure { margin: 0; display: flex; align-items: baseline;
+    flex-wrap: wrap; gap: var(--s1); }
   .pace-done { font: var(--w-black) var(--fs-figure)/1 var(--font-display); color: var(--ink);
     font-variant-numeric: tabular-nums; }
   .pace-goal { color: var(--ink-3); font-family: var(--font-mono);
     font-variant-numeric: tabular-nums; font-size: var(--fs-s); }
-  .pace-lbl { font-size: var(--fs-micro); color: var(--ink-3);
-    text-transform: uppercase; letter-spacing: 0.07em; font-weight: var(--w-med);
-    margin-left: 2px; }
+  /* `nowrap`, so the label can be pushed to its own line but can never break
+     apart in the middle of itself. Measured on the widest week the figure
+     shows (39/14): the pair needs 204px against 268px inside the padded rail
+     card, so it does not wrap at any width the rail is laid out at. The 72px
+     the ring and its gap used to take is exactly what it was short of. */
+  .pace-lbl { font-size: var(--fs-micro); margin-left: 2px;
+    color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.07em;
+    font-weight: var(--w-med); white-space: nowrap; }
   .pace-note { color: var(--ink-2); font-size: var(--fs-xs); margin: 3px 0 0; }
   .pace-note b { color: var(--ink); font-family: var(--font-mono);
     font-variant-numeric: tabular-nums; font-weight: var(--w-bold); }
@@ -454,11 +462,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      about somebody else's clock, and drawing it as a region would claim a
      precision the source (one S&T practitioner rule) does not have. No
      animation of any kind - nothing here changes in response to the reader
-     (P8, and audit-ui.md 15's "a page load is not a state change"). */
-  .daybar-hint { margin: 0 0 var(--s3); display: flex;
-    flex-wrap: wrap; gap: var(--s2); font-size: var(--fs-nano);
-    color: var(--ink-3); }
-  .daybar-hint .dbh b { color: var(--ink-2); font-weight: 600; }
+     (P8, and audit-ui.md 15's "a page load is not a state change").
+
+     ONE ROW PER MARKET (2026-09-02). This was a wrapping flex row of
+     clauses, so two markets rendered as two sentences that broke wherever
+     the card happened to end - four rendered lines of prose above a card
+     whose actual subject is a day's schedule. A list of rows instead: the
+     market and its good window read left, the avoid window reads right, and
+     the row is the same content-left / meta-right shape `.activity-row`
+     uses three cards down. */
+  .daybar-hint { list-style: none; margin: 0 0 var(--s3); padding: 0;
+    display: flex; flex-direction: column; gap: 2px;
+    font-size: var(--fs-nano); color: var(--ink-3); }
+  .dbh { display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--s2); }
+  .dbh b { color: var(--ink-2); font-weight: 600; }
+  /* The good window is the actionable half and gives way first; the avoid
+     window is short, fixed and holds its width. */
+  .dbh-good { min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  .dbh-avoid { flex: none; }
 
   .rail-card { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }
@@ -483,6 +506,28 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .activity-text { flex: 1; min-width: 0; }
   .activity-text a { color: var(--ink); font-weight: var(--w-med); }
   .activity-kind { color: var(--ink-3); }
+  /* The market a deadline belongs to, as a chip (2026-09-02). It used to be
+     an `.activity-kind` span like the event label beside it, separated from
+     the firm and from the label by nothing but a space, so a row ran the
+     firm, the market and the event together with no seam between them —
+     three separate facts that parse as one phrase rather than as three
+     fields. A chip is the seam. It carries exactly one fact, which is the
+     rule for a chip on this page, and it is deliberately the smallest of the
+     three: the firm keeps its link weight, the label stays quiet, and the
+     market only has to be separable, not loud. `market unstated` is a real
+     value here (see `crm.utils.firm_date_market`) so the chip must survive
+     two words.
+
+     NOTE FOR THE NEXT EDITOR OF THIS FILE: these comments are inside a
+     rendered <style> block, so every word here ships in the page body. The
+     first draft of this one quoted the defective row verbatim and broke two
+     `assert "<copy>" not in body` guards in
+     crm/tests/test_contact_facts_strip.py. Describe the old copy; do not
+     reproduce it. */
+  .dl-market { flex: none; font-family: var(--font-mono);
+    font-size: var(--fs-nano); text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px;
+    padding: 1px 4px; }
   /* The open-run line under a deadline. Its own line rather than a third
      inline part: `.activity-text` already carries a firm name plus an event
      label in a ~200px rail column, and a third clause on that line would
@@ -548,7 +593,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .unplaced-firm { flex: none; color: var(--ink-3);
     font-family: var(--font-mono); font-size: var(--fs-micro); }
 
-  /* Below 1024 the rail stacks under the queue, pace ring first. Cards flow
+  /* Below 1024 the rail stacks under the queue, pace first. Cards flow
      in a row while they fit and wrap rather than shrinking. */
   @media (max-width: 1023px) {
     .cockpit { grid-template-columns: 1fr; }
@@ -1981,7 +2026,8 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
   .cd-ai-loading { margin-left: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 
-  /* Eight-week trace under the pace ring. */
+  /* Eight-week trace under the week's figure — the pace card's only
+     picture since the ring came out on 2026-09-02. */
   {% comment %}
   Eight bars with the last one navy, and until now the only place that said
   what the horizontal axis was is the `aria-label` — a screen reader knew the

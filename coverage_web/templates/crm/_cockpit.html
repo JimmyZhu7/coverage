@@ -7,10 +7,23 @@ lanes. Everything the cap held back is one click away under "Up next", with
 the exact count and the policy holding it. Right (`.cockpit-rail`, ordered
 2026-08-31 per the founder's own words: "outreach this week goes on top,
 then deadlines, then unplaced"): a getting-started checklist while setup is
-unfinished, the weekly pace ring, the chats already on the calendar, this
-cycle's deadlines, this week's unplaced arrivals while there are any, and a
+unfinished, the week's pace, the chats already on the calendar, this cycle's
+deadlines, this week's unplaced arrivals while there are any, and a
 recent-activity feed. Re-rendered whole on every quick action so all of it
 stays in sync.
+
+THE COPY RULE FOR EVERY CARD IN THAT RAIL (2026-09-02, the founder reading
+his own screenshots: "the cards are wordy and the spacing is wrong"). The
+pass of 2026-08-31 made every claim state its provenance in prose and the
+sentences stacked. Keep every FACT, cut the EXPLANATION: a fact the student
+acts on is a line, and a fact about where that fact came from is a `title`,
+a chip, or nothing. One idea per line. No sentence a chip could carry. No
+label that repeats the heading directly above it.
+
+AND ONE READING RULE THE RAIL NOW HOLDS THROUGHOUT, because two cards print
+day counts and they used to disagree: a bare "Nd" is time already spent, and
+a distance into the future says "in". See `crm.today._next_deadlines` and
+`crm.today._recent_activity`, which state the two halves of it.
 
 
 WHAT LEADS THIS COLUMN, AND WHY. Read this before moving a section.
@@ -682,7 +695,7 @@ copy exactly once, and this is the once.
     page that is not allowed to manufacture work OR to paper over a real
     empty day. One sentence, nothing else — never the achievement-toned
     "Done for today" banner, which is exactly the copy that read as a
-    saturated pace ring's punchline on a day there was nothing to do.
+    saturated pace card's punchline on a day there was nothing to do.
     {% endcomment %}
     {% if quiet %}
       <div class="empty empty--quiet">
@@ -846,7 +859,7 @@ copy exactly once, and this is the once.
           On a blackout day the cap is not what holds these, so its number is
           not quoted: "pacing out at 5 a day" would count 94 held cards as
           owed at five a morning through Christmas week. Same switch in the
-          "Done for today" line above and the ring's caption in the rail.
+          "Done for today" line above and the pace card's caption in the rail.
           {% endcomment %}
           <span class="upnext-why">{% if blackout %}waiting for {{ blackout_resumes }}{% else %}pacing out at {{ daily_cap }} a day{% endif %}</span>
           <span class="upnext-toggle">Show all</span>
@@ -1078,8 +1091,8 @@ copy exactly once, and this is the once.
 
     FIRST IN THE RAIL, deliberately, while it exists at all: setup is what
     unblocks everything else Today can say to this student, so while any of
-    it is unfinished it outranks even the pace ring. The moment it is
-    finished it removes itself and the ring reclaims the top slot without
+    it is unfinished it outranks even the pace card. The moment it is
+    finished it removes itself and pace reclaims the top slot without
     this template having to know that happened.
     {% endcomment %}
     {% if getting_started %}
@@ -1101,49 +1114,74 @@ copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
-    Pace, laid out sideways. The ring used to be 120px tall with the figure
-    inside it and a caption underneath — a third of the rail's height for one
-    fraction, which is what pushed the rail past the viewport and forced it to
-    grow its own scrollbar. Same ring, same number, one row.
+    Pace. THE RING IS GONE (2026-09-02, the founder on his own screenshot:
+    "too complicated, refine with opus").
+
+    It had been shrunk twice already — 120px with the figure inside it and a
+    caption under, then 56px laid sideways — and shrinking was never the
+    problem. The problem is that this card stated the same week four times:
+    the ring's arc length, the `39/14` figure, the "Weekly goal hit."
+    sentence, and the last bar of the sparkline. On the founder's own
+    screenshot the week was 39 against a goal of 14, so `pace.pct` clamped to
+    100, the arc closed into a complete circle, and the ring rendered as a
+    plain green outline — the one state in which it is literally
+    indistinguishable from its own empty track. A meter that looks identical
+    at 100% and at 0% is not a meter.
+
+    Nothing measured was lost, because the ring measured nothing of its own:
+    it was `pace.done / pace.goal` drawn imprecisely and capped, and both of
+    those numbers are printed beside it to the unit. The sparkline is
+    strictly the better picture — it carries this week AND the eight before
+    it, marks which of them hit goal, and marks which one is now — so the
+    card keeps one visual, not two of the same thing.
+
+    What remains is three things that each say something the others do not:
+    the figure (exactly where you are), the note (what is still owed, or the
+    blackout, or that the goal is hit), and the sparkline (how this week
+    compares to the last eight).
     {% endcomment %}
     <div class="rail-card pace-card">
-      <div class="pace">
-        <svg class="pace-ring" viewBox="0 0 120 120" aria-hidden="true">
-          <circle class="pace-track" cx="60" cy="60" r="52"></circle>
-          <circle class="pace-fill{% if pace.hit %} is-hit{% endif %}" cx="60" cy="60" r="52" style="--pct: {{ pace.pct }}"></circle>
-        </svg>
-        {% comment %}
-        The SVG is decorative; this is the accessible value. It counts only
-        touches YOU logged — replies and state-correction audit rows are not
-        your work and never move this number.
-        {% endcomment %}
-        <div class="pace-text">
-          <p class="pace-figure">
-            <span class="pace-done">{{ pace.done }}</span><span class="pace-goal">/{{ pace.goal }}</span>
-            <span class="pace-lbl">outreach this week</span>
-          </p>
-          <p class="pace-note">
-            {% comment %}
-            "touches" dropped (2026-08-31, the founder's own wording): the
-            bare count reads plainer, and it also retires the pluralize
-            gotcha the old sentence needed a test for -- `pluralize` with
-            no argument yields "touchs", not "touches", which is why the
-            old copy had to spell out `pluralize:"es"` explicitly. Nothing
-            here needs that any more.
+      {% comment %}
+      The number counts only touches YOU logged — replies and
+      state-correction audit rows are not your work and never move it.
 
-            On a blackout day (crm.today.outreach_blackout) the caption names
-            the day outreach resumes instead of a number: "14 more to go" on
-            Dec 24 is the ring owing the student fourteen sends in the one
-            week the page is telling them not to send. The figure and the
-            fill above it stay exactly what they are; only the ask changes.
-            {% endcomment %}
-            {% if pace.hit %}Weekly goal hit.{% elif blackout %}Resumes {{ blackout_resumes }}.{% else %}<b>{{ pace.remaining }}</b> more to go.{% endif %}
-          </p>
-        </div>
-      </div>
-      {% comment %}Eight weeks of the same number the ring shows, so the ring
-      has a memory. Height against the best of (goal, busiest week); filled
-      bars hit goal. Each bar carries its week in the title for hover and in
+      `outreach this week` wrapped onto a second line beside the numeral, and
+      the ring is why. Measured on the founder's own week (39/14, the widest
+      the figure gets) the figure and its label need 204px; the padded card
+      offers 268px on the 320px rail and 299px once the rail stacks. The ring
+      and its gap were taking 72px of that, which is the whole of the
+      shortfall. With the ring gone the pair fits everywhere with room to
+      spare, so the label stays on the figure's line rather than being
+      demoted to its own — one fewer block in a card the founder already
+      read as having too many.
+      {% endcomment %}
+      <p class="pace-figure">
+        <span class="pace-done">{{ pace.done }}</span><span class="pace-goal">/{{ pace.goal }}</span>
+        <span class="pace-lbl">outreach this week</span>
+      </p>
+      <p class="pace-note">
+        {% comment %}
+        "touches" dropped (2026-08-31, the founder's own wording): the
+        bare count reads plainer, and it also retires the pluralize
+        gotcha the old sentence needed a test for -- `pluralize` with
+        no argument yields "touchs", not "touches", which is why the
+        old copy had to spell out `pluralize:"es"` explicitly. Nothing
+        here needs that any more.
+
+        On a blackout day (crm.today.outreach_blackout) the caption names
+        the day outreach resumes instead of a number: "14 more to go" on
+        Dec 24 is the card owing the student fourteen sends in the one
+        week the page is telling them not to send. The figure above stays
+        exactly what it is; only the ask changes.
+        {% endcomment %}
+        {% if pace.hit %}Weekly goal hit.{% elif blackout %}Resumes {{ blackout_resumes }}.{% else %}<b>{{ pace.remaining }}</b> more to go.{% endif %}
+      </p>
+      {% comment %}Eight weeks of the same number the figure shows, so the
+      week has a memory. Since 2026-09-02 this is the card's ONLY picture,
+      the ring above it having been the same fraction drawn twice: this one
+      carries eight weeks where the ring carried one, so it is the one that
+      stayed. Height against the best of (goal, busiest week); filled bars
+      hit goal. Each bar carries its week in the title for hover and in
       aria-label for readers.{% endcomment %}
       <div class="pace-spark" role="img" aria-label="Last 8 weeks:{% for w in pace_history %} {{ w.n }}{% endfor %}">
         {% for w in pace_history %}
@@ -1191,15 +1229,34 @@ copy exactly once, and this is the once.
         because this is the sole carrier of what it says. It renders whether
         or not anything is on the track, since "when is it worth writing" is a
         question about an empty day too.
+
+        ONE ROW PER MARKET, NOT A SENTENCE PER MARKET (2026-09-02, the
+        founder's own reading: "the cards are wordy"). Each market used to
+        render as a full clause — "HK desk good 9p to 10:30p, avoid 12:30a to
+        1:30a around the close" — and two of those, wrapping to four lines,
+        were most of this card before a single scheduled thing appeared.
+
+        "around the close" is gone from the copy and lives in the row's
+        `title` instead. It explains WHY that half hour is bad; it does not
+        add a time to avoid. Once "avoid" carries a window of its own, the
+        clause was the sentence explaining the fact rather than the fact.
+
+        Both windows survive intact — a good window with no avoid window is a
+        different, smaller claim, and this card does not trade a fact for a
+        shorter line. What changed is their shape: the good window is the
+        actionable half so it reads on the left with the market, and the
+        avoid window sits right as a marker, which is the same
+        content-left / meta-right row every other card in this rail uses.
         {% endcomment %}
         {% if daybar.show_hints %}
-          <p class="daybar-hint">
+          <ul class="daybar-hint">
             {% for h in daybar.hints %}
-              <span class="dbh">
-                <b>{{ h.market }} desk</b> good {{ h.good }}, avoid {{ h.avoid }} around the close
-              </span>
+              <li class="dbh" title="Lunchtime on the {{ h.market }} desk. The half hour either side of that market's close is the one to avoid.">
+                <span class="dbh-good"><b>{{ h.market }} desk</b> good {{ h.good }}</span>
+                <span class="dbh-avoid">avoid {{ h.avoid }}</span>
+              </li>
             {% endfor %}
-          </p>
+          </ul>
         {% endif %}
         <ul class="activity">
           {% for r in schedule %}
@@ -1247,8 +1304,18 @@ copy exactly once, and this is the once.
                 blank: `crm.utils.firm_date_market` returns "market unstated"
                 for a row that never said, rather than letting it pass for a
                 date that applies everywhere.
+
+                A CHIP, NOT A THIRD WORD IN A PHRASE (2026-09-02). The market
+                and the event label were both plain `.activity-kind` spans
+                separated by nothing but a space, so the row read "HSBC HK
+                Applications close" — three separate facts (a firm, a market,
+                an event) with no seam, which parses as one confusing phrase
+                and not as three fields. The market is the shortest and most
+                categorical of the three, so it is the one that becomes a
+                chip; the firm keeps its link weight and the event stays the
+                quiet trailing label it was.
                 {% endcomment %}
-                <span class="activity-kind">{{ d.market }}</span>
+                <span class="dl-market">{{ d.market }}</span>
                 <span class="activity-kind">{{ d.label }}</span>
                 {% comment %}
                 HOW LONG THIS FIRM'S PROGRAMME HAS BEEN OPEN, under the
@@ -1264,6 +1331,15 @@ copy exactly once, and this is the once.
                 Absent, not hedged, for a firm below the sample floor. There
                 is no "no data yet" line and no placeholder — the row simply
                 goes back to being what it was, a firm and a countdown.
+
+                WHY THE COUNTDOWN ABOVE NOW SAYS "in 58d" (2026-09-02). This
+                line and that one sat an inch apart reading "58d" and "24d",
+                two identical-looking day counts pointing in opposite
+                directions of time: 58 days UNTIL a close, 24 days ALREADY
+                spent open. Neither number moved and neither was dropped. The
+                countdown states its direction (`crm.today._next_deadlines`),
+                and everything else in this rail that prints a bare "Nd" —
+                here, and Recent Activity below — is elapsed time.
                 {% endcomment %}
                 {% if d.open_run %}
                   <span class="activity-run" title="Campus postings at this firm that Coverage watched open and that are still open. Not a forecast of when they close.">{% if d.open_run.longest_days %}{{ d.open_run.count }} open, longest {{ d.open_run.longest_days }}d{% else %}{{ d.open_run.count }} open, all today{% endif %}</span>
@@ -1354,11 +1430,28 @@ copy exactly once, and this is the once.
         "Place them" is not a new phrase either -- it is the verb the
         Contacts caption on the Network page already uses for this exact
         action, pointing at this exact tool.
+
+        THE NOTE, CUT TO ONE LINE (2026-09-02, "the cards are wordy"). The
+        heading and the verb above are the founder's own and are untouched.
+        The note under them is what grew: "New this week. Coverage cannot
+        match them to the right deadlines until you say." wrapped to two
+        lines and spent most of them restating what the heading had already
+        asked and the link had already answered.
+
+        Both of its facts survive. "New this week" is the seven-day arrival
+        window (`crm.today.UNPLACED_ARRIVAL_WINDOW_DAYS`) and is the reason
+        this card is here at all rather than showing every region-less
+        contact on the account. "Deadlines match by market" is the
+        consequence, which is what makes the question worth answering.
+        What went is the sentence around them -- "Coverage cannot ... until
+        you say" is the product explaining its own mechanism, and "until you
+        say" duplicated the verb sitting in the corner of the same heading.
+        The fuller version of the mechanism moved to the row's `title`.
         {% endcomment %}
         <h3 class="rail-title">Where do they sit?
           <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
         </h3>
-        <p class="unplaced-note">New this week. Coverage cannot match them to the right deadlines until you say.</p>
+        <p class="unplaced-note" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one.">New this week. Deadlines match by market.</p>
         <ul class="unplaced-list">
           {% for c in unplaced_arrivals %}
             <li class="unplaced-row">

@@ -1088,6 +1088,13 @@ def test_deadlines_are_named_not_just_counted(client):
     rail, and the rail carried only the overflow the board hadn't already
     shown. The board was removed (not practically useful, per the founder);
     the rail is back to naming every confirmed date on its own.
+
+    The countdown reads "in 2d" rather than "2d" as of 2026-09-02, and the
+    reason is the row directly under it: `open_run` prints an ELAPSED day
+    count, and two bare "Nd" figures an inch apart pointing in opposite
+    directions of time was the defect the founder read off this card.
+    Rewritten and not weakened — the assertion still pins the same two days
+    and the same urgency, which is what "named, not just counted" is about.
     """
     user = _user(weekly_touch_goal=14)
     firm = Firm.objects.create(slug="ms", name="Morgan Stanley")
@@ -1098,7 +1105,7 @@ def test_deadlines_are_named_not_just_counted(client):
 
     ctx = _cockpit_context(user)
     assert [(d["firm"].name, d["when"], d["urgent"]) for d in ctx["deadlines"]] == [
-        ("Morgan Stanley", "2d", True)]
+        ("Morgan Stanley", "in 2d", True)]
 
     body = _login_and_get(client, user)
     # "Insight programme deadline", not the old "Insight deadline" — see

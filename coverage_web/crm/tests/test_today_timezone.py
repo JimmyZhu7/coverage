@@ -393,6 +393,16 @@ def test_a_cancelled_chat_contributes_no_date_to_the_card():
 # sentence says so.)
 # ---------------------------------------------------------------------------
 def test_the_activity_rail_counts_days_on_the_students_own_clock():
+    """The COUNT is what this test is about, and the count has not moved.
+
+    The expected string changed from "8d ago" to "8d" on 2026-09-02: the card
+    is titled Recent Activity, so "ago" restated its own heading on every row
+    and was cut (see `crm/tests/test_rail_copy_2026_09_02.py`, which owns that
+    rule). Rewritten rather than weakened — this test still pins the eight,
+    which is the calendar-day number the raw elapsed floor got wrong, and the
+    unit is still asserted so a silent switch back to hours or business days
+    would still fail here.
+    """
     from crm.today import _cockpit_context
 
     user = get_user_model().objects.create_user(
@@ -415,7 +425,7 @@ def test_the_activity_rail_counts_days_on_the_students_own_clock():
     row = next(a for a in ctx["activity"] if a["name"] == "Rail Clock")
     # LA_TOUCH is Aug 23 in Los Angeles and LA_NOW is Aug 31: eight calendar
     # days. The raw elapsed floor would have said seven.
-    assert row["ago"] == "8d ago", row["ago"]
+    assert row["ago"] == "8d", row["ago"]
 
 
 # ---------------------------------------------------------------------------
