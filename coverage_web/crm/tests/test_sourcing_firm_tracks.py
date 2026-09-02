@@ -55,11 +55,43 @@ def test_a_pe_shop_gets_pe_seats_whatever_the_student_runs():
                    for r in rows)
 
 
-def test_a_corp_strat_firm_gets_corp_strat_seats():
+def test_a_corp_strat_firm_gets_the_generic_trio_not_banking_seats():
+    """REWRITTEN for D-3 (2026-09-02), which retired `corp-strat` from the
+    picker and deleted its archetype table. This test used to assert Google
+    handed back three corporate-strategy seats.
+
+    Google keeps its tag and its panel; what it must NOT do is inherit this
+    student's banking seats, which is what a plain "no tracks this module
+    knows -> fall back to the student's" rule would have produced. That is
+    the exact defect the firm-tracks read fixed on 2026-09-01 ("sales and
+    trading analyst" at KKR and Google). A firm that stated a track we have
+    no seats for is a classified firm, not an unknown one, so it degrades
+    to the generic trio."""
     rows = sourcing.suggestions_for({"name": "Google", "tracks": ["corp-strat"]},
                                     FakeUser(["ib", "st"]))
-    assert _tracks(rows) == ["corp", "corp", "corp"]   # "corp-strat-0" splits on the first dash
-    assert rows[0]["key"] == "corp-strat-0"
+    assert _tracks(rows) == ["any", "any", "any"]
+    assert not any("investment banking" in r["query"] or "sales and trading" in r["query"]
+                   for r in rows)
+
+
+def test_an_unclassified_firm_still_falls_back_to_the_students_tracks():
+    """The other half of the same rule: a firm nobody has classified is
+    unknown, not empty, and the student's own tracks stay the best guess
+    for it. Pinned beside the case above so the two can never be collapsed
+    into one branch again."""
+    rows = sourcing.suggestions_for({"name": "Some Boutique"}, FakeUser(["ib"]))
+    assert _tracks(rows) == ["ib", "ib", "ib"]
+
+
+def test_a_pipeline_firm_gets_the_generic_trio_too():
+    """MLT and SEO Career are access programmes, not employers: `pipeline`
+    is a real, stated track with no seats in this module. Same branch as
+    the retired-track case, and the reason that branch is written on
+    "stated something we have no table for" rather than on the retired
+    slug alone."""
+    rows = sourcing.suggestions_for({"name": "MLT", "tracks": ["pipeline"]},
+                                    FakeUser(["ib", "st"]))
+    assert _tracks(rows) == ["any", "any", "any"]
 
 
 def test_a_bank_on_one_of_the_students_tracks_uses_only_that_track():

@@ -617,11 +617,18 @@ BOARDS: list[tuple[str, BoardConfig]] = [
 # move the process. Jane Street's public FAQ answers "Can I schedule a phone
 # call or coffee?" with "unfortunately, no"; Citadel Securities' campus
 # funnel is Datathons and Invitationals; the practitioner finding is "if you
-# can't pass their tests, it doesn't matter who you know." Drives
-# `Firm.recruiting_style="assessment"`: the migration that seeded the live
-# rows (directory/0017) carries the same list, frozen there by convention;
-# THIS is the one `scrape` reads when it pre-creates a catalog firm, so a
-# fresh deploy that migrates before its first scrape still tags them.
+# can't pass their tests, it doesn't matter who you know."
+#
+# THE ONE DEFINITION OF `Firm.recruiting_style = "assessment"` (D-22,
+# 2026-09-02). Both writers read this set and neither restates it: the seed
+# migration (directory/0017) imports it, and `scrape` reads it when it
+# pre-creates or corrects a catalog firm. It used to be copied into the
+# migration as a frozen tuple "by convention", which is the two definitions
+# of one fact P5 forbids — and the failure mode is not abstract: a firm added
+# here and not there renders a coffee-chat prompt at a firm that says in
+# writing it will not take one. Adding a slug here now tags the firm on a
+# fresh deploy AND on the next scrape of an existing database.
+#
 # Multi-strat funds that run analyst programmes with real networking
 # (Millennium, Point72, AQR) are deliberately absent.
 ASSESSMENT_RECRUITING: frozenset[str] = frozenset({

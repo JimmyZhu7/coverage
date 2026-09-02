@@ -1040,3 +1040,46 @@ def test_career_insights_needs_the_colon_because_it_is_also_a_job_title():
     assert classify_role("Career Insights Manager, Consumer Data") != "insight"
     assert classify_role("Business Insights Lead") != "insight"
     assert classify_role("Market Insights Analyst") != "insight"
+
+
+# ---------------------------------------------------------------------------
+# D-3: the storage vocabulary, the picker vocabulary, and the read between.
+# ---------------------------------------------------------------------------
+from directory.classify import (  # noqa: E402
+    RETIRED_TRACKS, SELECTABLE_TRACKS, TRACKED_TRACKS, TRACK_LABELS,
+    selectable_tracks,
+)
+
+
+def test_the_picker_vocabulary_is_the_storage_one_minus_the_retired_slugs():
+    """Derived, never restated: a seventh track added to TRACKED_TRACKS is
+    selectable the same day, and the retirement list is the only thing that
+    can take one out."""
+    assert SELECTABLE_TRACKS == tuple(
+        t for t in TRACKED_TRACKS if t not in RETIRED_TRACKS
+    )
+    assert set(RETIRED_TRACKS) <= set(TRACKED_TRACKS)
+
+
+def test_a_retired_slug_keeps_its_constraint_seat_and_its_label():
+    """`FirmDate.track`'s CHECK constraint is built from TRACKED_TRACKS and
+    the nine firms tagged `corp-strat` still print a desk on their cards.
+    Retiring a track removes an offer, never a value."""
+    for slug in RETIRED_TRACKS:
+        assert slug in TRACKED_TRACKS
+        assert TRACK_LABELS[slug]
+
+
+def test_selectable_tracks_drops_the_retired_and_keeps_the_order():
+    assert selectable_tracks(["ib", "corp-strat", "st"]) == ["ib", "st"]
+    assert selectable_tracks(["corp-strat"]) == []
+    assert selectable_tracks(None) == []
+    assert selectable_tracks([]) == []
+
+
+def test_selectable_tracks_leaves_junk_alone_to_be_junk():
+    """`User.tracks` is a free-form ArrayField. This function answers one
+    question — is this slug still offered — and an unknown value has the
+    same answer as a retired one, which is what every caller already does
+    with it."""
+    assert selectable_tracks(["ib", "quant-research", ""]) == ["ib"]

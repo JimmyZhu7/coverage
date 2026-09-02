@@ -193,3 +193,41 @@ def test_the_region_facet_is_untouched(client, board):
 def test_no_track_selected_still_returns_the_whole_board(client, board):
     assert _get(client).context["total"] == 6
     assert _counts(_get(client))[""] == 6
+
+
+# ---------------------------------------------------------------------------
+# D-3: the retired track is not an option, on any board.
+# ---------------------------------------------------------------------------
+
+def test_a_retired_track_is_not_offered_even_when_rows_carry_it(client, board):
+    """`corp-strat` was retired from the picker because it returns almost
+    nothing: 5 open campus rows named it by title on the live board against
+    602 for ib, and not one firm tagged with it has a connector. A facet
+    still offering it would be the same dead promise on a second surface.
+
+    The rows are NOT dropped. They stay in Any Track, they stay in every
+    other facet, and the firm's own card still prints "Corp Strat" from
+    TRACK_LABELS. Only the option goes."""
+    tech = _firm("google", "Google", ["corp-strat"])
+    _opp(tech, 7, "2027 Corporate Strategy Summer Analyst")
+
+    counts = _counts(_get(client))
+
+    assert "corp-strat" not in counts
+    assert counts[""] == 7, "the row is still on the board"
+
+
+def test_a_retired_track_asked_for_by_url_reads_as_no_track_at_all(client, board):
+    """The one place `selected` is not force-kept in the options (contrast
+    `_region_facet`, whose docstring argues for keeping it). A value nobody
+    can choose is not a value the bar has to hold on to — and honouring it
+    anyway would filter the board to a value the control cannot show as
+    chosen, so an old bookmark gets the whole board and a bar that says so."""
+    tech = _firm("google", "Google", ["corp-strat"])
+    row = _opp(tech, 7, "2027 Corporate Strategy Summer Analyst")
+
+    resp = _get(client, track="corp-strat")
+
+    assert "corp-strat" not in _counts(resp)
+    assert resp.context["total"] == 7
+    assert row.id in _ids(resp)

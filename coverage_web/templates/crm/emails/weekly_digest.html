@@ -200,6 +200,17 @@ reason the light ones are.
     </td>
   </tr>
   {% comment %}
+  WHICH MODE THE SECTION IS IN, always printed (`crm.digest.MODE_LINES`).
+  The picks qualify on `first_seen` inside a week; when too few rows clear
+  the scorer the email falls back to the best open roles and says so rather
+  than letting the heading imply news it does not have. D-11.
+  {% endcomment %}
+  <tr>
+    <td class="d-ink-2" style="padding:4px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#4e5248;line-height:1.5;">
+      {{ digest.picks_mode_line }}
+    </td>
+  </tr>
+  {% comment %}
   ONE honest sentence when not one pick is for a cycle the student declared
   (`crm.digest._cycle_note`). The founder's four picks all wore a "2027
   intake" chip whose tooltip said "not a fit", printed below as if it were a
@@ -241,6 +252,14 @@ reason the light ones are.
       scorer's tooltip wording as it stands.{% endcomment %}
       <div class="d-ink-3" style="font-size:13px;color:#666a5e;margin-top:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
         {{ pick.why }}
+      </div>
+      {% comment %}
+      HOW OLD THE ROW IS, on every pick, in the feed's own wording. The
+      section is headed "New for you"; this is the fact that word rests on,
+      printed so a reader can check it without leaving the email (D-11).
+      {% endcomment %}
+      <div class="d-ink-3" style="font-size:12px;color:#666a5e;margin-top:2px;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">
+        {% if pick.first_seen_days == 0 %}First seen today{% else %}First seen {{ pick.first_seen_days }}d ago{% endif %}
       </div>
       {% comment %}
       A pick's date prints ONLY with its provenance, the same words the

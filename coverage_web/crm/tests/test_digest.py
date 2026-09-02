@@ -16,7 +16,10 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from analytics.models import UserOpportunity
-from crm.digest import MAX_ACTIONS, assemble_digest
+from crm.digest import (
+    MAX_ACTIONS, MIN_NEW_PICKS, MODE_BEST, MODE_LINES, MODE_NEW,
+    NEW_WINDOW_DAYS, assemble_digest,
+)
 from crm.models import Contact, Touch, UserFirm
 from directory.deadlines import CLOSING_SOON_DAYS
 from directory.models import Firm, Opportunity
@@ -771,3 +774,112 @@ def test_an_undated_pick_prints_no_date():
 
     assert pick["deadline_marker"]["posted"] is False
     assert pick["reported"] is None
+
+
+# ---------------------------------------------------------------------------
+# D-11: "New for you" means new.
+#
+# The section used to run the page's scorer over the page's board, and the
+# founder's four picks were picks one to four on the Opportunities page: 100%
+# overlap, an email that repeated the page it was meant to extend. The picks
+# now qualify on `first_seen` inside `NEW_WINDOW_DAYS` and fall back to the
+# scorer only when fewer than `MIN_NEW_PICKS` rows clear it, saying which of
+# the two it did.
+# ---------------------------------------------------------------------------
+def _age(opp, days):
+    """`Opportunity.first_seen` is `auto_now_add`, so a fixture row is always
+    born today. Writing the column afterwards is the only way to build an old
+    row, and every case below needs one."""
+    Opportunity.objects.filter(pk=opp.pk).update(
+        first_seen=timezone.now() - timedelta(days=days)
+    )
+    opp.refresh_from_db()
+    return opp
+
+
+def test_a_fresh_row_is_picked_over_an_old_one_that_scores_the_same():
+    """Two tier-1 firms, identical rows, and the only difference between
+    them is age. Before D-11 the four picks would have come off the top of
+    the same ranking the page shows; now the old firm's rows are not
+    eligible at all."""
+    user = _user()
+    stale_firm = _firm("Stale Bank", "stale")
+    fresh_firm = _firm("Fresh Bank", "fresh")
+    UserFirm.all_objects.create(user=user, firm=stale_firm, tier=1)
+    UserFirm.all_objects.create(user=user, firm=fresh_firm, tier=1)
+    for n in (1, 2, 3):
+        _age(_pick_opp(stale_firm, cohort="2028", n=n), NEW_WINDOW_DAYS + 1)
+    for n in (4, 5):
+        _pick_opp(fresh_firm, cohort="2028", n=n)
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert digest["picks_mode"] == MODE_NEW
+    assert digest["picks"], "the fresh rows should have scored"
+    assert {p["firm_name"] for p in digest["picks"]} == {"Fresh Bank"}
+    assert all(p["first_seen_days"] <= NEW_WINDOW_DAYS for p in digest["picks"])
+
+
+def test_one_qualifying_row_is_not_enough_and_the_email_says_so():
+    """The fallback, at its exact boundary: `MIN_NEW_PICKS` is 2, so a week
+    with one new row is a week the section stops claiming novelty. The old
+    rows come back, and the sentence above them changes."""
+    user = _user()
+    stale_firm = _firm("Stale Bank", "stale")
+    fresh_firm = _firm("Fresh Bank", "fresh")
+    UserFirm.all_objects.create(user=user, firm=stale_firm, tier=1)
+    UserFirm.all_objects.create(user=user, firm=fresh_firm, tier=1)
+    for n in (1, 2, 3):
+        _age(_pick_opp(stale_firm, cohort="2028", n=n), NEW_WINDOW_DAYS + 1)
+    _pick_opp(fresh_firm, cohort="2028", n=4)
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert digest["picks_mode"] == MODE_BEST
+    assert len(digest["picks"]) > MIN_NEW_PICKS - 1
+    assert "Stale Bank" in {p["firm_name"] for p in digest["picks"]}
+    assert digest["picks_mode_line"] == (
+        "Nothing new enough this week, so these are your best open roles."
+    )
+
+
+def test_the_boundary_day_still_counts_as_new():
+    """Seven days is the gap between two sends, so a row first seen exactly
+    `NEW_WINDOW_DAYS` ago is one the last email could not have carried. The
+    window is inclusive on purpose."""
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for n in (1, 2):
+        _age(_pick_opp(firm, cohort="2028", n=n), NEW_WINDOW_DAYS)
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert digest["picks_mode"] == MODE_NEW
+    assert [p["first_seen_days"] for p in digest["picks"]] == [NEW_WINDOW_DAYS] * 2
+
+
+def test_every_pick_carries_the_age_the_heading_rests_on():
+    """The claim has to be checkable from the inbox, in both modes: a reader
+    who is told these are new can count the days on every row."""
+    user = _user()
+    firm = _firm()
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _pick_opp(firm, cohort="2028", n=1)
+    _age(_pick_opp(firm, cohort="2028", n=2), 3)
+    _digest_with_something_due(user)
+
+    digest = assemble_digest(user, today=TODAY)
+
+    assert sorted(p["first_seen_days"] for p in digest["picks"]) == [0, 3]
+    assert digest["picks_mode_line"] == MODE_LINES[digest["picks_mode"]]
+
+
+def test_the_mode_line_is_one_sentence_in_the_house_voice():
+    for line in MODE_LINES.values():
+        assert line.endswith(".")
+        assert line.count(".") == 1
+        assert "—" not in line

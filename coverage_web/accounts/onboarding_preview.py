@@ -35,6 +35,7 @@ from django.db.models import Count, F, Q
 from crm.models import Contact, UserFirm
 from directory.classify import (
     REGION_LABELS,
+    SELECTABLE_TRACKS,
     TARGET_BUCKETS,
     TRACK_LABELS,
     TRACKED_REGIONS,
@@ -85,12 +86,17 @@ def read_answers(request, user, step: str) -> dict:
 
     if live and step == "profile":
         regions = [r for r in request.GET.getlist("regions") if r in TRACKED_REGIONS]
-        tracks = [t for t in request.GET.getlist("tracks") if t in TRACK_LABELS]
+        # SELECTABLE_TRACKS, not TRACK_LABELS: a label exists for every slug
+        # the storage vocabulary carries, including the retired `corp-strat`,
+        # and a preview counting a track the picker no longer offers would be
+        # a number for an answer nobody can give (D-3).
+        tracks = [t for t in request.GET.getlist("tracks") if t in SELECTABLE_TRACKS]
         raw_year = (request.GET.get("class_year") or "").strip()
         class_year = int(raw_year) if raw_year.isdigit() else None
     else:
         regions = [r for r in (getattr(user, "regions", None) or []) if r in TRACKED_REGIONS]
-        tracks = [t for t in (getattr(user, "tracks", None) or []) if t in TRACK_LABELS]
+        tracks = [t for t in (getattr(user, "tracks", None) or [])
+                  if t in SELECTABLE_TRACKS]
         class_year = getattr(user, "class_year", None)
 
     if live and step == "work_auth":

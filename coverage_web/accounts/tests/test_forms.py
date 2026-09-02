@@ -12,7 +12,8 @@ from django.urls import reverse
 
 from accounts.forms import REGION_CHOICES, TRACK_CHOICES, ProfileForm
 from directory.classify import (
-    REGION_LABELS, TRACKED_REGIONS, TRACK_LABELS, TRACKED_TRACKS,
+    REGION_LABELS, RETIRED_TRACKS, SELECTABLE_TRACKS, TRACKED_REGIONS,
+    TRACK_LABELS, TRACKED_TRACKS,
 )
 from directory.recommend import cycle_choices
 
@@ -58,10 +59,43 @@ def test_a_student_can_now_state_a_preference_for_every_feed_market():
 # ---------------------------------------------------------------------------
 
 def test_track_choices_matches_the_filters_vocabulary():
-    assert [code for code, _ in TRACK_CHOICES] == list(TRACKED_TRACKS)
-    assert len(TRACK_CHOICES) == 6
+    """REWRITTEN for D-3 (2026-09-02). This used to read TRACKED_TRACKS and
+    require six choices; the picker is now `SELECTABLE_TRACKS`, which is the
+    storage vocabulary minus the retired `corp-strat`. The rule it pins is
+    unchanged — the checkboxes and the Opportunities filter read one
+    vocabulary and one set of labels — against the vocabulary that now says
+    what a student may choose."""
+    assert [code for code, _ in TRACK_CHOICES] == list(SELECTABLE_TRACKS)
+    assert len(TRACK_CHOICES) == 5
     for code, label in TRACK_CHOICES:
         assert label == TRACK_LABELS[code]
+
+
+def test_a_retired_track_is_not_offered_but_keeps_its_label():
+    """D-3. `corp-strat` returned zero open rows in any bucket while nine
+    firms carried it, so it stops being somewhere a student can say they
+    want to work. It is not deleted: `FirmDate`'s check constraint is built
+    from TRACKED_TRACKS, the nine firms keep their tag, and their cards
+    still need a human name for it."""
+    codes = {code for code, _ in TRACK_CHOICES}
+    assert "corp-strat" in TRACKED_TRACKS
+    assert "corp-strat" in TRACK_LABELS
+    assert not codes & set(RETIRED_TRACKS)
+
+
+def test_a_profile_holding_a_retired_track_degrades_to_the_rest(user):
+    """The whole migration-free half of D-3: a stored `['ib', 'corp-strat']`
+    reads as `['ib']`, an already-supported one-track state, and the row is
+    not rewritten to make it so. The next Settings save drops the slug on
+    its own, because the box that would have kept it is gone."""
+    user.tracks = ["ib", "corp-strat"]
+    user.save(update_fields=["tracks"])
+
+    form = ProfileForm.from_user(user)
+    assert form.initial["tracks"] == ["ib"]
+
+    user.refresh_from_db()
+    assert user.tracks == ["ib", "corp-strat"], "no row rewritten behind them"
 
 
 def test_track_choices_calls_pe_private_equity_credit_not_just_private_equity():

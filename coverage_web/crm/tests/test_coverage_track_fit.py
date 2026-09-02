@@ -344,3 +344,39 @@ def test_network_page_without_a_close_draws_no_card_for_an_assessment_firm(clien
     client.force_login(user)
     resp = client.get(reverse("crm:contact_list"))
     assert [g["name"] for g in resp.context["gaps"]] == ["Goldman Sachs"]
+
+
+# ---------------------------------------------------------------------------
+# D-3: a retired track is not a track the strip ranks by.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_gap_strip_reads_a_retired_track_as_no_longer_stated(client):
+    """The 28% of the founder's zero-contact gap work that `corp-strat`
+    manufactured, in miniature. A student holding `['ib', 'corp-strat']`
+    used to make Google an ON-track tier-1 firm with nobody at it, worth a
+    full 12 and the top of the strip. The slug is retired, so the strip
+    ranks Google as the off-track firm it is (12 × 0.5 = 6) and the bank on
+    the track the student can actually still choose comes first.
+
+    Read-time, and nothing is rewritten: `User.tracks` still holds both."""
+    user = User.objects.create_user(
+        email="retired@example.com", password="pw12345!",
+        tracks=["ib", "corp-strat"],
+    )
+    google = Firm.objects.create(slug="google-fit", name="Google", tracks=["corp-strat"])
+    hsbc = Firm.objects.create(slug="hsbc-fit3", name="HSBC", tracks=["ib"])
+    UserFirm.all_objects.create(user=user, firm=google, tier=1)
+    UserFirm.all_objects.create(user=user, firm=hsbc, tier=1)
+    Contact.all_objects.create(user=user, name="Cold One", firm=hsbc, warmth="cold")
+
+    client.force_login(user)
+    resp = client.get(reverse("crm:contact_list"))
+    gaps = {g["name"]: g for g in resp.context["gaps"]}
+
+    assert [g["name"] for g in resp.context["gaps"]] == ["HSBC", "Google"]
+    assert gaps["Google"]["state"] == coverage.OFF_TRACK
+    assert gaps["Google"]["track_fit"] == coverage.OFF_TRACK_FIT
+
+    user.refresh_from_db()
+    assert user.tracks == ["ib", "corp-strat"]

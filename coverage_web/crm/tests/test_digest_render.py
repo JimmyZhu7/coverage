@@ -206,3 +206,50 @@ def test_the_plain_text_half_offers_the_same_way_out(digest_ctx):
 
     assert "Stop these emails: https://coverage.test/welcome/unsubscribe/" in text
     assert "Sept." not in text
+
+
+# ---------------------------------------------------------------------------
+# D-11: both halves of the email say which mode the section is in, and print
+# the age every pick's place in it rests on.
+# ---------------------------------------------------------------------------
+def _text(user, digest):
+    return render_to_string(
+        "crm/emails/weekly_digest.txt",
+        {"user": user, "digest": digest, "site_url": "https://coverage.test"},
+    )
+
+
+@pytest.fixture
+def picks_ctx(digest_ctx):
+    """The shared fixture plus two scoreable rows at the tiered firm, so the
+    New for you section actually renders."""
+    user, _ = digest_ctx
+    firm = Firm.objects.get(slug="gs")
+    for n in (1, 2):
+        Opportunity.objects.create(
+            firm=firm, url=f"https://x/gs/pick-{n}", title=f"Summer Analyst {n}",
+            bucket="internship", status="open", cohort="2028", location="New York",
+        )
+    digest = assemble_digest(user, today=TODAY)
+    assert digest["picks"], "fixture should have produced picks"
+    return user, digest
+
+
+def test_both_halves_print_which_mode_new_for_you_is_in(picks_ctx):
+    user, digest = picks_ctx
+    line = digest["picks_mode_line"]
+
+    assert line in _render(user, digest)
+    assert line in _text(user, digest)
+
+
+def test_both_halves_print_how_old_every_pick_is(picks_ctx):
+    """The rows are what make the sentence above them checkable, so the age
+    is on every one of them, in the feed's own wording."""
+    user, digest = picks_ctx
+    html = _render(user, digest)
+    text = _text(user, digest)
+
+    for half in (html, text):
+        assert half.count("First seen") == len(digest["picks"])
+        assert "First seen today" in half

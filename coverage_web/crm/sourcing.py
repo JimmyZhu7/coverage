@@ -40,9 +40,11 @@ Three rows per firm, always three, so the panel has a predictable size:
     because a shared school is the single highest-yield cold open a
     student has and it costs one extra keyword to hand over;
   * no tracks set on either side (a student who skipped that step in
-    onboarding, a firm nobody has classified) falls back to a generic
-    trio rather than to nothing. "We do not know your track" is not a
-    reason to withhold "find an analyst two years in".
+    onboarding, a firm nobody has classified), or a firm whose only
+    stated tracks are ones this panel has no seats for (the nine
+    `corp-strat` tech firms since D-3, MLT and SEO Career), falls back to
+    a generic trio rather than to nothing. "We do not know your track" is
+    not a reason to withhold "find an analyst two years in".
 
 THE ONE FIRM THAT GETS A DIFFERENT ANSWER
 -----------------------------------------
@@ -64,8 +66,8 @@ and (c) has a real reason to reply to a student. Junior seats reply
 because they were there last year; programme owners reply because
 answering students is the job; one senior seat per track exists because
 a name needs someone able to push it. Deliberately NOT a scored or
-learned list: it is six short tables a student can read, disagree with,
-and ignore.
+learned list: it is five short tables a student can read, disagree with,
+and ignore — one per selectable track.
 """
 
 from __future__ import annotations
@@ -147,18 +149,12 @@ TRACK_ARCHETYPES: dict[str, tuple[Archetype, ...]] = {
          "Named on the campus team. Your pipeline is their remit.",
          "campus recruiting"),
     ),
-    "corp-strat": (
-        ("Strategy manager in the group",
-         "Small teams. One manager decides most of the hire.",
-         "corporate strategy manager"),
-        ("Senior analyst who came from consulting",
-         "Knows both doors in and usually enjoys explaining the switch.",
-         "strategy analyst"),
-        ("Rotational programme grad",
-         "The programme is the front door. They took it.",
-         "rotational program analyst"),
-    ),
 }
+# No `corp-strat` table. The track was retired from the picker on 2026-09-02
+# (D-3, `classify.RETIRED_TRACKS`): nobody can select it, so nobody can be
+# handed its seats. The nine firms tagged with it keep their tag and keep a
+# panel — see `_tracks_of` for what they get instead, which is the generic
+# trio and not this student's banking seats.
 
 # Used when the student has set no tracks. Not a seventh track: the same
 # three seats every firm on the board has, phrased without a desk name.
@@ -236,11 +232,25 @@ def _tracks_of(user, firm: Any = None) -> list[str]:
     trading analyst" at KKR); failing tracks on the firm at all, the
     student's, exactly as before this module read the firm. Empty only
     when neither side has a track this module knows.
-    """
+
+    "NO TRACKS ON FILE" AND "TRACKS THIS MODULE HAS NO TABLE FOR" ARE NOT
+    THE SAME FIRM. A firm nobody has classified is unknown, and the
+    student's own tracks are the best available guess for it. A firm that
+    states `['corp-strat']` or `['pipeline']` has been classified, and
+    stated something this panel has no seats for — retired (D-3) or never
+    an employer at all (MLT, SEO Career). Falling back to the student's
+    tracks there would put "investment banking analyst" in front of Google
+    and MLT, which is the exact defect the firm-tracks read fixed on
+    2026-09-01. Those firms get an empty list, which `suggestions_for`
+    renders as the generic trio: an analyst two years in exists at all of
+    them, and a bulge-bracket desk does not."""
     user_tracks = _known_tracks(getattr(user, "tracks", None))
-    firm_tracks = _known_tracks(_firm_field(firm, "tracks"))
+    stated = [t for t in (_firm_field(firm, "tracks") or []) if t]
+    firm_tracks = _known_tracks(stated)
     shared = [t for t in user_tracks if t in firm_tracks]
-    return shared or firm_tracks or user_tracks
+    if shared or firm_tracks:
+        return shared or firm_tracks
+    return [] if stated else user_tracks
 
 
 def panel_note(firm: Any) -> str:

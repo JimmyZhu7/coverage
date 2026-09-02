@@ -55,7 +55,8 @@ from crm.models import Contact, UserFirm
 from crm.utils import _calendar_days_ago
 from directory.classify import (
     BUCKET_LABELS, ENTRY_LEVEL, INSIGHT, INTERNSHIP, OTHER, REGION_LABELS,
-    REGION_ORDER, TARGET_BUCKETS, derive_class_year,
+    REGION_ORDER, RETIRED_TRACKS, SELECTABLE_TRACKS, TARGET_BUCKETS,
+    derive_class_year,
     TRACK_LABELS as _TRACK_LABELS_BASE,
 )
 # The one definition of "closing soon" — see deadlines.py for why it isn't
@@ -123,11 +124,13 @@ FIRM_CATEGORIES = {
 }
 
 # Human labels for the firms.yaml track slugs. Raw slugs ("ib", "corp-strat")
-# read as internal shorthand; the filter is public-facing. The six
-# preference-eligible tracks are classify.TRACK_LABELS — the SAME dict
-# accounts/forms.py's Settings checkboxes read — so the two pages can never
-# disagree about a slug's label again (they used to: Settings said "Private
-# Equity", this filter said "Private Equity / Credit", both for "pe").
+# read as internal shorthand; the filter is public-facing. The labels are
+# classify.TRACK_LABELS — the SAME dict accounts/forms.py's Settings
+# checkboxes read — so the two pages can never disagree about a slug's label
+# again (they used to: Settings said "Private Equity", this filter said
+# "Private Equity / Credit", both for "pe"). Labelling a slug is not offering
+# it: which tracks are OFFERED is classify.SELECTABLE_TRACKS, which
+# `_track_facet` filters its options through.
 TRACK_LABELS = {
     **_TRACK_LABELS_BASE,
     # MLT and SEO Career, the two firms on this track, are not employers —
@@ -1771,12 +1774,23 @@ def _track_facet(qs, selected=""):
         total += n
         for t in _row_tracks(tracks_by_firm.get(firm_id), title):
             counts[t] += n
+    # RETIRED SLUGS ARE NOT OPTIONS, even when rows carry them and even when
+    # one is the current selection. `corp-strat` was retired from the picker
+    # (D-3) because it returns almost nothing — 5 open campus rows named it
+    # by title on 2026-09-02 against 602 for ib — and a facet that still
+    # offered it would be the same dead promise on a second surface. The rows
+    # are not dropped: they stay in "Any Track" and in every other facet, and
+    # a firm's own card still prints "Corp Strat" from TRACK_LABELS. This is
+    # the one place `selected` is not force-kept (see `_region_facet`), for
+    # the same reason it is not offered: a value nobody can choose is not a
+    # value the bar has to hold on to.
     return [
         {"value": "", "label": "Any Track", "count": total},
         *[
             {"value": t, "label": TRACK_LABELS.get(t, t), "count": counts[t]}
             for t in sorted(
-                set(counts) | ({selected} if selected else set()),
+                (set(counts) | ({selected} if selected else set()))
+                & set(SELECTABLE_TRACKS),
                 key=lambda t: TRACK_LABELS.get(t, t),
             )
         ],
@@ -3217,7 +3231,14 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # Programme/intake year, or `none` for the rows that state no year at all.
     year = request.GET.get("year", "").strip()
     region = request.GET.get("region", "").strip()
+    # A retired track in the query string reads as no track at all (D-3).
+    # The facet does not offer `corp-strat` any more, so honouring it here
+    # would filter the board to a value the control cannot show as chosen:
+    # the bar would say "Any Track" over five rows. An old bookmark gets the
+    # whole board back, which is what the bar it renders will say.
     track = request.GET.get("track", "").strip()
+    if track in RETIRED_TRACKS:
+        track = ""
     provider = request.GET.get("provider", "").strip()
     # Sponsorship (?sponsorship=yes|no|unknown). The first question an
     # international student asks about any US posting, answerable on the rows

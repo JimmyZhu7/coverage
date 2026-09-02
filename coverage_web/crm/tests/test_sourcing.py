@@ -19,7 +19,7 @@ from django.urls import reverse
 
 from crm import sourcing
 from crm.models import UserFirm
-from directory.classify import TRACK_LABELS
+from directory.classify import SELECTABLE_TRACKS
 from directory.models import Firm
 
 User = get_user_model()
@@ -45,11 +45,18 @@ def _keywords(url: str) -> str:
 # ---------------------------------------------------------------------------
 # 1. Every track has a real table, and the user's tracks pick it.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("track", sorted(TRACK_LABELS))
+@pytest.mark.parametrize("track", sorted(SELECTABLE_TRACKS))
 def test_every_app_track_has_archetypes(track):
     """The app's track vocabulary and this module's table must not drift:
     a student whose track has no entry would silently fall back to the
-    generic trio and never know their track was unsupported."""
+    generic trio and never know their track was unsupported.
+
+    SELECTABLE_TRACKS, not TRACK_LABELS, since D-3 retired `corp-strat`
+    from the picker: a label still exists for the slug because nine firms
+    still carry it, and a table would be a set of seats nobody can ask
+    for. The rule this pins is unchanged — every track a student can
+    CHOOSE has real archetypes — it now reads the vocabulary that says
+    what a student can choose."""
     assert track in sourcing.TRACK_ARCHETYPES
     table = sourcing.TRACK_ARCHETYPES[track]
     assert 2 <= len(table) <= 3
@@ -59,7 +66,7 @@ def test_every_app_track_has_archetypes(track):
         assert "—" not in label and "—" not in why
 
 
-@pytest.mark.parametrize("track", sorted(TRACK_LABELS))
+@pytest.mark.parametrize("track", sorted(SELECTABLE_TRACKS))
 def test_a_single_track_student_gets_that_tracks_seats(track):
     rows = sourcing.suggestions_for({"name": "Goldman Sachs"}, FakeUser([track]))
     assert len(rows) == 3
