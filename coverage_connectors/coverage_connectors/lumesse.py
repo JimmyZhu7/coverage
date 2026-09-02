@@ -32,7 +32,7 @@ import re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from .http import fetch_json
+from .http import fetch_json, unreadable
 from .models import FetchResult, LumesseBoard, Opportunity, VerificationResult
 
 name = "lumesse"
@@ -126,9 +126,25 @@ def fetch(board: LumesseBoard) -> FetchResult:
         while first < (_MAX_JOBS if total is None else min(total, _MAX_JOBS)):
             data = fetch_json(_page_url(board, first),
                               headers=_guest_headers(board))
+            # The FO-REST widget API always sends both keys. Their absence
+            # means guest auth was refused or the endpoint moved — a 200 in
+            # either case, and previously a clean zero.
+            if "jobs" not in data or "globals" not in data:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"lumesse tech_id {board.tech_id!r} answered 200 without "
+                        f"the jobs/globals envelope (got {sorted(data)[:6]})"),
+                )
             if total is None:
                 total = int((data.get("globals") or {}).get("jobsCount") or 0)
             jobs = data.get("jobs") or []
+            if not jobs and first == 0 and total:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"lumesse reported jobsCount={total} and returned 0 jobs"),
+                )
             if not jobs:
                 break
             for job in jobs:
@@ -138,7 +154,8 @@ def fetch(board: LumesseBoard) -> FetchResult:
                     opps.append(opp)
             first += _PAGE
         return FetchResult(board=board, ok=True, opportunities=opps,
-                           raw_count=total or len(opps))
+                           raw_count=total or len(opps),
+                           empty_state=not opps and total == 0)
     except Exception as exc:  # noqa: BLE001 — one board must not sink the run
         return FetchResult(board=board, ok=False, opportunities=[],
                            raw_count=0, error=f"{type(exc).__name__}: {exc}")

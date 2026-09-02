@@ -55,7 +55,7 @@ from datetime import date
 
 import tenacity
 
-from .http import FetchError, fetch_json, fetch_text, post_json
+from .http import FetchError, fetch_json, fetch_text, post_json, unreadable
 from .models import FetchResult, Opportunity, VerificationResult, WorkdayBoard
 
 name = "workday"
@@ -294,6 +294,20 @@ def fetch(board: WorkdayBoard) -> FetchResult:
                      else _fetch_all)
         data = fetch_all(board.tenant_host, board.site, board.search_text,
                          board.tenant, board.domain)
+        # CxS always sends `jobPostings`, empty or not. Its absence means the
+        # response is not a CxS search result — the SPA shell, an error
+        # envelope, a WAF page that happened to parse as JSON — and
+        # `.get("jobPostings", [])` read every one of those as "this site has
+        # no postings". Workday fails loudly on a renamed site (404) or a
+        # wrong tenant (422), so the case left over is precisely the one no
+        # status code covers.
+        if "jobPostings" not in data:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"workday response for site {board.site!r} carries no "
+                    f"'jobPostings' key (got {sorted(data)[:6]})"),
+            )
         jobs = data.get("jobPostings", [])
         # Kept inside this try — see greenhouse.py's fetch() for why: a
         # normalization failure on one malformed job must not propagate
@@ -303,12 +317,28 @@ def fetch(board: WorkdayBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     total = data.get("total", len(jobs))
+    # A stated total above zero with nothing in the array is not an empty
+    # board; the list was filtered or the page came back wrong. (The reverse —
+    # `total: 0` alongside real rows — is a known Workday defect on non-zero
+    # offsets and is NOT read here as anything: `_fetch_all` only ever asks
+    # offset 0 for its total.)
+    if not jobs and isinstance(total, int) and total > 0:
+        return FetchResult(
+            board=board, ok=False, opportunities=[], raw_count=0,
+            error=unreadable(
+                f"workday reported total={total} and returned 0 jobPostings"),
+        )
     return FetchResult(board=board, ok=True, opportunities=opportunities,
                         raw_count=total,
                         # The board says there are more than we read. Told to
                         # ingest rather than logged, because it changes what
                         # may be concluded from a row's absence.
-                        truncated=isinstance(total, int) and total > len(jobs))
+                        truncated=isinstance(total, int) and total > len(jobs),
+                        # `{"total": 0, "jobPostings": []}` is Workday's own
+                        # honest empty result — the one 200-with-zero-rows
+                        # case the platform research could reproduce
+                        # deliberately.
+                        empty_state=not opportunities and total == 0)
 
 
 def classify_url(url: str) -> dict | None:

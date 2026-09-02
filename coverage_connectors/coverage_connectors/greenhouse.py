@@ -46,7 +46,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import fetch_json
+from .http import fetch_json, unreadable
 from .models import FetchResult, GreenhouseBoard, Opportunity, VerificationResult
 
 name = "greenhouse"
@@ -111,7 +111,33 @@ def fetch(board: GreenhouseBoard) -> FetchResult:
     url = _BOARD_URL.format(token=board.token)
     try:
         data = fetch_json(url)
+        # Envelope check BEFORE the rows are read. `boards-api` always sends a
+        # `jobs` key, empty or not; a dict without one is a WAF page, an error
+        # body or a renamed API, and `data.get("jobs", [])` turned every one of
+        # those into a confident zero. A bare list is the pre-envelope shape
+        # this connector has always accepted, so it stays valid.
+        if isinstance(data, dict) and "jobs" not in data:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"greenhouse envelope for token {board.token!r} carries no "
+                    f"'jobs' key (got {sorted(data)[:6]})"),
+            )
         jobs = data.get("jobs", data if isinstance(data, list) else [])
+        # The board's own count disagreeing with the rows it sent is the one
+        # in-band signal Greenhouse offers, and it is worth acting on: a
+        # `total` above zero with no jobs means the list was filtered,
+        # truncated or served from a broken cache, never that the firm has
+        # nothing.
+        stated_total = ((data.get("meta") or {}).get("total")
+                        if isinstance(data, dict) else None)
+        if not jobs and isinstance(stated_total, int) and stated_total > 0:
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"greenhouse reported meta.total={stated_total} and returned "
+                    f"0 jobs"),
+            )
         # Normalization lives INSIDE this try, not after it: `_normalize`
         # does `(job.get("location") or {}).get("name", "")`, which raises
         # AttributeError the moment a single job's `location` ever arrives
@@ -124,7 +150,14 @@ def fetch(board: GreenhouseBoard) -> FetchResult:
         opportunities = [_normalize(j, board) for j in jobs]
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to a multi-board run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(jobs))
+    # `meta.total == 0` is Greenhouse SAYING the board is empty, which is a
+    # different fact from "our parse produced nothing" and the only positive
+    # empty signal this API has. A vacated token sends exactly this too, which
+    # is why the flag alone is not enough — see `zero_rows_guard`, which reads
+    # the caller's own row history for that case.
+    empty_state = not opportunities and stated_total == 0
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(jobs), empty_state=empty_state)
 
 
 def classify_url(url: str) -> dict | None:

@@ -29,7 +29,7 @@ import html
 import re
 import urllib.parse
 
-from .http import fetch_text
+from .http import fetch_text, unreadable
 from .models import FetchResult, Opportunity, SitemapBoard, VerificationResult
 
 name = "sitemap"
@@ -128,6 +128,22 @@ def fetch(board: SitemapBoard) -> FetchResult:
         register_sitemap(host, board.sitemap_url)
     try:
         xml = fetch_text(board.sitemap_url)
+        # A sitemap with no <loc> at all is not a sitemap: an error page, an
+        # empty body, a redirect landing. HSBC's board is fetched entirely
+        # through this file, so a zero here used to hand ingest permission to
+        # close the firm's whole campus set off a page that never listed
+        # anything in the first place.
+        #
+        # <loc> entries that exist but do not match `path_filter` are a
+        # different and honest answer — "the site is up, the campus path has
+        # nothing on it today" — and stay `ok=True`.
+        if not _LOC_RE.search(xml):
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"sitemap at {board.sitemap_url} carried no <loc> entries "
+                    f"({len(xml)} bytes)"),
+            )
         rows = _rows(xml, board.path_filter)
         # Kept inside this try — see greenhouse.py's fetch() for why a
         # normalization failure must not propagate uncaught out of
@@ -139,7 +155,11 @@ def fetch(board: SitemapBoard) -> FetchResult:
         ]
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
-    return FetchResult(board=board, ok=True, opportunities=opportunities, raw_count=len(rows))
+    return FetchResult(board=board, ok=True, opportunities=opportunities,
+                       raw_count=len(rows),
+                       # A readable sitemap that lists nothing under this
+                       # board's path is the site's own answer, not a silence.
+                       empty_state=not opportunities)
 
 
 def classify_url(url: str) -> dict | None:

@@ -23,7 +23,7 @@ import re
 import urllib.error
 from datetime import UTC, datetime
 
-from .http import fetch_json
+from .http import fetch_json, unreadable
 from .models import FetchResult, LeverBoard, Opportunity, VerificationResult
 
 name = "lever"
@@ -66,7 +66,20 @@ def fetch(board: LeverBoard) -> FetchResult:
     url = _POSTINGS_URL.format(org=board.org)
     try:
         data = fetch_json(url)
-        jobs = data if isinstance(data, list) else []
+        # `mode=json` on a live org returns a JSON ARRAY, always. Anything
+        # else — an error object, a redirect body, a rate-limit envelope —
+        # used to fall through `isinstance(data, list)` into an empty list and
+        # a confident `ok=True, 0 rows`, which for Lever (whose whole list is
+        # one unpaginated response) reads as "this org has closed every
+        # posting". Nothing may be concluded from a shape we did not expect.
+        if not isinstance(data, list):
+            return FetchResult(
+                board=board, ok=False, opportunities=[], raw_count=0,
+                error=unreadable(
+                    f"lever postings API returned {type(data).__name__}, not the "
+                    f"documented array"),
+            )
+        jobs = data
         # Normalization stays inside this try — see greenhouse.py's fetch()
         # for why: `_normalize` does `(job.get("categories") or {}).get(
         # "location", "")`, which raises if `categories` ever arrives as

@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import re
 
-from .http import fetch_json, fetch_text, post_json
+from .http import fetch_json, fetch_text, post_json, unreadable
 from .models import FetchResult, Opportunity, SocGenBoard, VerificationResult
 
 name = "socgen"
@@ -158,9 +158,28 @@ def fetch(board: SocGenBoard) -> FetchResult:
         while skip < (_MAX_JOBS if total is None else min(total, _MAX_JOBS)):
             data = post_json(f"{_ORIGIN}/search-proxy.php", _query(skip),
                              headers=headers)
+            # The proxy answers 200 for a rejected token or a changed query
+            # shape as readily as for a real search, so the envelope is what
+            # says whether this is a result set at all. `Result` absent means
+            # the response is not one, and `(data.get("Result") or {})` used
+            # to fold that into a clean zero — on a board that carries ~640
+            # postings and drives closed-detection for all of them.
+            if "Result" not in data:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"socgen proxy answered 200 with no 'Result' block "
+                        f"(got {sorted(data)[:6]})"),
+                )
             if total is None:
                 total = int(data.get("TotalCount") or 0)
             docs = (data.get("Result") or {}).get("Docs") or []
+            if not docs and skip == 0 and total:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"socgen reported TotalCount={total} and returned 0 docs"),
+                )
             if not docs:
                 break
             for doc in docs:
@@ -170,7 +189,10 @@ def fetch(board: SocGenBoard) -> FetchResult:
                     opps.append(opp)
             skip += _PAGE
         return FetchResult(board=board, ok=True, opportunities=opps,
-                           raw_count=total or len(opps))
+                           raw_count=total or len(opps),
+                           # Quantum answering TotalCount=0 is the search
+                           # saying nothing matched, which is a fact.
+                           empty_state=not opps and total == 0)
     except Exception as exc:  # noqa: BLE001 — one board must not sink the run
         return FetchResult(board=board, ok=False, opportunities=[],
                            raw_count=0, error=f"{type(exc).__name__}: {exc}")

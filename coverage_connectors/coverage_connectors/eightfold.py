@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from urllib.parse import urlencode
 
-from .http import fetch_json, fetch_text
+from .http import fetch_json, fetch_text, unreadable
 from .models import EightfoldBoard, FetchResult, Opportunity, VerificationResult
 
 name = "eightfold"
@@ -66,10 +66,33 @@ def fetch(board: EightfoldBoard) -> FetchResult:
     # Set only when the CAP ends the walk. Both natural exits below (an empty
     # page, reaching the API's own `count`) mean we read the whole board.
     truncated = False
+    stated_count: int | None = None
     try:
         while start < _MAX:
             data = fetch_json(_page_url(board, start, _PAGE))
-            batch = data.get("positions") or [] if isinstance(data, dict) else []
+            # `/api/apply/v2/jobs` always sends `positions`. A dict without
+            # it, or a bare list, is not a jobs response — and the old
+            # `isinstance(data, dict)` fallback turned every one of those into
+            # an empty batch and a clean zero for the whole board.
+            if not isinstance(data, dict) or "positions" not in data:
+                shape = (f"{type(data).__name__}" if not isinstance(data, dict)
+                         else f"keys {sorted(data)[:6]}")
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"eightfold domain {board.domain!r} answered 200 with no "
+                        f"'positions' key ({shape})"),
+                )
+            batch = data.get("positions") or []
+            if stated_count is None and isinstance(data.get("count"), int):
+                stated_count = data["count"]
+            if not batch and start == 0 and stated_count:
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(
+                        f"eightfold reported count={stated_count} and returned 0 "
+                        f"positions"),
+                )
             if not batch:
                 break
             positions.extend(batch)
@@ -92,7 +115,8 @@ def fetch(board: EightfoldBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities,
-                       raw_count=len(positions), truncated=truncated)
+                       raw_count=len(positions), truncated=truncated,
+                       empty_state=not opportunities and stated_count == 0)
 
 
 def classify_url(url: str) -> dict | None:

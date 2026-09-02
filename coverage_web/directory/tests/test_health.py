@@ -7,10 +7,22 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
+from coverage_connectors import GreenhouseBoard
+
 from directory import health
 from directory.models import Firm, Opportunity, ScrapeRun
 
 pytestmark = pytest.mark.django_db
+
+
+def _board(slug: str):
+    """A real BoardConfig stand-in for the catalog.
+
+    These used to be bare `object()`s, which was fine while every check keyed
+    on the slug alone. `board_health()` reads the config itself — provider,
+    identifying field — so the stand-in has to be a config. Same slugs, same
+    assertions."""
+    return (slug, GreenhouseBoard(firm=slug, token=slug))
 
 
 def _run(errors, *, ago_minutes=0, connector="all"):
@@ -91,7 +103,7 @@ def test_a_never_yielding_board_that_fetches_cleanly_is_empty_not_broken(monkeyp
     Firm.objects.create(slug="jefferies", name="Jefferies")
     Opportunity.objects.create(firm=yielding, url="https://x/1", title="SA",
                                bucket="internship", status="open")
-    monkeypatch.setattr(health, "BOARDS", [("evercore", object()), ("jefferies", object())])
+    monkeypatch.setattr(health, "BOARDS", [_board("evercore"), _board("jefferies")])
     _run([], ago_minutes=60)   # latest run fetched everything cleanly
 
     assert health.boards_that_never_yield() == {
@@ -106,7 +118,7 @@ def test_a_never_yielding_board_that_also_errors_is_broken(monkeypatch):
     error for the firm — that one really is a config problem and keeps the
     loud warning."""
     Firm.objects.create(slug="jefferies", name="Jefferies")
-    monkeypatch.setattr(health, "BOARDS", [("jefferies", object())])
+    monkeypatch.setattr(health, "BOARDS", [_board("jefferies")])
     _run(["Jefferies"], ago_minutes=60)
 
     assert health.boards_that_never_yield() == {
@@ -187,7 +199,7 @@ def test_a_never_yielding_walled_board_is_not_called_empty_or_broken(monkeypatch
     'empty — plausible market fact' for weeks while Oleeo Protect was eating
     the page. Unreadable is not empty, and it is not a config bug either."""
     Firm.objects.create(slug="jefferies", name="Jefferies")
-    monkeypatch.setattr(health, "BOARDS", [("jefferies", object())])
+    monkeypatch.setattr(health, "BOARDS", [_board("jefferies")])
     _walled_run(["Jefferies"], ago_minutes=60)
 
     assert health.boards_that_never_yield() == {
@@ -212,7 +224,7 @@ def test_the_report_is_empty_when_healthy(monkeypatch):
     firm = Firm.objects.create(slug="evercore", name="Evercore")
     Opportunity.objects.create(firm=firm, url="https://x/1", title="SA",
                                bucket="internship", status="open")
-    monkeypatch.setattr(health, "BOARDS", [("evercore", object())])
+    monkeypatch.setattr(health, "BOARDS", [_board("evercore")])
     _run([], ago_minutes=120)
     _run([], ago_minutes=60)
     _run([], ago_minutes=30)
@@ -357,11 +369,40 @@ def test_a_truncating_board_does_not_ring_the_failure_alarm():
     assert health.repeat_failures() == []
 
 
-def test_the_suspicious_wipe_guard_also_does_not_ring_it():
+def test_the_suspicious_wipe_guard_does_ring_the_failure_alarm():
+    """REWRITTEN 2026-09-01. This used to assert the opposite, and the
+    assertion was the bug.
+
+    Both of ingest's guards contain the phrase "skipped auto-close", and
+    `_is_guard_notice` matched the phrase — so the WIPE guard was being
+    filed under the truncation guard's reassuring line, "auto-close skipped
+    on a partial list (board is healthy …)". The two mean opposite things. A
+    partial list is a board too big for one fetch, which is fine. A wipe is a
+    board that fetched clean and returned NOTHING while the firm still holds
+    open postings, which is a vacated Greenhouse token, a renamed Workday
+    site, or a page whose markup moved — the exact shape that hid Sixth
+    Street's dead token (20 open rows) and Marshall Wace's silent board.
+
+    A board tripping the wipe guard three runs running is down, and this
+    alarm is what says so."""
     for ago in (180, 120, 60):
         _run_with([{"firm": "Lazard", "error": _WIPE_GUARD}], ago_minutes=ago)
 
-    assert health.repeat_failures() == []
+    assert health.repeat_failures() == ["Lazard"]
+
+
+def test_only_the_partial_list_guard_counts_as_a_healthy_board():
+    """The narrowed marker, pinned from both sides: the two guards must never
+    be matched by the same string again."""
+    _run_with([
+        {"firm": "J.P. Morgan", "error": _TRUNCATED},
+        {"firm": "Lazard", "error": _WIPE_GUARD},
+    ])
+
+    assert health.guarded_boards() == ["J.P. Morgan"]
+    assert health._is_guard_notice({"error": _TRUNCATED})
+    assert not health._is_guard_notice({"error": _WIPE_GUARD})
+    assert health._is_wipe_guard({"error": _WIPE_GUARD})
 
 
 def test_a_real_failure_still_rings_while_a_guard_notice_is_present():
@@ -389,7 +430,7 @@ def test_a_guarded_board_is_named_in_its_own_quiet_line():
 def test_a_never_yielding_board_reporting_only_a_guard_notice_is_not_called_broken(monkeypatch):
     """'Broken' means a bad URL or a failing fetch. A guard notice is neither."""
     Firm.objects.create(slug="jpm", name="J.P. Morgan")
-    monkeypatch.setattr(health, "BOARDS", [("jpm", object())])
+    monkeypatch.setattr(health, "BOARDS", [_board("jpm")])
     _run_with([{"firm": "J.P. Morgan", "error": _TRUNCATED}])
 
     assert health.boards_that_never_yield()["broken"] == []

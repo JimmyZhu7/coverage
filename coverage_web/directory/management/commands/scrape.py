@@ -95,15 +95,33 @@ class Command(BaseCommand):
         ))
         if s["created_firms"]:
             self.stdout.write(f"  auto-created firms (not in seed set): {', '.join(s['created_firms'])}")
+        if s.get("boards"):
+            # One line per board that did not return rows, printed before the
+            # per-firm errors below because it is the specific version of the
+            # same news: `errors` keys on (firm, provider), so a firm with two
+            # boards on one provider gets one entry between them and the
+            # operator cannot tell which board it was about.
+            quiet = [b for b in s["boards"] if b["ok"] and not b["rows"]]
+            for b in quiet:
+                kind = "empty (board said so)" if b["empty_state"] else "zero rows"
+                self.stdout.write(self.style.NOTICE(
+                    f"  {kind} — {b['slug']}/{b['board']} ({b['provider']})"))
         if s["errors"]:
-            # Not everything in `errors` is a failed board. Two entries are
-            # notes about a board that fetched FINE but whose result was not
-            # a whole board (the partial-list and suspected-shape-change
-            # auto-close guards), and labelling those "board failed" reports
-            # a healthy fetch as a broken one — the exact misreading the
-            # guards exist to prevent. Same list, honest labels.
+            # Not everything in `errors` is a failed board. ONE entry is a
+            # note about a board that fetched FINE but whose result was not
+            # the whole board — the partial-list auto-close guard — and
+            # labelling that "board failed" reports a healthy fetch as a
+            # broken one.
+            #
+            # The suspected-shape-change guard used to be labelled a note
+            # too, on the strength of the shared phrase "skipped auto-close".
+            # It is not one: it fires when a board fetched clean and returned
+            # NOTHING while the firm still holds open postings, which is a
+            # vacated token or a page whose markup moved. Same list, honest
+            # labels, and `health._GUARD_NOTICE_MARKER` draws the line in the
+            # same place.
             for e in s["errors"]:
-                note = "skipped auto-close" in e["error"]
+                note = "skipped auto-close (partial list)" in e["error"]
                 label = "note" if note else "board failed"
                 style = self.style.NOTICE if note else self.style.WARNING
                 self.stderr.write(style(

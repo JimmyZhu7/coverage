@@ -65,7 +65,7 @@ import re
 import urllib.error
 import urllib.parse
 
-from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text
+from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text, unreadable
 from .models import FetchResult, Opportunity, SuccessFactorsBoard, VerificationResult
 
 name = "successfactors"
@@ -105,6 +105,30 @@ _TITLE_PROPERTY_RE = re.compile(
     r'data-careersite-propertyid="title"[^>]*>(.*?)</span>', re.DOTALL
 )
 _SEARCH_SHELL_RE = re.compile(r'id="search-results"|searchResultsShell', re.IGNORECASE)
+
+# RMK'S ONLY POSITIVE "NOTHING HERE" SIGNAL. The platform is a catch-all 200:
+# a wrong `q=`, a tenant that moved its board, a maintenance page and a real
+# zero-result search all arrive as HTTP 200 with no `data-row` in them, so
+# zero parsed rows on its own says nothing at all. What separates a genuinely
+# empty result set from an unreadable page is the search UI's own empty-state
+# panel, which names itself in the markup and in prose.
+#
+# The list is deliberately generous, and the asymmetry is why: calling a
+# readable-but-empty board "unreadable" costs one line in the health report
+# that a human resolves in a minute, while calling an unreadable board
+# "empty" hands `ingest` permission to close every open row the firm has.
+# When a tenant's phrasing is missing from this list the connector fails
+# loudly in the cheap direction.
+_EMPTY_STATE_RE = re.compile(
+    r"noSearchResults|no-search-results|searchResultsNoResults"
+    r"|no\s+jobs?\s+(?:were\s+)?found"
+    r"|no\s+(?:matching\s+)?(?:jobs?|results?|positions?|openings?|vacancies)"
+    r"\s+(?:were\s+)?(?:found|match|available)"
+    r"|no\s+open\s+positions?"
+    r"|0\s+jobs?\s+found"
+    r"|did\s+not\s+match\s+any",
+    re.IGNORECASE,
+)
 
 
 def _text(fragment: str) -> str:
@@ -153,6 +177,10 @@ def fetch(board: SuccessFactorsBoard) -> FetchResult:
     seen: set[str] = set()
     rows: list[dict] = []
     truncated = False
+    # Set when a keyword's FIRST page parsed nothing and the page said so in
+    # its own empty-state panel. Only consulted when the whole board came back
+    # with no rows at all.
+    saw_empty_state = False
     try:
         for keyword in board.keywords or ("",):
             startrow = 0
@@ -165,6 +193,20 @@ def fetch(board: SuccessFactorsBoard) -> FetchResult:
                         error=f"{BOT_BLOCK_PREFIX} ({challenge}) — board unreadable, not empty",
                     )
                 page = _parse(html, board.origin)
+                if not page and startrow == 0:
+                    # First page of this keyword, no rows. Either the search
+                    # honestly matched nothing (the panel says so) or this is
+                    # not a results page at all — see `_EMPTY_STATE_RE`.
+                    if _EMPTY_STATE_RE.search(html):
+                        saw_empty_state = True
+                    else:
+                        return FetchResult(
+                            board=board, ok=False, opportunities=[], raw_count=0,
+                            error=unreadable(
+                                f"successfactors 200 for q={keyword!r} with no "
+                                f"data-row and no empty-state panel "
+                                f"({len(html)} bytes)"),
+                        )
                 for row in page:
                     if row["url"] in seen:
                         continue
@@ -194,7 +236,8 @@ def fetch(board: SuccessFactorsBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities,
-                       raw_count=len(rows), truncated=truncated)
+                       raw_count=len(rows), truncated=truncated,
+                       empty_state=not opportunities and saw_empty_state)
 
 
 def classify_url(url: str) -> dict | None:

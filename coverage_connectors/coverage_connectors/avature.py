@@ -24,10 +24,28 @@ from __future__ import annotations
 import re
 import urllib.parse
 
-from .http import fetch_text
+from .http import fetch_text, unreadable
 from .models import AvatureBoard, FetchResult, Opportunity, VerificationResult
 
 name = "avature"
+
+# The feed's own envelope. An RSS 2.0 document always has a `<channel>`,
+# with or without items, so its presence is what separates "this feed is
+# empty" from "this is not the feed".
+#
+# THE TWO SHAPES THIS CATCHES, both HTTP-200-ish and both previously read as
+# an empty board. Avature answers a rate-limited or not-yet-warm feed with
+# **202 and an empty body** — urllib does not raise on a 2xx, so the old code
+# parsed "" into zero items and returned `ok=True`. And a tenant that has put
+# its careers site behind SSO serves a small **login stub** (~830 bytes of
+# sign-in HTML) at the same URL, which likewise parses to zero items. Either
+# one, on a firm whose feed normally carries a hundred postings, used to read
+# as "this firm closed everything".
+_CHANNEL_RE = re.compile(r"<channel\b", re.IGNORECASE)
+_LOGIN_STUB_RE = re.compile(
+    r"<input[^>]+type=[\"']password|name=[\"']password|/login|sign\s*in\b",
+    re.IGNORECASE,
+)
 
 _ITEM_RE = re.compile(r"<item\b[^>]*>(.*?)</item>", re.IGNORECASE | re.DOTALL)
 _TITLE_RE = re.compile(r"<title>\s*(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?\s*</title>",
@@ -73,6 +91,20 @@ def fetch(board: AvatureBoard) -> FetchResult:
     try:
         while offset < _MAX_ITEMS:
             xml = fetch_text(_feed_url(board.feed_url, offset))
+            if offset == 0 and not _CHANNEL_RE.search(xml):
+                # Not an RSS document. Name which of the two known shapes it
+                # is where we can — the operator's fix differs (wait/retry vs
+                # find the tenant's new public feed URL).
+                if not xml.strip():
+                    what = "empty body (Avature answers 202 with one)"
+                elif _LOGIN_STUB_RE.search(xml):
+                    what = f"a {len(xml)}-byte login stub, not the feed"
+                else:
+                    what = f"{len(xml)} bytes with no <channel> element"
+                return FetchResult(
+                    board=board, ok=False, opportunities=[], raw_count=0,
+                    error=unreadable(f"avature feed returned {what}"),
+                )
             items = _parse_items(xml)
             fresh = [(t, u) for t, u in items if u not in seen]
             if not fresh:
@@ -91,7 +123,11 @@ def fetch(board: AvatureBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to a multi-board run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opps,
-                       raw_count=len(opps), truncated=truncated)
+                       raw_count=len(opps), truncated=truncated,
+                       # A real `<channel>` with no `<item>` in it is the feed
+                       # saying the board is empty, and by this point one has
+                       # been seen.
+                       empty_state=not opps)
 
 
 def classify_url(url: str) -> dict | None:

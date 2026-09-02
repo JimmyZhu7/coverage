@@ -27,10 +27,31 @@ import json
 import re
 import urllib.error
 
-from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text
+from .http import BOT_BLOCK_PREFIX, bot_challenge_reason, fetch_text, unreadable
 from .models import FetchResult, IcimsBoard, Opportunity, VerificationResult
 
 name = "icims"
+
+# Positive content, the same shape talnet.py's `_VACANCY_MARKUP_RE` takes: a
+# page still rendering job cards while `_ANCHOR_RE` matches none of them has
+# had its markup changed under us, and reporting that as "this tenant has no
+# openings" is what the guard exists to prevent. Keyed on the card container
+# and the row-level classes rather than on `iCIMS_Anchor` alone, because the
+# anchor class is what the parser already looks for — a marker that can only
+# be present when the parse succeeded would never fire.
+_JOB_MARKUP_RE = re.compile(
+    r"iCIMS_JobsTable|iCIMS_JobCardItem|iCIMS_JobListing|data-job-id=",
+    re.IGNORECASE,
+)
+# iCIMS' own empty-results panel. A portal with nothing posted renders this
+# and no cards, which is a statement, not a silence.
+_NO_RESULTS_RE = re.compile(
+    r"iCIMS_NoResults|no\s+jobs?\s+(?:were\s+)?found"
+    r"|no\s+(?:matching\s+)?(?:jobs?|results?|openings?|positions?)"
+    r"\s+(?:were\s+)?(?:found|match|available)"
+    r"|there\s+are\s+no\s+(?:open\s+)?(?:jobs?|positions?)",
+    re.IGNORECASE,
+)
 
 # Sane upper bound on the pr= sweep — 40 pages of ~12 rows is far above any
 # single-tenant board seen live; this is a runaway guard, not a coverage cap.
@@ -74,6 +95,7 @@ def fetch(board: IcimsBoard) -> FetchResult:
     # True when we run out of allowed pages while pages were still yielding
     # new rows — the board has more than we read.
     truncated = False
+    empty_state = False
     try:
         for page in range(_MAX_PAGES):
             html = fetch_text(_list_url(board, page))
@@ -84,6 +106,28 @@ def fetch(board: IcimsBoard) -> FetchResult:
                     error=f"{BOT_BLOCK_PREFIX} ({challenge}) — board unreadable, not empty",
                 )
             fresh = [r for r in _parse(html) if r["id"] not in seen]
+            if not fresh and page == 0:
+                # Nothing on the FIRST page. Three possibilities and they are
+                # not interchangeable: the portal says it has no jobs, the
+                # portal is rendering jobs this parser can no longer read, or
+                # the response is not a job list at all. Only the first is an
+                # empty board.
+                if _NO_RESULTS_RE.search(html):
+                    empty_state = True
+                elif _JOB_MARKUP_RE.search(html):
+                    return FetchResult(
+                        board=board, ok=False, opportunities=[], raw_count=0,
+                        error=unreadable(
+                            f"icims tenant {board.tenant!r} renders job-card markup "
+                            f"but no listing parsed — card layout changed"),
+                    )
+                else:
+                    return FetchResult(
+                        board=board, ok=False, opportunities=[], raw_count=0,
+                        error=unreadable(
+                            f"icims tenant {board.tenant!r} answered {len(html)} bytes "
+                            f"with neither job cards nor a no-results panel"),
+                    )
             if not fresh:
                 break
             seen.update(r["id"] for r in fresh)
@@ -99,7 +143,8 @@ def fetch(board: IcimsBoard) -> FetchResult:
     except Exception as e:  # noqa: BLE001 — board-level failure, not fatal to the run
         return FetchResult(board=board, ok=False, opportunities=[], raw_count=0, error=str(e))
     return FetchResult(board=board, ok=True, opportunities=opportunities,
-                       raw_count=len(rows), truncated=truncated)
+                       raw_count=len(rows), truncated=truncated,
+                       empty_state=not opportunities and empty_state)
 
 
 def classify_url(url: str) -> dict | None:
