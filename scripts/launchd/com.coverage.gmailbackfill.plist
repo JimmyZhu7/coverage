@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.coverage.gmailbackfill</string>
+
+  <!-- The local stand-in for render.yaml's `coverage-gmail-backfill` cron.
+       "Scan Now" only queues (rescan_status="pending"); this is what claims
+       the row. gmail_poll is already running and is a DIFFERENT job (live
+       incremental sync off a stored cursor) — it never reads rescan_status.
+
+       One tick per launch rather than a while-loop script, so launchd owns
+       the schedule and a crashed tick cannot take the loop down with it. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/.venv/bin/python</string>
+    <string>__REPO__/coverage_web/manage.py</string>
+    <string>gmail_backfill</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DJANGO_SETTINGS_MODULE</key>
+    <string>coverage_web.settings.local</string>
+  </dict>
+
+  <!-- 300s = the */5 in render.yaml. Deliberately the SAME number as
+       production, not something friendlier: local latency should be the
+       latency a deployed student actually sees, or local testing quietly
+       stops being a test of the real experience. -->
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/coverage-gmail-backfill.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/coverage-gmail-backfill.log</string>
+</dict>
+</plist>

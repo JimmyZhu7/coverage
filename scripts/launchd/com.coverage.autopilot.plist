@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.coverage.autopilot</string>
+
+  <!-- The local stand-in for render.yaml's `coverage-autopilot` cron. The
+       "Run Autopilot" button on Today (capture.autopilot.start_run) writes a
+       QUEUED AutopilotRun and returns immediately — the strip says "starts
+       within a few minutes" — so something has to actually claim and decide
+       those rows, or a queued run just sits there forever. It did: run #5
+       stayed queued for 43+ minutes with 0 llm_calls until this command was
+       run by hand.
+
+       One tick per launch, same reasoning as com.coverage.gmailbackfill: a
+       crashed tick cannot take a loop down with it, since there is no
+       loop. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/.venv/bin/python</string>
+    <string>__REPO__/coverage_web/manage.py</string>
+    <string>capture_autopilot_worker</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DJANGO_SETTINGS_MODULE</key>
+    <string>coverage_web.settings.local</string>
+  </dict>
+
+  <!-- 300s = the */5 in render.yaml's coverage-autopilot cron. Same number as
+       production, not something friendlier — a student is watching this
+       strip, and local testing should feel exactly as fast as it really
+       is. -->
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/coverage-autopilot.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/coverage-autopilot.log</string>
+</dict>
+</plist>

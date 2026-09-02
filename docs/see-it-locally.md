@@ -57,5 +57,50 @@ contacts, opportunities.
 - **Stop:** close the black window.
 - **Restart:** double-click `Start Coverage.command` again.
 
+## The background jobs (optional, and the reason mail goes stale without them)
+
+Everything above renders without any of this. What the background jobs buy is
+the app being *current*: mail turning into touches, queued work actually
+getting claimed, listings not going a week old. On Render those are separate
+services in `render.yaml`; on a Mac they are launchd agents. Install all four:
+
+```
+./scripts/launchd/install.sh
+```
+
+That renders the templates in `scripts/launchd/` (they hold `__REPO__` where an
+absolute path goes, because a plist cannot expand a variable) into
+`~/Library/LaunchAgents/` and loads them. It is idempotent — it boots each job
+out before loading it — so re-running is how you apply an edit. Check with
+`launchctl list | grep coverage`; remove with `install.sh --uninstall`.
+
+| launchd agent | stands in for | shape |
+|---|---|---|
+| `com.coverage.gmailpoll` | `coverage-gmail-live` (**worker**) | runs forever, `KeepAlive` |
+| `com.coverage.gmailbackfill` | `coverage-gmail-backfill` cron | one tick every 5 min |
+| `com.coverage.autopilot` | `coverage-autopilot` cron | one tick every 5 min |
+| `com.coverage.refresh` | `coverage-scrape` cron | daily 08:30, via `scripts/refresh.sh` |
+
+**`gmailpoll` is the one that is easy to miss, and it was missed.** It is the
+only worker in the set: the other three are crons that launchd fires on a
+timer, while this one is a process that has to stay alive. `gmail_poll` is what
+turns a new Gmail message into a touch, and for two days nothing ran it. Gmail
+showed connected, the watch was registered, and 137 unread messages sat behind
+the stored cursor with `last_notification_at` still null since the day the
+mailbox was linked. Nothing was broken; a process simply did not exist. That is
+what this directory is for.
+
+The three plists that are crons deliberately reuse production's own numbers
+(`*/5`), so local latency is the latency a deployed student sees. `refresh` is
+the exception at once a day against Render's every six hours: it is the only
+job with a cost outside this machine, since it hits every firm's careers site.
+
+Three of `render.yaml`'s services have **no** local stand-in and are not
+missing by accident: `coverage-push-alerts`, `coverage-weekly-digest` and
+`coverage-pro-trial-expire` all send something outward, which wants a real
+sending domain rather than a laptop. `coverage-gmail-watch-renew` has none
+either, and that one is genuinely unnecessary here: it keeps a *push*
+registration alive, and the local set polls.
+
 Everything here is only on your Mac — no one else can see it until you deploy
 (see `docs/deploy.md`).

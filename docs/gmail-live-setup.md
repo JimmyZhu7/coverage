@@ -170,7 +170,13 @@ below just no-op.
      you got ADC working. Runs forever; syncs the moment Gmail notifies.
    Either way this is a long-running process, not a cron job like the rest
    of this app's commands — launchd/tmux/systemd, whatever keeps a process
-   alive on your machine.
+   alive on your machine. **On a Mac, run `./scripts/launchd/install.sh`
+   and this step is done**: `com.coverage.gmailpoll` is that job, with
+   `KeepAlive` rather than a timer for exactly this reason, and the same
+   `--interval 120` production uses. Do not leave it to "I'll start it in a
+   terminal." The vagueness of this paragraph is itself how the step got
+   skipped for two days while Gmail read as connected and 137 messages sat
+   behind the cursor unprocessed. See `docs/see-it-locally.md`.
 3. Also run, on a cron:
    - `python manage.py gmail_watch_renew` — daily. Google's `watch()`
      registration expires every 7 days regardless of activity; this keeps
@@ -189,7 +195,9 @@ below just no-op.
      7-day-overlap window for one already touched). Most ticks find nothing
      pending and no-op instantly. Use `--dry-run` to see what a run would do
      without writing anything — worth doing once against your own mailbox
-     before trusting it against a student's.
+     before trusting it against a student's. `scripts/launchd/install.sh`
+     installs this one too, as `com.coverage.gmailbackfill`, at
+     production's own `*/5`.
 
 ## 9. The 7-day token expiry — resolve this before any pilot, not after
 
