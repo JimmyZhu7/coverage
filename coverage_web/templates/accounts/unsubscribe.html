@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}{% if done %}Unsubscribed{% else %}Stop the weekly digest{% endif %} · Coverage{% endblock %}
+
+{% block head %}{% include "account/_auth_styles.html" %}{% endblock %}
+
+{% block content %}
+{% comment %}
+Two states, one page, no chrome of its own. The reader arrived from an inbox
+and may not be signed in, so this borrows `.auth-wrap` / `.auth-card` — the
+same centred single card the sign-in screens use — rather than the app's
+`.page` shell, which assumes a session and a nav.
+
+The GET state is a question with one button. The POST state is the answer,
+and it names Settings, because "you can turn it back on" is the only thing a
+person needs to know after unsubscribing from anything.
+{% endcomment %}
+<div class="auth-wrap">
+  <div class="auth-card">
+    {% if done %}
+      <h1 class="auth-title">Unsubscribed.</h1>
+      <p class="auth-sub">No more weekly digests to {{ email }}. Turn it back on in Settings.</p>
+      <a class="btn btn-primary auth-submit" href="{% url 'accounts:settings' %}#preferences">Open Settings</a>
+    {% else %}
+      <h1 class="auth-title">Stop the weekly digest?</h1>
+      <p class="auth-sub">Coverage sends {{ email }} one email a week, and only in a week your board has something due.</p>
+      <form method="post">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary auth-submit">Unsubscribe</button>
+      </form>
+      <p class="auth-foot">Everything else about your account stays exactly as it is.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

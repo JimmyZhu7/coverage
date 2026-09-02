@@ -112,8 +112,33 @@ def test_comparison_table_renders_every_row_in_both_columns(client):
 
     rows = re.findall(r"<tr>(.*?)</tr>", table, re.S)
     feature_rows = [r for r in rows if "cmp-group" not in r and "<th" not in r]
-    assert len(feature_rows) == 16, (
-        f"the spec calls for exactly 16 feature rows, found {len(feature_rows)}"
+    # TWELVE, DOWN FROM SIXTEEN, AND THE FOUR THAT LEFT ARE THE POINT.
+    #
+    # This number was 16 and this test was right to pin it: a comparison
+    # table that silently loses a row is exactly the failure a spot-check
+    # misses. What the count could not tell anyone is whether the rows were
+    # TRUE. The 2026-09-01 billing audit read the code behind each Pro cell
+    # and found four rows describing behaviour with no implementation
+    # anywhere in the repo:
+    #
+    #   Board refresh "Hourly on Tier 1"  -> one global 6-hourly cron
+    #     (render.yaml), no per-user or per-tier cadence, no plan reference
+    #     in directory/ at all.
+    #   Calendar sync                     -> GMAIL_LIVE_SCOPES is
+    #     gmail.readonly; there is no Calendar client and no calendar OAuth.
+    #   LinkedIn contact import           -> LinkedIn is a sign-in provider
+    #     and a URL field on a contact; nothing imports from it.
+    #   Season archive "Every cycle"      -> FirmCycleObservation history is
+    #     open to every plan; no per-user retention model exists.
+    #
+    # A cell in a plan column is a statement about what that plan does today,
+    # and an "In the works" badge on the header does not turn a table into a
+    # roadmap. Those four moved to the Pro card's "Planned, not yet built"
+    # list, where the same claims are made honestly and are pinned by
+    # test_pricing_honesty.py. Raising this number again means adding a row
+    # for something that ships.
+    assert len(feature_rows) == 12, (
+        f"twelve shipped feature rows, found {len(feature_rows)}"
     )
     for row in feature_rows:
         cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
@@ -123,13 +148,12 @@ def test_comparison_table_renders_every_row_in_both_columns(client):
                 "cmp-yes" in state or "cmp-no" in state or "cmp-val" in state
             ), f"a plan cell must be a check, a dash, or a value: {state!r}"
 
-    # The two states the page uses to say "this is where Pro differs".
-    assert table.count('class="cmp-no"') == 3, (
-        "exactly three rows are Pro-only: Gmail Live, Calendar sync, LinkedIn import"
+    # One row, not three: Gmail Live is now the only thing the code gates
+    # that Free does not get at all.
+    assert table.count('class="cmp-no"') == 1, (
+        "Gmail Live is the single Pro-only row the implementation supports"
     )
     assert "Gmail scan on demand" in table, "the free on-demand scan stays on the board"
-    assert "Every 6 hours" in table and "Hourly on Tier 1" in table
-    assert "This cycle" in table and "Every cycle" in table
     assert "Fast model" in table and "Stronger model" in table
     assert 'class="cmp-badge">In the works</span>' in table, (
         "one In-the-works marker on the Pro column header, and only one"

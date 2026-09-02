@@ -7,6 +7,27 @@
 <style>
   /* ---- Landing-page-only styles. Everything shared lives in coverage.css. -- */
 
+  /* ---- The hero sheen runs once ------------------------------------------
+     `.kin-hero::after` is a 7.5s diagonal sheen declared `infinite` in
+     coverage.css §15, and this page and /pricing/ are the only two that wear
+     it. Nothing about a marketing hero changes, so an animation that never
+     stops is decoration on a static thing: it draws the eye back to the
+     masthead every 7.5 seconds while the visitor is reading the section
+     below it. Once, on arrival, is the whole of what it was for.
+
+     `both` keeps the end state, which the shared rule's own comment says is
+     the sheen resting OFF-SCREEN; without it the band snaps back to a
+     visible resting position and stays there.
+
+     Longhands, not the `animation` shorthand, and that is the point:
+     coverage.css's reduced-motion block sets `animation: none`, which sets
+     animation-NAME to none. Nothing here touches the name, so under
+     `prefers-reduced-motion` there is still no animation at all. Written in
+     this page's own style block rather than in coverage.css because that
+     file belongs to another pass; when the shared rule becomes one-shot,
+     this block and pricing.html's copy of it can both go. */
+  .kin-hero::after { animation-iteration-count: 1; animation-fill-mode: both; }
+
   /* ---- Hero: the live desk ------------------------------------------------
      The product is the hero. Copy left, a framed mock of the Today queue
      right, so the first screen shows the thing rather than describing it.
@@ -52,6 +73,26 @@
     background: color-mix(in srgb, var(--accent) 5%, var(--surface));
     font-family: var(--font-mono); font-size: var(--fs-micro);
     text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-3); }
+  {% comment %}
+  DELIBERATELY UNCHANGED, AND HERE IS THE MEASUREMENT.
+
+  The 2026-09-01 audit reported this bar's label at 3.77:1 and the "live"
+  word at 3.25:1, both under AA. Both figures are wrong, and the reason is
+  worth writing down so the next pass does not "fix" them either.
+
+  This bar's background is `color-mix(in srgb, var(--accent) 5%, var(--surface))`.
+  Chromium serialises that through `getComputedStyle` as
+  `color(srgb 0.944902 0.957843 0.951373)` — components in 0..1, not 0..255 —
+  and the audit's contrast helper parses the numbers out and treats them as
+  0..255, so it measured this text against a near-black ground that does not
+  exist. Computed by hand against the real #f1f4f3 the bar actually paints:
+  --ink-3 is 5.01:1 and --ok is 5.81:1. Both clear AA at 11px.
+
+  An earlier cut of this commit moved both to --ink-2 on the strength of the
+  reported numbers, which bought nothing and cost the "live" word its green.
+  Reverted. The monogram below, whose 4.3:1 the same pass reported, IS real
+  (its colours are hsl(), which that helper parses correctly) and is fixed.
+  {% endcomment %}
   .desk-bar-live { display: inline-flex; align-items: center; gap: 6px;
     color: var(--ok); flex: none; }
   .desk-body { display: flex; align-items: center; gap: var(--s4);
@@ -136,10 +177,15 @@
     background: var(--surface); padding: 6px 14px 6px 6px;
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
     white-space: nowrap; }
+  /* 24% lightness on the ink, not 31%. Measured on the rendered page the old
+     pair was 4.3:1 at 11px, under AA — and the directory's copy of this exact
+     monogram had already been corrected to 24% (directory/_styles.html), so
+     the landing page was the last surface still failing on a tile that
+     appears ~40 times across the marquee. Same hue, same tint, darker ink. */
   .strip-chip .mono { width: 26px; height: 26px; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
     font-size: 11px; font-weight: var(--w-bold); overflow: hidden;
-    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 31%); }
+    background: hsl(var(--hue, 210) 52% 90%); color: hsl(var(--hue, 210) 55% 24%); }
   /* The real mark when we have one. The landing page is where these earn
      the most — it is the page making the claim that Coverage checks these
      firms directly — and it was still showing two-letter monograms after the
@@ -381,6 +427,20 @@
         <span>Today · your queue</span>
         <span class="desk-bar-live"><span class="live-dot"></span> live</span>
       </div>
+      {% comment %}
+      EVERY WORD ON THIS MOCK IS A WORD THE PRODUCT SAYS.
+
+      It used to read "Reply" and "Sent", both of which Today retired
+      (docs/specs/today-page.md F5): "Sent" invited a one-click sweep that
+      left the CRM believing 29 notes went out, and "Reply" read as "compose
+      a reply" when the button logs THEIR reply. `crm/_act_card.html` says
+      "Log it" and "They replied"; so does this. The done pill says "Logged",
+      which is the state "Log it" produces, not "Sent", which is a claim
+      about an email nobody watched leave.
+
+      Pinned by core/tests/test_home_product_vocabulary.py, which fails on
+      any retired verb reappearing here.
+      {% endcomment %}
       <div class="desk-body">
         <div class="desk-queue">
           <div class="desk-row" style="--i:0">
@@ -393,16 +453,16 @@
           <div class="desk-row" style="--i:1">
             <span class="desk-row-main">
               <b>Marcus Ito</b>
-              <span class="desk-why">Analyst · replied Tuesday</span>
+              <span class="desk-why">Analyst · wrote back Tuesday</span>
             </span>
-            <span class="desk-go">Reply</span>
+            <span class="desk-go">Log it</span>
           </div>
           <div class="desk-row" style="--i:2">
             <span class="desk-row-main">
               <b>Priya Nair</b>
               <span class="desk-why">Associate · new intro</span>
             </span>
-            <span class="desk-go is-done">Sent</span>
+            <span class="desk-go is-done">Logged</span>
           </div>
         </div>
         <div class="desk-pace">
@@ -489,21 +549,26 @@
         <p class="feature-kicker">Today</p>
         <h3>Wake up knowing exactly who to reach.</h3>
         <p>Your cadence becomes one ranked queue.</p>
+        {% comment %}Lane names off `crm/today.py::_TODAY_LANES`, verbs off
+        `crm/_act_card.html`. The old copy sold "Overdue first, then due",
+        which was the priority-echo lane set today-page.md F6 replaced with
+        semantic ones, and "One-click Sent, Reply", which F5 retired.
+        {% endcomment %}
         <ul class="feature-points">
-          <li>One-click Sent, Reply, Snooze, Skip</li>
+          <li>One click: Log it, They replied, Snooze, Skip</li>
           <li>Every card carries the angle to open with</li>
-          <li>Overdue first, then due, inside the tiers you set</li>
+          <li>Don't lose these first, then what you can move forward</li>
         </ul>
       </div>
       <div class="vig kin-reveal">
         <p class="vig-label">Today · one card, opened</p>
         <div class="v-decide">
-          <p class="v-decide-why"><span class="v-flag">Overdue</span> Tier 1 · no reply in 12 days</p>
+          <p class="v-decide-why"><span class="v-flag">Don't lose these</span> Tier 1 · no reply in 12 days</p>
           <p class="v-decide-name">Sarah Lin <span>· VP, Investment Banking</span></p>
           <p class="v-decide-angle">Angle: she mentioned the Hong Kong desk rotation on your last call.</p>
           <div class="v-rail">
-            <span class="is-primary">Sent</span>
-            <span>Reply</span>
+            <span class="is-primary">Log it</span>
+            <span>They replied</span>
             <span>Snooze</span>
             <span>Skip</span>
           </div>
@@ -572,7 +637,12 @@
           </div>
           <p class="bd">Hi, thank you for reaching out! Tuesday at 2pm works…</p>
         </div>
-        <p class="v-logline"><span class="ok-dot"></span> Logged reply from <b>Sarah Lin</b> · warmth moved to Warm</p>
+        {% comment %}"Emailed, Replied", not "Warm": `crm/views.py`'s
+        `_WARMTH_SECTIONS` is the board's own vocabulary and the warmth-board
+        vignette above already reads off it. This line was the last place on
+        the page still using the marketing shorthand that comment says was
+        dropped.{% endcomment %}
+        <p class="v-logline"><span class="ok-dot"></span> Logged reply from <b>Sarah Lin</b> · warmth moved to Emailed, Replied</p>
       </div>
     </div>
   </section>

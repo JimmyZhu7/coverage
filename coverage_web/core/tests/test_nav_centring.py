@@ -32,6 +32,7 @@ import re
 import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -42,8 +43,23 @@ NAV_PAGES = ["/app/", "/opportunities/", "/app/contacts/", "/app/calendar/",
 
 
 def _client():
+    """An ONBOARDED user, which every page in NAV_PAGES describes anyway.
+
+    `onboarded_at` was left None here until 2026-09-01, when the header
+    started hiding `.site-nav` for the length of the wizard: /welcome/ is the
+    Settings prefix, so every step of onboarding lit the SETTINGS pill and
+    handed a student on step 1 of 4 five ways out of the thing gating the
+    product. There is no nav to centre while that is true, so a fixture with
+    no `onboarded_at` was asserting the centring script against a header that
+    correctly has no pills in it.
+
+    Stamping the field does not soften anything these tests check. Today,
+    Opportunities, Network, Calendar and Settings are all pages you reach
+    after the wizard, and the bug being pinned (a pill measured before
+    `.site-auth` lays out) is a property of that finished header.
+    """
     user = get_user_model().objects.create_user(
-        email="nav@example.com", password="x" * 14
+        email="nav@example.com", password="x" * 14, onboarded_at=timezone.now(),
     )
     c = Client()
     c.force_login(user)

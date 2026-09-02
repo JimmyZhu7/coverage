@@ -16,11 +16,20 @@ What these pin: the fields exist under EXACTLY the names other readers use
 (`getattr(user, "languages", None)` and friends), the form round-trips them
 without silently clearing anything, the language vocabulary is the
 extractor's own, the data migration moves the founder's row and leaves
-`assets` otherwise intact, both pages render the controls with their ledes,
+`assets` otherwise intact, Settings renders the controls with their ledes,
 and the dead column is gone.
+
+WHERE THESE CONTROLS LIVE CHANGED ON 2026-09-01. Settings is now the only
+page that asks for languages, affiliations and a timezone; onboarding step 1
+stopped, because none of the three narrows the feed the wizard's preview
+panel is showing while the student answers. The two render tests near the
+bottom of this file say so in both directions, and the one that used to
+assert the wizard renders them says why it now asserts the opposite.
 """
 
 from __future__ import annotations
+
+import re
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -222,10 +231,46 @@ def test_the_settings_page_renders_the_three_controls_with_their_ledes(client, u
     _assert_controls_and_ledes(client.get(reverse("accounts:settings")).content.decode())
 
 
-def test_the_onboarding_profile_step_renders_the_three_controls_with_their_ledes(client, user):
+def test_the_onboarding_profile_step_asks_only_what_the_feed_reads(client, user):
+    """REWRITTEN 2026-09-01. This test used to assert the wizard's step 1
+    renders the same three controls Settings does, and it was right when the
+    two pages were meant to be the same form.
+
+    They are not any more. Step 1 measured 2080px tall — twelve controls
+    before a student has watched Coverage do anything — and the wizard's own
+    rule (accounts/views.py's ONBOARDING_STEPS comment: "asking early is how
+    a wizard gets abandoned") applies inside a step as much as across them.
+    Languages, affiliations and timezone came off it, because none of them
+    narrows the Opportunities feed the preview panel is showing while the
+    student answers: languages produce a WARNING on a role and never hide
+    one, affiliations feed an outreach draft that cannot exist before there
+    is a contact, and the timezone auto-follows the browser.
+
+    So the assertion flips rather than being dropped: Settings still renders
+    all three (the test above is unchanged and is what pins that), and step 1
+    must NOT, while still asking for everything the feed does read. The
+    behaviour this protects now is that the trim did not quietly take a
+    feed-relevant field with it.
+
+    accounts/tests/test_onboarding_chrome.py carries the other half: that the
+    three values ride through as hidden inputs, so a save from this step
+    cannot blank them.
+    """
     client.force_login(user)
     body = client.get(reverse("accounts:onboarding") + "?step=profile").content.decode()
-    _assert_controls_and_ledes(body)
+    visible = re.sub(r'<input type="hidden"[^>]*>', "", body)
+
+    assert 'name="languages"' not in visible
+    assert 'id="id_affiliations"' not in visible
+    assert 'id="id_timezone"' not in visible
+    assert "Languages, affiliations and timezone: set later in Settings." in body
+
+    # Still asked, because the feed reads every one of them.
+    assert 'id="id_study_level"' in body
+    assert "Some programmes are MBA- or PhD-only. This keeps them off your picks." in body
+    for field in ('name="school"', 'name="class_year"', 'name="target_cycles"',
+                  'name="regions"', 'name="tracks"'):
+        assert field in body
 
 
 def test_the_ledes_carry_no_em_dash():

@@ -54,6 +54,7 @@ week. See `assemble_digest`'s return contract below.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 from django.utils import timezone
@@ -97,9 +98,20 @@ def assemble_digest(user, *, today: date | None = None) -> dict | None:
     if not closing and not actions:
         return None
 
+    from accounts.unsubscribe import make_token
+
     picks, picks_note = _new_for_you(user, today=today)
     return {
         "today": today,
+        # THE WAY OUT, IN THE EMAIL ITSELF. settings-page.md's LATER section
+        # says the digest ships with "an unsubscribe link in the email that
+        # writes the same flag" as the Settings toggle, and it shipped
+        # without one: the footer explained why the mail arrived and offered
+        # nothing to do about it, so the only exit was to find a Settings
+        # page you have to be signed in to reach. The token is minted here,
+        # with the rest of the row assembly, so the templates stay renderers;
+        # `accounts.unsubscribe` owns what it means and what it grants.
+        "unsubscribe_token": make_token(user),
         # THE ONE LINE AT THE TOP. Advocates in place and firms with nobody
         # at all are the two numbers that predict whether this student gets
         # an interview, and the digest used to open on this week's
@@ -120,6 +132,46 @@ def assemble_digest(user, *, today: date | None = None) -> dict | None:
         "closing_reported": next((i["reported"] for i in closing if i.get("reported")), None),
         "picks_reported": next((p["reported"] for p in picks if p.get("reported")), None),
     }
+
+
+_WHY_YOU_TAIL = re.compile(r"\s*—\s*you\b", re.IGNORECASE)
+_WHY_EM_DASH = re.compile(r"\s*—\s*")
+_WHY_YEAR_RANGE = re.compile(r"(?<=\d)–(?=\d)")
+
+
+def why_line(why: str) -> str:
+    """A `Recommendation.why` string, in the digest's own voice.
+
+    THE DIGEST DOES NOT GET TO ASSUME THE SCORER'S WORDING. `directory.
+    recommend` writes its reason chips for a hover tooltip on a card, where
+    "For 2027-2028 grads — you" reads as an aside about the row under the
+    cursor. Joined into one line in an inbox it landed as a dangling
+    fragment, and the em dash in it is against house copy style (P7) besides.
+    The label at the source is being reworded by the pass that owns
+    `recommend.py`; this function is why that pass and this one cannot break
+    each other. It normalises whatever arrives, so the digest is correct
+    before, during and after that change, and stays correct if a future
+    reason introduces an em dash of its own.
+
+    Three rules, in order, each narrower than the next:
+
+      * the "— you" tail becomes "(yours)", which is what it means and is
+        the wording the source is moving to anyway;
+      * any other em dash becomes a comma, because the digest writes lists
+        with commas and dots, never with dashes;
+      * an en dash between two digits becomes a hyphen, so "2027–2028"
+        renders as one unbreakable-looking token in mail clients that treat
+        an en dash as a wrap opportunity.
+
+    Deliberately NOT a rewrite of the chip text. It changes punctuation and
+    one three-character idiom; every claim the scorer made survives it. A
+    digest that edited the scorer's reasons would be the second definition of
+    "why this role" (P5), which is exactly what this module exists not to be.
+    """
+    s = str(why or "")
+    s = _WHY_YOU_TAIL.sub(" (yours)", s)
+    s = _WHY_EM_DASH.sub(", ", s)
+    return _WHY_YEAR_RANGE.sub("-", s)
 
 
 def _join(names: list[str]) -> str:
@@ -475,8 +527,9 @@ def _new_for_you(user, *, today: date) -> tuple[list[dict], str]:
         # but the email templates want the one-line join the Opportunities
         # page's chips already spell out — `Recommendation.why` is exactly
         # that string, computed once, here, rather than re-joined in the
-        # template.
-        card["why"] = r.why
+        # template. `why_line` is the inbox's punctuation, not a rewrite;
+        # see its docstring.
+        card["why"] = why_line(r.why)
         o = by_id.get(r.candidate.id)
         card["deadline_marker"] = deadline_marker(
             o.deadline if o else None, getattr(o, "deadline_precision", "") if o else "",

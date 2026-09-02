@@ -3,7 +3,7 @@ Plain text, not HTML — autoescape is off for the whole file so a firm name
 with an "&" or a mailto: URL's "&"-joined query params render as literal
 characters instead of HTML entities (Django's template engine autoescapes by
 default regardless of the .txt extension; only an explicit tag turns it off).
-{% endcomment %}Coverage · your week of {{ digest.today|date:"N j" }}
+{% endcomment %}Coverage · your week of {{ digest.today|date:"M j" }}
 {% comment %}
 The line the digest leads with — see the HTML half for why. Built by
 `crm.digest._coverage_summary` from the counts the Network board's Coverage
@@ -69,4 +69,6 @@ when Closing did not already print it.
 Open Coverage: {{ site_url }}{% url 'crm:week' %}
 
 You're getting this because you're onboarded on Coverage. It runs weekly, built from your own tracked roles and contacts, and stops on its own the week neither has anything due.
+
+Stop these emails: {{ site_url }}{% url 'accounts:digest_unsubscribe' digest.unsubscribe_token %}
 {% endautoescape %}

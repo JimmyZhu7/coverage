@@ -15,9 +15,14 @@ labelled rule between social and email sign-in. Shared by login and signup.{% en
 
   .auth-providers { display: flex; flex-direction: column; gap: var(--s2); }
   .auth-providers form { margin: 0; }
+  /* `--r-ctl`, not the 999px this carried. One card, two control shapes 40px
+     apart: "Continue with Google" was a capsule and "Sign In" directly under
+     it was squared, and the token's own comment says --r-ctl is the shape of
+     a thing you press. A provider button and a submit button are the same
+     kind of thing, so they are now the same shape. */
   .auth-provider { width: 100%; display: inline-flex; align-items: center;
     justify-content: center; gap: var(--s3); padding: 11px 16px;
-    border: 1px solid var(--line-strong); border-radius: 999px;
+    border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
     background: var(--surface); color: var(--ink); cursor: pointer;
     font: var(--w-med) var(--fs-s)/1.2 var(--font-ui); text-transform: none;
     letter-spacing: normal; box-shadow: var(--shadow-1);
@@ -58,4 +63,35 @@ labelled rule between social and email sign-in. Shared by login and signup.{% en
     margin: var(--s5) 0 0; }
   .auth-legal { text-align: center; color: var(--ink-3); font-size: var(--fs-xs);
     margin: var(--s4) 0 0; }
+
+  /* ---- Finger targets ------------------------------------------------------
+     Measured at 375px: "Forgot?" 43x19, the "Keep me signed in" row 21px,
+     "Create one" 65x16, the two footer links 19px. Every one of them is a
+     link a student on a phone has to hit on the first screen of the product,
+     and every one of them was under half the 44px floor the rest of the app
+     keeps.
+
+     `pointer: coarse` only — on a mouse these are correctly sized text links
+     and inflating them would put 44px of dead space around a word inside a
+     sentence. The two links that sit INSIDE a sentence (.auth-foot a,
+     .auth-legal a) grow by padding rather than by min-height, so the line
+     they belong to does not gain a 44px step; the label row and the standalone
+     "Forgot?" take the floor directly.
+
+     Lives here rather than in coverage.css because these classes are this
+     card's own; the site-wide `.btn` floor is the CSS pass's to write. */
+  @media (pointer: coarse) {
+    /* Wide as well as tall: "Forgot?" measures 43px across, one pixel under
+       the floor, and `justify-content: flex-end` keeps the word where the
+       row's right edge always put it. */
+    .auth-mini { display: inline-flex; align-items: center; justify-content: flex-end;
+      min-height: 44px; min-width: 44px; }
+    /* Baseline alignment with the label beside it is what the row was built
+       on, so the taller target is pulled back out of the flow rather than
+       pushing the password field down. */
+    .auth-label-row { align-items: center; margin-bottom: calc(var(--s2) * -1); }
+    .auth-check { min-height: 44px; }
+    .auth-foot a, .auth-legal a { display: inline-block;
+      padding: 14px 6px; margin: -14px -6px; }
+  }
 </style>

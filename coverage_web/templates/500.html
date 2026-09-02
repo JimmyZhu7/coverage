@@ -6,20 +6,45 @@ something has already broken, so this page must not depend on context
 processors, static-file resolution, or anything else that might be the thing
 that just failed. Inline styles, absolute links, nothing clever — the one
 page that must never itself 500.
+
+That constraint is also why the palette below is a block of literal hex rather
+than `var(--paper)` and friends: an error page cannot depend on a stylesheet
+that may be exactly what is down. The values are copied from
+static/css/coverage.css §1 (light) and its dark block, so the page reads as
+Coverage in both schemes instead of as the pre-v4 ink-and-navy it wore until
+now (#171717 ink, #1d3a5f link, no dark scheme at all — a light card thrown at
+a reader whose whole OS is dark).
 {% endcomment %}
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1f4e79">
+  <meta name="theme-color" content="#141712" media="(prefers-color-scheme: dark)">
   <title>Something broke · Coverage</title>
   <style>
+    :root {
+      color-scheme: light dark;
+      --paper: #f2f4ee;
+      --ink: #191b16;
+      --ink-2: #4e5248;
+      --accent: #1f4e79;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --paper: #141712;
+        --ink: #eaece5;
+        --ink-2: #b2b5a8;
+        --accent: #7aa7d4;
+      }
+    }
     body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #f2f4ee; color: #171717; display: grid; place-items: center;
-      min-height: 100vh; }
+      background: var(--paper); color: var(--ink); display: grid;
+      place-items: center; min-height: 100vh; }
     main { text-align: center; padding: 24px; }
     h1 { font-size: 22px; margin: 0 0 8px; }
-    p { color: #555; margin: 0 0 16px; }
-    a { color: #1d3a5f; }
+    p { color: var(--ink-2); margin: 0 0 16px; }
+    a { color: var(--accent); }
   </style>
 </head>
 <body>

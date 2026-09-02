@@ -5,7 +5,9 @@ from . import views
 app_name = "accounts"
 
 # Mounted at /welcome/ (see coverage_web/urls.py). Everything is login-
-# required except the two legal pages.
+# required except the two legal pages and the digest unsubscribe link, which
+# is opened from an inbox by a reader who may have no session at all (see
+# accounts/unsubscribe.py).
 urlpatterns = [
     path("", views.onboarding, name="onboarding"),
     # The wizard's live preview panel. Read-only; the wizard renders it
@@ -29,6 +31,10 @@ urlpatterns = [
     # toggle POSTs to these directly from JS.
     path("push/subscribe/", views.push_subscribe, name="push_subscribe"),
     path("push/unsubscribe/", views.push_unsubscribe, name="push_unsubscribe"),
+    # The link in the weekly digest's footer. GET confirms, POST writes the
+    # same `weekly_digest_opt_out` flag the Settings toggle writes.
+    path("unsubscribe/<str:token>/", views.digest_unsubscribe,
+         name="digest_unsubscribe"),
     path("privacy/", views.privacy, name="privacy"),
     path("terms/", views.terms, name="terms"),
 ]

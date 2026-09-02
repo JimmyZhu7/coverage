@@ -53,7 +53,16 @@
   "Add to Home Screen" produces a bare bookmark. start_url is /app/ — an
   installed Coverage opens on Today, not the marketing page.{% endcomment %}
   <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
-  <meta name="theme-color" content="#1d3a5f">
+  {% comment %}Browser-chrome tint. The value was #1d3a5f, the navy from
+  before the v4 palette landed, so the one piece of UI the site paints
+  OUTSIDE its own document was the last thing still wearing the old accent.
+  Light is `--accent` (#1f4e79). Dark is `--paper` (#141712), not the dark
+  accent: the dark accent is a LIGHT blue (#7aa7d4), and a light blue address
+  bar above a near-black page is the same "pastel tile glowing on dark" the
+  audit flagged elsewhere. The unqualified tag stays first as the fallback
+  for clients that do not understand `media` on this meta.{% endcomment %}
+  <meta name="theme-color" content="#1f4e79">
+  <meta name="theme-color" content="#141712" media="(prefers-color-scheme: dark)">
   {% comment %}Registers the notification-display worker (deadline push
   alerts — see static/service-worker.js's own docstring for why it is NOT
   an offline-cache worker) for every signed-in visitor, same "students live
@@ -87,6 +96,31 @@
     })();
   {% endscript %}
   <link rel="stylesheet" href="{% static 'css/coverage.css' %}">
+  {% comment %}
+  THE SHELL'S OWN FINGER TARGETS, and the only CSS this file carries.
+
+  Measured at 375px: the footer's three links are 19px tall and the wordmark
+  21px, on every page of the product. They are text links, so they are
+  correctly sized for a cursor; on a phone they are under half the 44px floor
+  the rest of the app keeps, and the footer is where a student goes looking
+  for Privacy and Terms.
+
+  Padding plus an equal negative margin, not `min-height`: the target grows,
+  the footer does not. `pointer: coarse` only, so nothing changes on a
+  desktop.
+
+  This belongs in coverage.css beside `.site-footer-inner a`, and it will go
+  there: that file is another pass's, so the rule sits with the shell it is
+  about rather than being written into a file two agents are editing at once.
+  {% endcomment %}
+  <style>
+    @media (pointer: coarse) {
+      .site-footer-inner nav a, .site-footer-inner > a {
+        display: inline-block; padding: 13px 6px; margin: -13px -6px;
+      }
+      .site-auth a { display: inline-flex; align-items: center; min-height: 44px; }
+    }
+  </style>
   {# Vendored static asset, not a CDN or Node build — see coverage_web/static/vendor/. #}
   <script src="{% static 'vendor/htmx.min.js' %}" defer></script>
   {% block head %}{% endblock %}
@@ -120,6 +154,27 @@ select on.
   <header class="site-header">
     <div class="site-header-inner">
       <a class="wordmark" href="/">{% include "_logo.html" %}Coverage</a>
+      {% comment %}
+        NO SITE NAV DURING THE WIZARD. /welcome/ is the Settings prefix, so
+        every step of onboarding lit the SETTINGS pill: a student on step 1 of
+        4 was told they were in Settings, and handed five ways out of a wizard
+        that gates the whole product. While `onboarded_at` is None the header
+        is the wordmark plus the account block — Sign Out stays, because
+        leaving the account is not the same as wandering into a product that
+        has not been set up yet. Pinned by
+        accounts/tests/test_onboarding_chrome.py.
+
+        `hide_site_nav` is the same argument for a page that is not the
+        wizard: the digest's unsubscribe link is opened from an inbox, often
+        by someone with no session, and it lives under /welcome/ — so it lit
+        SETTINGS too, on a page that is not Settings, for a reader who has
+        not asked to see the product at all. A view sets the flag when its
+        page is a destination rather than a place in the app.
+      {% endcomment %}
+      {% comment %}Nested rather than one condition: Django templates have no
+      parentheses, and `a and b or a and c` is a thing to re-read every time
+      rather than a thing to read once.{% endcomment %}
+      {% if not hide_site_nav %}{% if not user.is_authenticated or user.onboarded_at %}
       <nav class="site-nav" aria-label="Primary">
         {% comment %}
           Site IA: Today, Opportunities, Network, Calendar, Talk, Settings.
@@ -145,7 +200,12 @@ select on.
         <a href="/assistant/"{% if request.path|slice:":10" == "/assistant" %} class="active"{% endif %}>Talk</a>
         <a href="/welcome/"{% if request.path|slice:":8" == "/welcome" or request.path|slice:":8" == "/capture" %} class="active"{% endif %}>Settings</a>
       </nav>
-      <div class="site-auth">
+      {% endif %}{% endif %}
+      {% comment %}A landmark, and now a named one. axe flagged the page as
+      carrying unlabelled navigation regions; a screen reader listing
+      landmarks got "navigation" twice with nothing to tell them apart.
+      {% endcomment %}
+      <nav class="site-auth" aria-label="Account">
         {% if user.is_authenticated %}
           <a href="/welcome/#profile" class="site-user">
             {% if user.avatar %}
@@ -173,7 +233,7 @@ select on.
         {% else %}
           <a href="/accounts/login/">Sign In</a>
         {% endif %}
-      </div>
+      </nav>
       {% comment %}On the phone the nav is one scrollable row; without this
       the row can open scrolled to wherever the browser left it, with the
       page you are ON out of view. block:'nearest' so centring the pill can
@@ -319,7 +379,7 @@ select on.
         {% include "_logo.html" %}<span>Coverage</span>
       </a>
       <span>Recruiting deadlines and a networking CRM.</span>
-      <nav>
+      <nav aria-label="Footer">
         <a href="/pricing/">Pricing</a>
         <a href="/welcome/privacy/">Privacy</a>
         <a href="/welcome/terms/">Terms</a>
@@ -403,10 +463,51 @@ select on.
         btn.setAttribute("aria-haspopup", "listbox");
         btn.setAttribute("aria-expanded", "false");
         btn.setAttribute("aria-controls", listId);
-        if (sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
         var val = document.createElement("span");
         val.className = "csel-value";
+        val.id = listId + "-val";
         btn.appendChild(val);
+        // WHAT THIS BUTTON IS CALLED. The native <select> keeps its label;
+        // the button a sighted user actually operates had none, so the four
+        // filters on the star page announced as "button, Any Year,
+        // collapsed" with no clue that "Any Year" is the Programme Year
+        // filter. `aria-labelledby` naming a caption AND the value span
+        // gives "Programme Year Any Year", which is the native control's own
+        // accessible name.
+        //
+        // THE CAPTION IS COPIED, NOT REFERENCED, and that is the whole
+        // subtlety. Half these selects sit INSIDE their <label> (see
+        // directory/opportunities.html), so the label element's text is the
+        // caption plus every option in the list — pointing at it would name
+        // the button "Programme Year Any Year 2035 (34) 2034 (34) ...". So
+        // the caption is read out of a clone with the control removed, and
+        // parked in a visually-hidden span of our own. That one path then
+        // covers all three shapes: a wrapping label, a `for=`-associated
+        // one, and a select carrying only `aria-label`.
+        //
+        // `sel.labels` rather than a `label[for=...]` query because it is
+        // the platform's own answer and it finds the wrapping case too.
+        var caption = "";
+        var lbl = sel.labels && sel.labels[0];
+        if (lbl) {
+          if (lbl.contains(sel)) {
+            var clone = lbl.cloneNode(true);
+            var innerSel = clone.querySelector("select");
+            if (innerSel) innerSel.remove();
+            caption = (clone.textContent || "").trim();
+          } else {
+            caption = (lbl.textContent || "").trim();
+          }
+        }
+        if (!caption) caption = sel.getAttribute("aria-label") || "";
+        if (caption) {
+          var capSpan = document.createElement("span");
+          capSpan.className = "vh";
+          capSpan.id = listId + "-lbl";
+          capSpan.textContent = caption;
+          wrap.appendChild(capSpan);
+          btn.setAttribute("aria-labelledby", capSpan.id + " " + val.id);
+        }
         btn.insertAdjacentHTML("beforeend",
           '<svg class="csel-caret" viewBox="0 0 16 16" aria-hidden="true">' +
           '<path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" ' +
@@ -866,11 +967,21 @@ select on.
           el.id = "hx-toast";
           el.setAttribute("role", "status");
           el.setAttribute("aria-live", "polite");
+          // `.msg` (coverage.css, the same class every flash message on
+          // every page wears) rather than a private set of inline values.
+          // The old inline block was a SECOND toast style beside it: 14px
+          // where .msg is 13px and off the type scale entirely, an 8px
+          // radius where the app's control radius is 10px, and its own
+          // hardcoded dark fallbacks that could not follow the palette. One
+          // toast style, one radius, one type size.
+          //
+          // Only POSITION stays inline, because that is the one thing .msg
+          // does not carry: the flash stack is placed by its `.page-msgs`
+          // parent, and this element has none.
+          el.className = "msg";
           el.style.cssText =
             "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);" +
-            "z-index:200;padding:10px 16px;border-radius:8px;font-size:14px;" +
-            "background:var(--surface,#1c1f1a);color:var(--ink,#e8e6df);" +
-            "border:1px solid var(--line,#3a3d36);box-shadow:0 4px 16px rgba(0,0,0,.35);";
+            "z-index:200;width:max-content;max-width:min(360px,calc(100vw - 32px));";
           document.body.appendChild(el);
         }
         el.textContent = text;

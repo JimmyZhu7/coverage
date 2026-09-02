@@ -217,7 +217,21 @@ def test_one_student_never_sees_another_s_thread(client, user):
     assert "other student's private plan" not in body
 
 
-def test_the_nav_offers_the_page_on_every_signed_in_screen(signed_in):
+def test_the_nav_offers_the_page_on_every_signed_in_screen(signed_in, user):
+    """The student is stamped as onboarded, which every screen this test names
+    already implies.
+
+    base.html stopped rendering `.site-nav` for the length of the onboarding
+    wizard on 2026-09-01: /welcome/ is the Settings prefix, so every step lit
+    the SETTINGS pill and handed a student on step 1 of 4 five ways out of the
+    thing gating the product. Today is a page you reach after that wizard, so
+    a fixture with no `onboarded_at` was asserting the nav against a header
+    that correctly has no pills in it. Nothing about what this test checks
+    changes: the Talk link still has to be on the nav of a working screen.
+    """
+    user.onboarded_at = timezone.now()
+    user.save(update_fields=["onboarded_at"])
+
     body = signed_in.get(reverse("crm:week")).content.decode()
 
     assert 'href="/assistant/"' in body

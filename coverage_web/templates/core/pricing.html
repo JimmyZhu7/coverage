@@ -40,6 +40,12 @@
      renders .kin-hero is touched. */
   .page > .kin-hero { max-width: var(--page-w); margin-inline: auto; }
 
+  /* The hero sheen runs once. Same override, same reasoning, same removal
+     condition as core/home.html's copy — see the long note there. Longhands
+     only, so coverage.css's `prefers-reduced-motion` block (which sets the
+     animation NAME to none) still wins. */
+  .kin-hero::after { animation-iteration-count: 1; animation-fill-mode: both; }
+
   .aud { max-width: var(--page-w); margin: 0 auto; }
   .aud > input { position: absolute; opacity: 0; pointer-events: none; }
   .seg { display: flex; justify-content: center; align-items: center; gap: 4px;
@@ -53,6 +59,16 @@
     font-size: var(--fs-s); font-weight: var(--w-med); color: var(--ink-2);
     transition: background var(--t-fast), color var(--t-fast); }
   .seg label:hover { color: var(--ink); background: var(--accent-soft); }
+  /* The capsule stays a capsule: this is a SEGMENTED CHOICE, which is the one
+     shape exempt from the "a control you press takes --r-ctl" rule (the site
+     nav's own `.subnav` keeps its pill for the same reason). What it does not
+     get to keep is a 33px tap target on the first control a phone visitor
+     meets on this page. The container's 4px padding is what turns two 44px
+     labels into a 52px capsule, so it gives that up at the same breakpoint. */
+  @media (pointer: coarse) {
+    .seg { padding: 0; }
+    .seg label { min-height: 44px; }
+  }
   #aud-ind:checked ~ .seg label[for="aud-ind"],
   #aud-team:checked ~ .seg label[for="aud-team"] {
     background: var(--accent); color: var(--on-accent); }
@@ -187,6 +203,33 @@
      weight. The old filled minus-in-a-circle was a second metaphor
      saying "excluded", which is not what a Pro feature is. */
   .price-card.preview .plan-features li::before { background: var(--ink-3); }
+  /* ---- Planned, not yet built ---------------------------------------------
+     Visibly a different list from the one above it, because it is a different
+     kind of claim. No check glyph (the check means "this is in the plan"),
+     muted ink, and a dash the eye reads as "pending" rather than "included" —
+     the same dash the comparison table's `.cmp-no` uses, so the page has one
+     glyph for "not here".
+
+     The divider between the two lists is a border-BOTTOM on the list above,
+     not a border-top on the heading below, and only on the card that has a
+     planned list. That is the same hairline `.plan-price` already draws for
+     the same reason ("everything above is what it costs, everything below is
+     what you get"), so the card reads as two rules of one kind rather than
+     gaining a third edge treatment — and the measured panel-style count
+     stays at 8 rather than gaining a ninth border signature. */
+  .price-card.preview .plan-features { margin-bottom: var(--s5);
+    padding-bottom: var(--s5); border-bottom: 1px solid var(--line); }
+  .plan-planned-head { margin-top: 0; }
+  .plan-planned { list-style: none; margin: 0 0 var(--s6); padding: 0;
+    display: flex; flex-direction: column; gap: var(--s3); }
+  .plan-planned li { position: relative; padding-left: 26px;
+    font-size: var(--fs-s); color: var(--ink-3); line-height: 1.55;
+    text-wrap: pretty; }
+  .plan-planned li::before { content: ""; position: absolute; left: 0; top: 4px;
+    width: 16px; height: 16px; background: var(--ink-3);
+    -webkit-mask: var(--icon-dash) no-repeat center / 16px;
+    mask: var(--icon-dash) no-repeat center / 16px; }
+
   .plan-cta { margin-top: auto; }
   .plan-cta .btn { width: 100%; justify-content: center; display: inline-flex; }
   .plan-note { font-size: var(--fs-xs); color: var(--ink-3);
@@ -300,6 +343,51 @@
        already at their floor. Together with .cmp's min-width this is what
        makes .cmp-scroll actually scroll rather than crush. */
     .cmp td:not(:first-child), .cmp thead th:not(:first-child) { width: 130px; }
+  }
+
+  /* ---- The table stops being a table on a phone ---------------------------
+     Measured at 375px: `.cmp` held its 480px min-width inside a 375px
+     `.cmp-scroll`, so the Pro column, the whole point of the comparison, sat
+     entirely off-screen with no fade, no shadow and no hint that there was
+     anything to the right of "Free". A horizontal scroller nobody can see is
+     the same as a missing column.
+
+     Below 560 each row becomes a small stack instead: the feature name on its
+     own line, then Free and Pro under it, each labelled. The labels are
+     generated (`::before` on the 2nd and 3rd cell) rather than added to the
+     markup, so the table stays one semantic table with one header row for a
+     screen reader and nothing is duplicated in the DOM.
+
+     `min-width: 0` on `.cmp` is what actually stops the scroll: without it
+     the 480px contract survives the display change and the stack scrolls too.
+
+     `.cmp-group` rows (the four section headings) span all three columns, so
+     they are excluded from the label rule and from the value-row layout. */
+  @media (max-width: 560px) {
+    .cmp-scroll { overflow-x: visible; }
+    .cmp { min-width: 0; }
+    /* The head is redundant once every cell carries its own plan label; it is
+       hidden rather than removed so the "In the works" marker on Pro is still
+       announced, and the caption still names the table. */
+    .cmp thead { position: absolute; width: 1px; height: 1px; padding: 0;
+      margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+      white-space: nowrap; border: 0; }
+    .cmp, .cmp tbody, .cmp tr, .cmp td { display: block; width: auto; }
+    .cmp tr { border-bottom: 1px solid var(--line); padding: var(--s3) 0; }
+    .cmp td { border-bottom: 0; }
+    .cmp th[scope="row"], .cmp td:first-child { padding: 0 0 var(--s2); }
+    .cmp td:not(:first-child), .cmp thead th:not(:first-child) {
+      width: auto; text-align: left; padding: 3px 0 3px var(--s4); }
+    /* The plan each value belongs to, said once per cell. */
+    .cmp td:not(.cmp-group):nth-child(2)::before { content: "Free"; }
+    .cmp td:not(.cmp-group):nth-child(3)::before { content: "Pro"; }
+    .cmp td:not(.cmp-group):nth-child(2)::before,
+    .cmp td:not(.cmp-group):nth-child(3)::before {
+      display: inline-block; width: 46px; margin-left: calc(var(--s4) * -1);
+      font-family: var(--font-mono); font-size: var(--fs-xs);
+      color: var(--ink-3); }
+    .cmp td.cmp-group { padding: var(--s2) 0; }
+    .cmp tr:has(> .cmp-group) { border-bottom: 0; padding-bottom: 0; }
   }
 
   /* .kin-reveal is a page-load rise; nothing here depends on it to be
@@ -441,25 +529,70 @@
             bullet.
             {% endcomment %}
             <li>Gmail Live: real-time sync that logs itself.</li>
-            <li>Calendar sync too, only if you connect it.</li>
+            <li>Scan your inbox any time, instead of once every {{ free_rescan_days }} days.</li>
             <li>Talk to Coverage on a stronger model, with sharper
               judgement on where your week should go.
               <span class="feat-meta">Three times the credits: {{ advisor_pro_grant }} a month.</span></li>
-            <li>Hourly refresh on your Tier 1 firms, instead of every six hours</li>
+          </ul>
+          {% comment %}
+          WHAT IS BUILT AND WHAT IS NOT, SPLIT ON THIS CARD.
+
+          Four of the six bullets this list used to carry had no code behind
+          them anywhere in the repo: hourly Tier 1 refresh (the board runs one
+          global 6-hourly cron, render.yaml, with no per-user or per-tier
+          cadence), LinkedIn contact import (LinkedIn is a sign-in provider
+          and a URL field on a contact; nothing imports from it), the
+          multi-cycle archive (FirmCycleObservation history is open to
+          everyone and no plan check exists in directory/ at all), and
+          calendar sync (GMAIL_LIVE_SCOPES is gmail.readonly only; there is no
+          Calendar client). An "In the works" badge on the card header does
+          not make a feature list a roadmap — a bullet in a plan column reads
+          as a thing the plan has.
+
+          The three above are the three the code actually gates:
+          capture/gmail_live.py's watch registration and gmail_poll's
+          `user__plan="pro"` filter, `free_rescan_unlocks_at` returning None
+          for Pro, and assistant/plans.py picking the model plus
+          billing/credits.py's 60-vs-180 grant.
+          {% endcomment %}
+          <p class="plan-includes plan-planned-head">Planned, not yet built</p>
+          <ul class="plan-planned">
+            <li>Calendar sync, only if you connect it</li>
+            <li>Hourly refresh on your Tier 1 firms. The board refreshes every
+              six hours for everyone today.</li>
             <li>LinkedIn contact import</li>
             <li>Multi-cycle archive of past seasons</li>
           </ul>
           <div class="plan-cta">
             {% include "core/_waitlist_form.html" with source="pricing_page" label="Notify Me When Pro Opens" aria="Email for the Pro waitlist" note="Announced in the app first." %}
+            {% comment %}
+            The trial was decided (PRO_TRIAL_DAYS / PRO_TRIAL_TRIGGER,
+            settings/base.py) and shipped (accounts/trials.py, called from
+            capture/gmail_live.py's connect path) and then said nowhere a
+            student looks: not here, not in the wizard, not on the Settings
+            Gmail card. The number is read from the setting through
+            core.views.pricing for the same reason every other figure on this
+            page is — a typed 14 goes stale the day someone changes it.
+            {% endcomment %}
+            <p class="plan-note">Connect Gmail and Pro is free for {{ pro_trial_days }} days. One trial per account.</p>
           </div>
         </article>
       </div>
 
       {% comment %}
-      The inventory, after the pitch. Two rules govern what may appear here:
-      every number comes from the credit system via context (row "Credits a
-      month"), and every typed string mirrors a claim the Pro card already
-      makes, so the table can never drift away from the cards above it.
+      The inventory, after the pitch. Three rules govern what may appear here:
+      every number comes from the app's own settings via context (the credit
+      rows, the Free scan interval), every typed string mirrors a claim the
+      Pro card already makes, so the table can never drift away from the cards
+      above it, and NOTHING UNBUILT GETS A ROW.
+
+      That third rule is why four rows came off it (2026-09-01): board refresh
+      "Hourly on Tier 1", Calendar sync, LinkedIn contact import and the
+      season archive all drew a Pro cell for behaviour with no implementation
+      anywhere in the repo. They live in the Pro card's "Planned, not yet
+      built" list now, which is the honest place for them; a table cell is a
+      statement about what the plan does today. See that card's own comment
+      for the search behind each one.
 
       No "messages a day" row on purpose: Free and Pro both compute to 15
       today, and a row of two identical numbers sells nothing while implying
@@ -510,11 +643,6 @@
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
               </tr>
-              <tr>
-                <td>Board refresh</td>
-                <td><span class="cmp-val">Every 6 hours</span></td>
-                <td><span class="cmp-val">Hourly on Tier 1</span></td>
-              </tr>
 
               <tr><td class="cmp-group" colspan="3">The CRM</td></tr>
               <tr>
@@ -527,23 +655,23 @@
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
               </tr>
+              {% comment %}
+              Two ticks used to sit here, side by side, saying Free and Pro get
+              the same on-demand Gmail scan. They do not: `free_rescan_unlocks_at`
+              (capture/gmail_live.py) returns None for Pro and
+              `last_scan + GMAIL_FREE_RESCAN_INTERVAL_DAYS` for Free, and
+              capture/views.py refuses the request in between. So the ONE real
+              Free limit the product enforces was the one thing the table drew
+              as a match. Both cells are values now, and the Free number comes
+              from the setting through the view.
+              {% endcomment %}
               <tr>
                 <td>Gmail scan on demand</td>
-                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
-                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
+                <td><span class="cmp-val">Every {{ free_rescan_days }} days</span></td>
+                <td><span class="cmp-val">Any time</span></td>
               </tr>
               <tr>
                 <td>Gmail Live: real-time, logs itself</td>
-                <td><span class="cmp-no" role="img" aria-label="Not included">&ndash;</span></td>
-                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
-              </tr>
-              <tr>
-                <td>Calendar sync</td>
-                <td><span class="cmp-no" role="img" aria-label="Not included">&ndash;</span></td>
-                <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
-              </tr>
-              <tr>
-                <td>LinkedIn contact import</td>
                 <td><span class="cmp-no" role="img" aria-label="Not included">&ndash;</span></td>
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
               </tr>
@@ -570,11 +698,6 @@
                 <td>Delete everything, instantly</td>
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
                 <td><span class="cmp-yes" role="img" aria-label="Included"></span></td>
-              </tr>
-              <tr>
-                <td>Season archive</td>
-                <td><span class="cmp-val">This cycle</span></td>
-                <td><span class="cmp-val">Every cycle</span></td>
               </tr>
             </tbody>
           </table>

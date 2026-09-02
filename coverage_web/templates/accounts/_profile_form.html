@@ -166,6 +166,46 @@ independent of whether anything currently renders it.
 {{ form.tracks.errors }}
 
 {% comment %}
+`compact` is passed by onboarding step 1 and by nothing else, so Settings
+renders exactly what it always has.
+
+WHY THREE FIELDS COME OFF STEP 1. The step measured 2080px tall: photo, name,
+school, class year, study level, school email, 8 cycle chips, 6 region chips,
+6 track chips, 12 language chips, an affiliations textarea and a 600-option
+timezone select, all before the student has seen the product do anything.
+accounts/views.py's own ONBOARDING_STEPS comment states the rule this breaks
+("asking early is how a wizard gets abandoned"), and it applies inside a step
+as much as across them. What stays is what the FEED reads: school, class year,
+study level, cycles, regions, tracks. Languages, affiliations and timezone are
+already on the Settings page, unchanged, and none of them narrows the
+Opportunities feed:
+
+  languages     -> directory/views.py::_language_fit, a WARNING on a role
+                   ("Mandarin needed, not in your profile"). It never hides a
+                   row, so a blank list costs the student nothing on day one.
+  affiliations  -> the hooks an outreach draft opens with. There is no draft
+                   to open until there is a contact, which is step 4 at the
+                   earliest.
+  timezone      -> when the day rolls over. Auto-follows the browser until
+                   someone picks a zone by hand (User.timezone_auto), so the
+                   default is already right for everybody.
+
+THE HIDDEN INPUTS ARE NOT DECORATION. ProfileForm.apply_to writes all three
+fields on every save, unconditionally — so simply not rendering them would
+blank a returning student's languages and affiliations, and worse, post an
+empty timezone, which apply_to reads as an explicit pick and turns
+timezone_auto OFF. Carrying the current values through keeps "not asked" from
+meaning "answered blank". `form.<field>.value` is the stored value on a GET
+and the submitted one on a re-render after a validation error, so a round
+trip through an error does not lose them either.
+{% endcomment %}
+{% if compact %}
+  <p class="field-hint ob-later">Languages, affiliations and timezone: set later in Settings.</p>
+  {% for value in form.languages.value %}<input type="hidden" name="languages" value="{{ value }}">{% endfor %}
+  <input type="hidden" name="affiliations" value="{{ form.affiliations.value|default:'' }}">
+  <input type="hidden" name="timezone" value="{{ form.timezone.value|default:'' }}">
+{% else %}
+{% comment %}
 Languages the student can WORK in, matched against what a posting states
 (directory/facts.py::extract_languages read by directory/views.py::
 _language_fit). Labelled for what it does. A chip here turns the feed's bare
@@ -196,6 +236,7 @@ binary alumni flag by a wide margin (a high-school-directory tie replies at
 <label for="{{ form.timezone.id_for_label }}">Timezone</label>
 {{ form.timezone }}
 {{ form.timezone.errors }}
+{% endif %}
 
 {% comment %}
 Progressive enhancement for the photo field. Delegated from `document` and
