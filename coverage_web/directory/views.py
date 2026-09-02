@@ -1186,6 +1186,16 @@ def _firm_date_row(fd, *, today):
         # compare rows to each other — see `_drop_contradicted_openings`.
         "date": d,
         "date_text": date_text,
+        # "23:59 HKT, 08:59 your time", and "" on every row whose firm never
+        # stated an hour. Deliberately a SEPARATE key from `date_text`
+        # rather than appended to it: `date_text` already carries three
+        # shapes keyed off precision, one of which is "~ Oct 2027", and a
+        # time may only ever ride a day-level row. Keeping them apart means
+        # the constraint that stops an hour landing on an estimate
+        # (`firm_dates_close_time_needs_a_day`) is the only rule the
+        # renderer has to trust. `get_current_timezone_name` is the zone
+        # `TimezoneMiddleware` activated for this request.
+        "time_text": fd.close_time_label(timezone.get_current_timezone_name()),
         # ALREADY GONE. This page had no date cutoff of any kind: 10 of the
         # 41 live rows sit in the past, and the founder's own firm pages
         # rendered Morgan Stanley's 6 Aug insight deadline and BlackRock's

@@ -1,0 +1,73 @@
+# The closing HOUR, where a firm published one. Read by
+# `manage.py set_firm_date_times`, which is dry-run by default.
+#
+# SHAPE. The same block-mapping shape `timeline_*.yaml` uses, under an
+# `entries:` header, and parsed by the same code (`seed_parsers`). This repo
+# has no YAML library on purpose — see that module's docstring — so a file
+# here earns its keep by fitting a shape the existing parser already reads.
+# One key per line at two spaces; a `quote:` folds onto following indented
+# lines.
+#
+# THE BAR, AND WHY IT IS THIS HIGH. A time may be written here only when a
+# source states it out loud, in the firm's own words, for the exact row it is
+# attached to. Nothing here is derived: not from a market convention, not
+# from "deadlines are usually end of day", not from a sibling posting at the
+# same bank. 25 of the 41 rows this decision was measured against are
+# `precision: estimated`, and an hour on an estimate is not a more useful
+# date, it is a false one.
+#
+# `date:` is not decoration. The command refuses an entry whose stored row
+# carries a different day, because a time is a fact about ONE close: if a
+# relabel or a re-date moved the row, this entry no longer describes it and
+# writing anyway would attach last cycle's hour to this cycle's deadline.
+#
+# `tz:` is an IANA key, never an abbreviation. "HKT" is not a zone `zoneinfo`
+# can resolve, "CST" names three of them, and half of them shift twice a
+# year. The abbreviation a student reads is rendered FROM this key at the
+# row's own date (`FirmDate.close_time_label`), so it is right in October and
+# right again in November.
+#
+# WHAT THE EVIDENCE ACTUALLY SAYS ABOUT HSBC, since the decision that
+# commissioned this file used it as the worked example. HSBC's Hong Kong CIB
+# internship posting — the one FirmDate id 40 cites — states "Opening Date:
+# Mon Jul 06, 2026 Closing Date: Fri Oct 30, 2026" and no time at all, in its
+# own cached detail text. `seeds/timeline_hk.yaml` quotes it the same way:
+# "Application close: 30 October 2026". The firm that publishes 23:59 HKT for
+# 30 October is Citi. So HSBC has no entry here and its countdown keeps
+# flipping at local midnight, which is the honest behaviour for a date whose
+# hour nobody published.
+
+entries:
+# Morgan Stanley's Hong Kong SA 2027 close. The later of two staged
+# deadlines; the earlier (16 Aug 2026) has no row of its own.
+- firm: ms
+  cycle: sa2027
+  region: hk
+  event_kind: app_close
+  date: 2026-09-27
+  time: "23:55"
+  tz: Asia/Hong_Kong
+  source: https://morganstanley.tal.net/candidate
+  quote:
+    MS HK SA 2027 ran two staged deadlines, 16 Aug and 27 Sep 2026, both
+    23:55 HKT (research-hongkong.md section 1, Grade A; restated in
+    seeds/timeline_hk.yaml).
+
+# Citi's Hong Kong SA 2027 close. The one HK deadline in the corpus that
+# states its hour in the firm's own sentence. No FirmDate row carries this
+# close today - Citi's stored HK rows are the SA 2028 estimates - so the
+# command reports it as unmatched rather than inventing the row. Kept here so
+# that the day someone records Citi's SA 2027 close, the hour arrives with it
+# instead of being researched again.
+- firm: citi
+  cycle: sa2027
+  region: hk
+  event_kind: app_close
+  date: 2026-10-30
+  time: "23:59"
+  tz: Asia/Hong_Kong
+  source: https://jobs.citi.com/
+  quote:
+    Citi HK SA 2027 closed "Friday, October 30, 2026 at 23:59 HKT"
+    (research-hongkong.md section 1, Grade A; restated in
+    seeds/timeline_hk.yaml).

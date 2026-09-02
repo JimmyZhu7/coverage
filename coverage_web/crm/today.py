@@ -2507,13 +2507,33 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
     Opportunities feed, which is the surface that lists every live posting
     rather than the four nearest dates.
     """
-    rows = list(confirmed_firm_dates()
-                .filter(date__gte=today)
-                .select_related("firm")
-                .order_by("date")[:limit])
+    # THE DOOR SHUTS AT AN INSTANT, NOT AT MIDNIGHT. `date__gte=today` keeps
+    # a row on the rail for the whole of its closing day in the READER's
+    # zone, which is right for every row whose firm never stated an hour and
+    # wrong for the ones that did. HSBC's Hong Kong close is 23:59 HKT, which
+    # is 08:59 in Los Angeles: this rail carried it, alarm and all, for
+    # fifteen hours after it had closed.
+    #
+    # So the day filter still runs in the database (it is the cheap, indexed
+    # half and it is correct for every row with no `close_time`), and rows
+    # that DO carry a stated instant are dropped here once that instant has
+    # passed. `closes_at()` answers None for all the others, so their
+    # behaviour is byte-for-byte what it was (P3).
+    #
+    # Over-fetched by one page and re-sliced, because dropping after a
+    # `[:limit]` slice would quietly shorten the rail: a rail of four that
+    # loses today's closed HSBC row should show the next date, not three
+    # rows. `limit` is 4, so this is one small query either way.
+    now = timezone.now()
+    rows = [fd for fd in (confirmed_firm_dates()
+                          .filter(date__gte=today)
+                          .select_related("firm")
+                          .order_by("date")[:limit * 2])
+            if (fd.closes_at() or now) >= now][:limit]
     # One batch for at most `limit` firms, after the slice — the rail asks
     # about four firms, not about the whole board.
     open_runs = firm_open_runs({fd.firm_id for fd in rows}, today)
+    viewer_tz = timezone.get_current_timezone_name()
     out = []
     for fd in rows:
         days = (fd.date - today).days
@@ -2542,6 +2562,15 @@ def _next_deadlines(user, today, limit=4) -> list[dict]:
             "date": fd.date,
             "days": days,
             "when": "today" if days == 0 else ("1d" if days == 1 else f"{days}d"),
+            # "23:59 HKT, 08:59 your time", or "" for every row whose firm
+            # never stated an hour — which is most of them, and which the
+            # template renders as nothing at all. Never derived: a time on a
+            # date the product estimated would be false precision, and the
+            # column is populated only from a source that says the hour out
+            # loud. `viewer_tz` is the zone `TimezoneMiddleware` already
+            # activated for this request, so the "your time" half is the same
+            # clock `today` above was computed against.
+            "close_time_label": fd.close_time_label(viewer_tz),
             # Mirrors the cadence engine's own urgency bar, so the colour here
             # and the lane a contact lands in cannot disagree.
             "urgent": days <= 7,

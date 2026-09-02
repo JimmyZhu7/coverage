@@ -483,3 +483,34 @@ def test_the_past_row_keeps_its_own_confidence_treatment(client):
     body = _page(client, firm)
     assert PAST_ROW in body
     assert "confirmed" in body
+
+
+# ---------------------------------------------------------------------------
+# D-19: the closing hour, where the firm published one.
+# ---------------------------------------------------------------------------
+
+def test_the_stated_closing_hour_reaches_the_page(client, settings):
+    """Rendered rather than asserted on the view dict, for this file's own
+    reason: the bug lives in the seam. `settings.TIME_ZONE` stands in for the
+    reader here — a signed-out visitor gets the project default, which is
+    exactly the "your time" the template prints."""
+    settings.TIME_ZONE = "America/Los_Angeles"
+    firm = _firm()
+    _date(firm, event_kind="app_close", date=dt.date(2026, 10, 30),
+          precision="day", confidence=1.0,
+          close_time=dt.time(23, 59), close_tz="Asia/Hong_Kong")
+
+    assert "23:59 HKT, 08:59 your time" in _page(client, firm)
+
+
+def test_a_row_with_no_stated_hour_prints_no_hour(client):
+    """Which is most rows, and the reason nothing here is derived: a time on
+    a date the product estimated would be precision it has no source for."""
+    firm = _firm()
+    _date(firm, event_kind="app_close", date=dt.date(2026, 10, 30),
+          precision="day", confidence=1.0)
+
+    body = _page(client, firm)
+
+    assert "your time" not in body
+    assert "23:59" not in body

@@ -1251,6 +1251,18 @@ copy exactly once, and this is the once.
                 <span class="activity-kind">{{ d.market }}</span>
                 <span class="activity-kind">{{ d.label }}</span>
                 {% comment %}
+                THE HOUR, where the firm stated one. "23:59 HKT, 08:59 your
+                time" — the firm's own words first, the reader's clock
+                second, and only when the two differ. Blank on every row
+                whose source never said an hour, which is most of them, and a
+                blank prints nothing rather than a hedge: a time this product
+                inferred would be exactly the false precision D-19 was
+                narrowed to keep out. See `FirmDate.close_time_label`.
+                {% endcomment %}
+                {% if d.close_time_label %}
+                  <span class="activity-kind" title="The closing time the firm published, and the same instant on your own clock.">{{ d.close_time_label }}</span>
+                {% endif %}
+                {% comment %}
                 HOW LONG THIS FIRM'S PROGRAMME HAS BEEN OPEN, under the
                 countdown for the same firm. See `crm.today._next_deadlines`
                 for why it trails a date rather than ranking against one, and
