@@ -1832,6 +1832,93 @@ def _pace(user, today) -> dict:
 
 
 
+# What the Recent Activity rail refuses to call activity.
+#
+# `manual_override` is the audit kind: the row `crm.pipeline` writes when the
+# SYSTEM changes a contact's state, so the log has no gap. Six of the six rows
+# on the demo board's rail read "Updated manually" — a rail titled Recent
+# Activity presenting bookkeeping as the student's week, three cards below a
+# pace ring reading 0/17 for the same week. The two cannot both be right, and
+# the ring is the one that is: `PACE_TOUCH_KINDS` (above) already excludes
+# this kind structurally, because `pipeline` keeps its audit kind out of
+# `TOUCH_TRANSITIONS` entirely. This set makes the rail agree with the ring.
+#
+# EXCLUDED, not relabelled. The alternative was a "bookkeeping" label sorted
+# to the bottom, and it fails the same test the description line on the
+# contact card failed: the rail holds six rows, so anything kept is six
+# minus one of something a student wanted. Spec E1/C2 is explicit that audit
+# rows are not the student's work, and the full log — with the richer,
+# note-aware `crm.views._override_label` wording — is still on the contact's
+# own History, which is where an audit trail belongs.
+#
+# `bulk_received` stays IN. It is somebody else's software's action and the
+# pace ring excludes it for that reason, but a newsletter landing is still a
+# real thing that happened on the relationship, and this rail reports what
+# happened rather than what the student did.
+_RAIL_SILENT_TOUCH_KINDS = frozenset({"manual_override"})
+
+# Six, not eight. The rail carries four cards now; the feed is the longest
+# and the least time-critical of them, so it is the one that gives ground to
+# keep the whole column inside a laptop viewport.
+_RAIL_ACTIVITY_LIMIT = 6
+
+
+def _recent_activity(user, *, as_of) -> list[dict]:
+    """The Recent Activity rail: the last touches logged, newest first.
+
+    `as_of` is the caller's "now" — passed in rather than read here so the
+    rail's day counts and the rest of the page's agree to the second, and so
+    a test can pin the calendar-date boundary without mocking the clock.
+    """
+    kind_labels = dict(TOUCH_KIND_LABELS)
+    recent = (
+        Touch.objects.for_user(user)
+        .exclude(kind__in=_RAIL_SILENT_TOUCH_KINDS)
+        .select_related("contact")
+        .order_by("-ts")[:_RAIL_ACTIVITY_LIMIT]
+    )
+
+    def _rail_ago(ts) -> str:
+        # `_calendar_days_ago`, not `timesince`. This was the last call site
+        # still measuring a raw elapsed floor, and `crm/utils.py`'s helper
+        # exists precisely to abolish it -- its docstring names the failure
+        # ("two surfaces showing the same touch disagreed on 'how long
+        # ago'"). It was disagreeing here: on 2026-09-01 one of the
+        # founder's contacts read "3 business days ago" on her act card, "4
+        # days" in this rail, and "5d since last touch" on her Network card,
+        # all about a single touch. This rail now speaks the same
+        # calendar-day clock the rest of the CRM does; the business-day
+        # count on the act card stays what it is, because that one is the
+        # cadence engine's own reasoning and says so.
+        #
+        # CLAMPED AT 0, not just falsy-checked. `recent` has no `ts__lte`
+        # guard (unlike `crm.debrief.pending`, which filters `ts__lte=as_of`
+        # for exactly this reason), so a touch dated after `as_of` sorts to
+        # the top of the feed rather than being excluded from it. An
+        # unclamped negative day count rendered "-2d ago" for a touch
+        # 2 days in the future -- a wrong result, demonstrated in
+        # `test_the_activity_rail_does_not_render_a_negative_day_count`.
+        # Nothing on the founder's live account is future-dated today, but
+        # `coverage_domain.cadence` and `.scoring` both guard this same
+        # shape rather than assume it can't happen (a chat hand-logged with
+        # tomorrow's date, or a caller whose clock runs behind the touch's),
+        # so the rail matches that posture instead of trusting the query.
+        days = _calendar_days_ago(ts, as_of=as_of)
+        return f"{days}d ago" if days and days > 0 else "today"
+
+    return [
+        {
+            "name": t.contact.name,
+            "contact_id": t.contact_id,
+            "kind": t.kind,
+            "kind_label": kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize()),
+            "ago": _rail_ago(t.ts),
+            "inbound": t.kind in _INBOUND_TOUCH_KINDS,
+        }
+        for t in recent
+    ]
+
+
 _SCHEDULE_HORIZON_DAYS = 14
 
 
@@ -2888,52 +2975,11 @@ def _cockpit_context(user) -> dict:
         )
 
     # Activity feed: the last touches logged — what changed since last look.
-    kind_labels = dict(TOUCH_KIND_LABELS)
-    # Six, not eight. The rail carries four cards now; the feed is the
-    # longest and the least time-critical of them, so it is the one that
-    # gives ground to keep the whole column inside a laptop viewport.
-    recent = Touch.objects.for_user(user).select_related("contact").order_by("-ts")[:6]
+    # The rail's own module-level helper (`_recent_activity`) owns the query,
+    # the day arithmetic and the audit-row exclusion; `now` is passed in so
+    # this page's several clocks are one clock.
     now = timezone.now()
-
-    def _rail_ago(ts) -> str:
-        # `_calendar_days_ago`, not `timesince`. This was the last call site
-        # still measuring a raw elapsed floor, and `crm/utils.py`'s helper
-        # exists precisely to abolish it -- its docstring names the failure
-        # ("two surfaces showing the same touch disagreed on 'how long
-        # ago'"). It was disagreeing here: on 2026-09-01 one of the
-        # founder's contacts read "3 business days ago" on her act card, "4
-        # days" in this rail, and "5d since last touch" on her Network card,
-        # all about a single touch. This rail now speaks the same
-        # calendar-day clock the rest of the CRM does; the business-day
-        # count on the act card stays what it is, because that one is the
-        # cadence engine's own reasoning and says so.
-        #
-        # CLAMPED AT 0, not just falsy-checked. `recent` has no `ts__lte`
-        # guard (unlike `crm.debrief.pending`, which filters `ts__lte=as_of`
-        # for exactly this reason), so a touch dated after `now` sorts to
-        # the top of the feed rather than being excluded from it. An
-        # unclamped negative day count rendered "-2d ago" for a touch
-        # 2 days in the future -- a wrong result, demonstrated in
-        # `test_the_activity_rail_does_not_render_a_negative_day_count`.
-        # Nothing on the founder's live account is future-dated today, but
-        # `coverage_domain.cadence` and `.scoring` both guard this same
-        # shape rather than assume it can't happen (a chat hand-logged with
-        # tomorrow's date, or a caller whose clock runs behind the touch's),
-        # so the rail matches that posture instead of trusting the query.
-        days = _calendar_days_ago(ts, as_of=now)
-        return f"{days}d ago" if days and days > 0 else "today"
-
-    activity = [
-        {
-            "name": t.contact.name,
-            "contact_id": t.contact_id,
-            "kind": t.kind,
-            "kind_label": kind_labels.get(t.kind, t.kind.replace("_", " ").capitalize()),
-            "ago": _rail_ago(t.ts),
-            "inbound": t.kind in _INBOUND_TOUCH_KINDS,
-        }
-        for t in recent
-    ]
+    activity = _recent_activity(user, as_of=now)
 
     schedule = _schedule(user, today)
     chat_prep = _chat_prep(user, today, schedule)

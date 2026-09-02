@@ -34,8 +34,23 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cd-bcc { margin: var(--s2) 0 0; font-size: var(--fs-xs); color: var(--ink-3); }
   .cd-noemail { margin: 0; color: var(--ink-2); font-size: var(--fs-s); }
   .cd-angle { margin: var(--s3) 0 0; font-size: var(--fs-s); }
+  {% comment %}
+  The site has one eyebrow: mono, uppercase, `--fs-micro`, 0.07em, `--ink-3`,
+  declared once in coverage.css §6b and worn by every section label on every
+  page. This one was the same idea at 0.06em, inline in the middle of a
+  sentence — the only inline eyebrow in the product, and off the shared
+  tracking by a hair nobody could see but every future copy would inherit.
+
+  Kept rather than dropped: "Angle" is doing real work. `angle` and `notes`
+  render as two adjacent paragraphs of the student's own prose and without
+  the label there is nothing saying which is which. So it matches the site's
+  eyebrow exactly and stops being a fourth variant of it. It still sits
+  inline, which is the one thing that cannot change — the site's eyebrow
+  heads a section and this heads a clause.
+  {% endcomment %}
   .cd-k { font-family: var(--font-mono); font-size: var(--fs-micro);
-    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3);
+    font-weight: var(--w-med);
+    text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3);
     margin-right: 6px; }
   .cd-notes { margin: var(--s2) 0 0; font-size: var(--fs-s); color: var(--ink-2);
     line-height: 1.5; }
@@ -118,6 +133,33 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     gap: var(--s4); max-height: calc(100vh - 104px); overflow-y: auto;
     overscroll-behavior: contain; padding-right: 2px;
     scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  {% comment %}
+  The cap stays; the CUT gets an affordance. Measured at 1280x800 the rail
+  sliced Recent Activity through the middle of a row with nothing saying so —
+  macOS hides the 5px scrollbar until you actually scroll, so the only tell
+  was text ending on a straight edge. Dropping the cap was the alternative
+  and it undoes the fix the comment above argues for: a sticky column taller
+  than the viewport pins its top and strands its bottom forever.
+
+  So a fade, the affordance the Opportunities feed uses. NOT that column's
+  `local`-gradient trick, though: those gradients paint on the container's
+  own canvas, and they work over there because `.rolerow` is transparent. The
+  rail's children are `.rail-card`s with an opaque `--surface`, which would
+  cover the fade entirely. A sticky pseudo-element is the version that works
+  over opaque children — it is the last child in the box tree, so it paints
+  above its siblings, and `bottom: 0` glues it to the bottom of the scrollport
+  while there is more below.
+
+  It does NOT wash out the last row at the end of the scroll: the element's
+  own flow position is after the final card plus the flex gap, so once the
+  rail is scrolled to the bottom the fade settles onto empty space and the
+  last row is drawn clean. `--paper` is the page ground the rail sits on, and
+  `pointer-events: none` keeps the strip from eating clicks on the card under
+  it.
+  {% endcomment %}
+  .cockpit-rail::after { content: ""; flex: none; height: 20px;
+    position: sticky; bottom: 0; pointer-events: none;
+    background: linear-gradient(transparent, var(--paper)); }
   .cockpit-rail::-webkit-scrollbar { width: 5px; }
   .cockpit-rail::-webkit-scrollbar-thumb { background: var(--line-strong);
     border-radius: 999px; }
@@ -152,10 +194,47 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font-size: var(--fs-l); line-height: 1.35; letter-spacing: -0.01em;
     margin: 0 0 var(--s3); padding-top: 2px; }
   .lane-count { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: var(--fs-s); color: var(--ink-3); }
+    font-size: var(--fs-s); color: var(--ink-3);
+    display: inline-block; }
+  {% comment %}
+  The receipt for an act. The cards move under a view transition and the
+  count above them used to just flip between two frames, which is the one
+  case motion rule M4 (coverage.css §15b) explicitly allows: a number that
+  changed because the reader did something. `chip-check` is the spring this
+  app already uses for "a thing just became true", so the count borrows it
+  rather than introducing a second one.
+
+  The class is added by script (week.html) ONLY when a count captured before
+  an htmx swap differs from the one after it, which is what keeps this off a
+  plain page load — the same distinction rule M2 draws. `display:
+  inline-block` is what lets a transform apply at all.
+
+  Its own keyframe rather than a borrowed one: `chip-check` is declared
+  twice in this codebase (coverage.css and, later, this file) with different
+  curves, and the one that would actually win here starts at scale(0.4) — a
+  pop written for a checkbox tick appearing from nothing, far too big for a
+  figure that is only going from 5 to 4. Same idea, smaller amplitude.
+  {% endcomment %}
+  .lane-count.is-changed {
+    animation: lane-count-pop 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  @keyframes lane-count-pop {
+    0%   { transform: scale(1); }
+    45%  { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .lane-count.is-changed { animation: none; } }
+  {% comment %}
+  Static, per motion rule M1 (coverage.css §15b). "Critical" is a condition
+  the lane is in, not something happening to it: the queue can sit in that
+  condition for a week, and a marker that pulses for a week is decoration
+  wearing urgency. This is the argument `.live-dot` in coverage.css already
+  made about its own ring and won — that comment even names this dot as the
+  remaining user of `kin-pulse-ring`, which no longer has one. The dot keeps
+  the danger colour, and the lane keeps its name in text, which is what
+  actually carries the meaning.
+  {% endcomment %}
   .lane-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--danger);
-    flex: none; animation: kin-pulse-ring 1800ms ease-out infinite; }
-  @media (prefers-reduced-motion: reduce) { .lane-dot { animation: none; } }
+    flex: none; }
   /* Semantic lanes. The dot and the tint are secondary signals only — each
      lane carries its name in text, and each card carries its verb badge, so
      colour is never the sole carrier of meaning. */
@@ -259,8 +338,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-primary .btn { flex: 1 1 auto; padding: 6px 10px; font-size: var(--fs-xs);
     text-align: center; white-space: nowrap; }
   .act-ghosts { display: flex; gap: var(--s4); }
+  {% comment %}
+  `min-width` as well as the shared coarse-pointer `min-height` (coverage.css
+  §16b). Measured at 375px, Skip came out 43 x 44 — tall enough and one pixel
+  narrow, because "Skip" is four characters and nothing set a floor on the
+  other axis. A 44px target is 44 in both directions.
+  {% endcomment %}
   .act-ghost { background: transparent; border-color: transparent; color: var(--ink-3);
     padding: 3px var(--s2); font-size: var(--fs-xs); }
+  @media (pointer: coarse) { .act-ghost { min-width: 44px; } }
   .act-ghost:hover { background: var(--paper); border-color: var(--line); color: var(--ink-2); }
 
   /* Pace — a weekly-goal donut that fills on load, laid out SIDEWAYS. The
@@ -410,6 +496,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     .cockpit-rail { position: static; flex-direction: row; flex-wrap: wrap;
       max-height: none; overflow: visible; }
     .cockpit-rail .rail-card { flex: 1 1 240px; }
+    {% comment %}
+    Nothing is cut here, so nothing announces a cut. The fade only exists to
+    mark the cap's edge, and this block has just removed the cap; left in, a
+    20px strip would join the wrapped row of cards as a fifth flex item.
+    {% endcomment %}
+    .cockpit-rail::after { display: none; }
   }
 
   /* ---- Stat ribbon: the commodity layer, below the queue and slim ---- */
@@ -520,7 +612,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .act-grid { display: flex; flex-direction: column; gap: var(--s2);
     container-type: inline-size; container-name: queue; }
   .act-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--accent); border-radius: var(--r-panel);
+    border-left: var(--edge-w) solid var(--accent); border-radius: var(--r-panel);
     padding: var(--s3) var(--s4);
     /* The actions track is `auto`, so it claims its max-content width before
        the middle gets a share — with the four-control confirm-a-chat row
@@ -561,7 +653,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     text-transform: uppercase; letter-spacing: 0.04em; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   .act-name { margin: 0; font-size: var(--fs-m); line-height: 1.25; }
-  .act-name a { color: var(--ink); }
+  {% comment %}
+  The contact's name is the row's way into the person, and it measured 19px
+  tall on a phone while every other target in the same row cleared 44. The
+  padding is given back with a matching negative margin, so the hit area
+  grows and the ledger row's line rhythm does not move a pixel. `inline-block`
+  is what lets vertical padding apply at all — on an inline box it paints but
+  does not size.
+  {% endcomment %}
+  .act-name a { color: var(--ink); display: inline-block;
+    padding: 6px 0; margin: -6px 0; }
   .act-role { margin: 0; color: var(--ink-2); font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .act-badges { display: flex; gap: var(--s2); flex-wrap: wrap; }
@@ -645,12 +746,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .prop-undo { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
     margin-bottom: var(--s5); padding: var(--s2) var(--s4) var(--s2) var(--s3);
     background: var(--accent-soft); border: 1px solid var(--accent-line);
-    border-left: 3px solid var(--accent); border-radius: 10px;
+    border-left: var(--edge-w) solid var(--accent); border-radius: 10px;
     color: var(--ink-2); font-size: var(--fs-s); }
   .prop-undo-said { flex: 1 1 auto; }
   .prop-undo-note { color: var(--ink-3); }
+  {% comment %}
+  `--r-ctl`, per the control-shape rule now written into coverage.css's own
+  `.btn` block: Undo is pressed, so it takes the shape of a thing you press.
+  It was 999px, which spent the badge shape on an action and put a capsule
+  20px from the squared `.btn`s in the same strip.
+  {% endcomment %}
   .prop-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
-    color: var(--accent-ink); border-radius: 999px; padding: var(--s1) 14px;
+    color: var(--accent-ink); border-radius: var(--r-ctl); padding: var(--s1) 14px;
     font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
     transition: background var(--t-fast), border-color var(--t-fast); }
   .prop-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
@@ -668,8 +775,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
          a red panel: nothing was lost, nothing was charged, and nothing
          needs undoing, so a full alarm would misstate the stakes. The
          edge is enough to say "this one is different". */
-  .ap-strip-quiet { background: var(--surface-2, var(--surface));
-    border-color: var(--line); border-left-color: var(--ink-4, var(--line));
+  {% comment %}
+  Real tokens, not `var(--surface-2, …)` / `var(--ink-4, …)`. Neither of those
+  two names is defined anywhere in the system — this rule was the only place
+  in the codebase that mentioned them, so both fallbacks fired 100% of the
+  time and the declarations were an elaborate way of writing what follows the
+  comma. A fallback to a token that never exists is a token gap pretending to
+  be a graceful degradation.
+  {% endcomment %}
+  .ap-strip-quiet { background: var(--surface);
+    border-color: var(--line); border-left-color: var(--line);
     color: var(--ink-3); }
   .ap-strip-warn { background: var(--danger-soft);
     border-color: var(--danger-line); border-left-color: var(--danger);
@@ -728,16 +843,80 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      panel opens into a white rectangle with the board's first lane drawn
      on top of it. */
   .gap-strip { margin-bottom: var(--s5); position: relative; z-index: 5; }
-  .gap-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-    gap: var(--s3); }
-  @media (max-width: 1180px) { .gap-row { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-  @media (max-width: 700px) { .gap-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  .gap-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--line-strong); border-radius: var(--r-panel);
-    padding: var(--s3) var(--s4); display: flex; flex-direction: column;
-    gap: var(--s2); box-shadow: var(--shadow-1);
-    transition: box-shadow var(--t-med), transform var(--t-med); }
-  .gap-card:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
+  {% comment %}
+  ======================================================================
+  THE GAP STRIP AS A LEDGER — v2 of this block (2026-09-01).
+
+  v1 was six 150px boxes in a six-across grid, and the measurement that
+  killed it is the same one that killed the queue's card gallery a month
+  earlier: three card SHAPES on one board (this one, `.firm-card` on paper
+  with a grab cursor, `.contact-card` transparent and shadowless) and six
+  identical buttons in a row. A tier tag, a firm name, a state and a verb
+  are four short facts about one firm — that is a row, and this product
+  already has a row: hairline-ruled, one accent edge, the figures in a
+  column down the page.
+
+  So the six cards become six rows inside one bordered surface, at the
+  density `.rolerow` and `.act-card` set: firm | tier | gap state | Who to
+  find | the verb. The zones are a grid, not a flex chain, so the tier
+  column and the verb column line up across all six rows — which is the
+  entire point of a ledger and the thing six independent boxes could not
+  do. The panel around them is the same one `.warmth-list` uses, for the
+  same reason it gave: a row is a line with a rule under it, not a card,
+  unless it needs to be one.
+
+  What did NOT change: the ordering (`rank_gaps`), the face's refusal to
+  print a number (the exposure/rank arguments below still stand and
+  `test_the_gap_strip_shows_no_number_on_its_face` still pins them), the
+  tier as BOTH a colour and a text tag, and the "Who to find" dropdown.
+  The class names are unchanged too, so the tests and the sourcing script
+  that key off `.gap-card .src` keep working.
+  ======================================================================
+  {% endcomment %}
+  .gap-row { display: flex; flex-direction: column;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
+    overflow: visible; }
+  .gap-card { display: grid; align-items: center;
+    grid-template-columns: minmax(0, 1fr) auto minmax(9rem, auto) auto auto;
+    gap: var(--s2) var(--s4);
+    padding: var(--s3) var(--s4);
+    border-top: 1px solid var(--line);
+    border-left: var(--edge-w) solid var(--line-strong);
+    transition: background-color var(--t-fast); }
+  .gap-card:first-child { border-top: 0; }
+  {% comment %}
+  Explicit columns, not auto-placement: "Who to find" only renders when
+  `crm/sourcing.py` has archetypes for the firm's tracks, and the Apply-gated
+  firms swap their verb entirely. Left to flow, a row missing its sourcing
+  panel would slide its button one column left and break the alignment that
+  is the whole reason this is a ledger.
+  {% endcomment %}
+  .gap-card > .gap-name { grid-column: 1; }
+  .gap-card > .gap-head { grid-column: 2; }
+  .gap-card > .gap-state { grid-column: 3; }
+  .gap-card > .src { grid-column: 4; }
+  .gap-card > .gap-act { grid-column: 5; }
+  {% comment %}
+  A row highlights, it does not lift: there is no card edge left to raise,
+  and motion rule M3 (coverage.css §15b) caps a hover lift at 1px anyway.
+  This one was at 2px.
+  {% endcomment %}
+  .gap-card:hover { background: var(--paper); }
+  {% comment %}
+  Below 700px the five columns stop being a row a phone can read: the firm
+  name and the verb keep their line, and the tier, state and "Who to find"
+  wrap under them. Still one ledger, still one surface.
+  {% endcomment %}
+  @media (max-width: 700px) {
+    .gap-card { grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start; row-gap: var(--s1); }
+    .gap-card > .gap-name { grid-column: 1; grid-row: 1; }
+    .gap-card > .gap-act  { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+    .gap-card > .gap-head { grid-column: 1; grid-row: 2; }
+    .gap-card > .gap-state { grid-column: 1; grid-row: 3; }
+    .gap-card > .src { grid-column: 1; grid-row: 4; }
+  }
   /* Tier is the loudest term in the ranking, so it's the loudest signal on
      the card too. */
   .gap-t1 { border-left-color: var(--danger); }
@@ -756,14 +935,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      this comment was written to avoid. Cutting the badge without giving
      colour-blind or low-vision readers a second channel would be redoing
      the mistake this rule already fixed once, not simplifying past it. */
-  .gap-head { display: flex; gap: var(--s2); align-items: baseline; }
-  .gap-tier-tag { font-size: 10px; font-family: var(--font-mono);
+  {% comment %}
+  `--fs-xs`, not the 10px both tags carried. `--fs-nano`'s own token comment
+  in coverage.css calls 10px "THE FLOOR" and reserves it for uppercase badge
+  labels; a tier tag qualifies on a stretch, but "6d to close" is a fact a
+  student is meant to read, and the row now has the horizontal room the
+  150px box did not.
+  {% endcomment %}
+  .gap-head { display: flex; gap: var(--s2); align-items: baseline; flex: none; }
+  .gap-tier-tag { font-size: var(--fs-xs); font-family: var(--font-mono);
     color: var(--ink-3); font-weight: var(--w-med); }
-  .gap-due-tag { font-size: 10px; font-family: var(--font-mono);
+  .gap-due-tag { font-size: var(--fs-xs); font-family: var(--font-mono);
     color: var(--danger); font-weight: var(--w-med); }
-  .gap-name { font-weight: var(--w-bold); font-size: var(--fs-s); line-height: 1.25;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-    overflow: hidden; }
+  {% comment %}
+  One line with an ellipsis, not a two-line clamp: in a row the name owns a
+  column, and a firm name that wraps to two lines would set the height of
+  every other zone on the row. The full string is one hover away in the
+  row's own `title=`, which already carries the whole exposure sentence.
+  {% endcomment %}
+  .gap-name { font-weight: var(--w-bold); font-size: var(--fs-s); line-height: 1.35;
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* No "N Open" pill here any more — asked for directly, pointing at a card
      in this strip. What it was for is still done: same-tier, same-gap-state
      firms tie on exposure, and the open-role count now breaks that tie in
@@ -775,7 +966,8 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      identically across all six cards regardless of firm (see
      contact_list.html for the full argument and the one state where the
      count still mattered). `title=` on this element carries it now. */
-  .gap-state { font-size: var(--fs-xs); color: var(--ink-3); }
+  .gap-state { font-size: var(--fs-xs); color: var(--ink-3);
+    white-space: nowrap; }
   /* `.gap-exp` is gone, and with it every number on this card's face. It
      held the raw "exposure" score, then the card's rank once that score
      was cut; both were cut on the founder's ask, the second within
@@ -786,17 +978,29 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      heading's, spelled out with the word "exposure" — it just no longer
      competes with `g.label` for the one line a reader actually scans.
      `test_the_gap_strip_shows_no_number_on_its_face` keeps it out. */
-  .gap-act { margin-top: auto; padding: 5px var(--s2); font-size: var(--fs-xs);
+  {% comment %}
+  `margin-top: auto` is gone with the column layout that needed it (it pinned
+  the button to the bottom of a flex card). In a row the verb sits in its own
+  column, and `min-height: 32px` is the floor the 10px-text pass set for every
+  small pressable thing on this page — the coarse-pointer rule in coverage.css
+  §16b takes it the rest of the way to 44 on a phone.
+  {% endcomment %}
+  .gap-act { padding: 5px var(--s3); font-size: var(--fs-xs); min-height: 32px;
     text-align: center; white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; display: block; }
+    text-overflow: ellipsis; max-width: 14rem; }
 
   /* ---- "Who to find": role archetypes + prefilled LinkedIn searches ----
      A native <details> so the panel opens with no JavaScript, and a
-     DROPDOWN rather than an inline block because a gap card is one sixth
-     of the page wide: three labelled rows inline would wrap to nine lines
-     and push the whole board down every time one card opened. Positioned
-     against the card, which is why `.gap-card` is a containing block. */
+     DROPDOWN rather than an inline block because three labelled rows
+     opened inline would push every row below it down the page. Positioned
+     against the row, which is why `.gap-card` is a containing block. */
   .gap-card { position: relative; }
+  {% comment %}
+  The toggle is a zone of the row now, so it gets the same 32px floor the
+  verb beside it has and centres in the row rather than sitting on the
+  baseline of whatever wrapped last.
+  {% endcomment %}
+  .gap-card .src { display: flex; align-items: center; min-height: 32px; }
   .src-toggle { list-style: none; cursor: pointer; width: fit-content;
     font-size: var(--fs-xs); color: var(--ink-2); font-weight: var(--w-med);
     border-bottom: 1px dashed var(--line-strong); padding-bottom: 1px;
@@ -807,8 +1011,17 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   details[open] > .src-toggle::after { content: " ↑"; }
   .src-toggle:hover, details[open] > .src-toggle { color: var(--ink);
     border-bottom-color: var(--ink-3); }
-  .src-panel { position: absolute; z-index: 20; top: calc(100% + var(--s2));
-    left: 0; width: max(100%, 250px); max-width: 78vw;
+  {% comment %}
+  Anchored to the RIGHT of the row now, not the left. In the six-across grid
+  a card was ~200px wide and the panel grew rightwards from its left edge;
+  a row is the full width of the board, so growing from the left would open
+  a 250px panel under a firm name and leave it a page away from the "Who to
+  find" toggle that opened it. `right: 0` puts it under the row's action end,
+  which is where the toggle now lives. The four nth-child flip rules the grid
+  needed are gone with the grid.
+  {% endcomment %}
+  .src-panel { position: absolute; z-index: 20; top: calc(100% - var(--s2));
+    right: 0; left: auto; width: min(340px, 90vw); max-width: 78vw;
     background: var(--surface); border: 1px solid var(--line-strong);
     border-radius: var(--r-panel); box-shadow: var(--shadow-2);
     padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
@@ -818,17 +1031,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        functions in one shorthand, and the browser dropped the whole
        declaration. The panel appeared with no drop at all. */
     animation: src-drop 180ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
-  /* The last two cards in a row would otherwise hang their panel off the
-     right edge of the page. */
-  .gap-row > .gap-card:nth-child(n+5) .src-panel { left: auto; right: 0; }
-  @media (max-width: 1180px) {
-    .gap-row > .gap-card .src-panel { left: 0; right: auto; }
-    .gap-row > .gap-card:nth-child(3n) .src-panel { left: auto; right: 0; }
-  }
-  @media (max-width: 700px) {
-    .gap-row > .gap-card .src-panel { left: 0; right: auto; }
-    .gap-row > .gap-card:nth-child(2n) .src-panel { left: auto; right: 0; }
-  }
   @keyframes src-drop { from { opacity: 0; transform: translateY(-4px); }
                         to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .src-panel { animation: none; } }
@@ -1077,6 +1279,28 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-radius: var(--r-panel); padding: var(--s4) var(--s5);
     box-shadow: var(--shadow-1);
     flex: 1; height: min(70vh, 640px); overflow-y: scroll; }
+  {% comment %}
+  The Covered Firms panel gives up its own scroller. Measured at 1280x800 on
+  a 22-firm board: the panel is fixed at 606px of client height, its content
+  measures 606px, and it never scrolls — while the `.tier-grid.is-capped`
+  INSIDE it does (177 visible of 352). So the page carried two nested scroll
+  regions where only the inner one was ever used, plus a third in each
+  `.contact-grid` further down, and the outer one still painted a permanent
+  12px scrollbar lane for a scrollbar with nothing to move.
+
+  It is safe to drop because the inner cap is not a coincidence: the script
+  at the foot of contact_list.html caps EVERY tier grid to two rows of
+  whatever the real card height turns out to be, so the panel's content is
+  bounded by construction — three tier labels plus at most six rows of
+  cards. The fixed height was a second bound on an already-bounded box, and
+  a shorter board just left empty surface under the last tier.
+
+  Scoped to `.net-coverage` deliberately. The Unplaced panel uses the same
+  class and has NO inner cap — a student with 60 unplaced contacts would
+  stretch that one down the page — so it keeps its scroller and the
+  scrollbar styling below stays shared.
+  {% endcomment %}
+  .net-coverage .net-panel { flex: none; height: auto; overflow: visible; }
   .net-panel { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
   .net-panel::-webkit-scrollbar { width: 12px; }
   .net-panel::-webkit-scrollbar-track { background: var(--paper);
@@ -1268,8 +1492,19 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      buys a way to re-tier a firm without a mouse. */
   .firm-card-act { flex: none; margin-top: -2px; display: flex;
     align-items: center; gap: var(--s2); min-width: 0; }
+  {% comment %}
+  `--fs-xs`, up from 10px, and a 32px floor under the hit area. The comment
+  above argues for a quiet line rather than the strip's full button chrome
+  and that argument stands — this is still a link, not a button. What did not
+  stand is the size: `--fs-nano`'s own token comment in coverage.css reserves
+  10px for "uppercase badge labels only", and this is the card's ONLY verb,
+  measured 247 x 16px on a phone. `display: flex` + `align-items: center` is
+  what turns the min-height into a real target instead of a taller box with
+  the text stuck at its top.
+  {% endcomment %}
   .fc-act-link { flex: 1 1 auto; min-width: 0;
-    font-size: 10px; font-weight: var(--w-med);
+    display: flex; align-items: center; min-height: 32px;
+    font-size: var(--fs-xs); font-weight: var(--w-med);
     color: var(--accent-ink); text-decoration: none; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
   .fc-act-link:hover { text-decoration: underline; }
@@ -1280,14 +1515,34 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      decoration. At rest it reads as the card's own tier caption in the same
      10px mono as `.fc-adv` beside it; the control chrome arrives on hover
      and focus, which is when someone is aiming at it. */
+  {% comment %}
+  Three changes, all from the 2026-09-01 measurement pass.
+
+  `--r-ctl`, not 999px: this is a control you press, and the control-shape
+  rule now written into coverage.css §6 allows a capsule only for a segmented
+  choice among peers. A lone dropdown is not that.
+
+  `--fs-xs` and a 32px floor, for the same reason as `.fc-act-link` above —
+  10px was under the stated floor and this is a real control, 21px tall.
+
+  And the caret is PINNED to `--ink-3` rather than left on `currentColor`.
+  At rest the two resolved to the same thing, which is why the resting state
+  already drew a caret — the audit's worry that the control was undiscoverable
+  was about the missing border and fill, not the arrow. But `currentColor`
+  meant the one mark that says "this opens" tracked every colour change the
+  hover and focus rules make, and it is the affordance: it should not be able
+  to follow the text anywhere. The border and fill still arrive only on hover
+  and focus, which is the part the comment above defends and which still
+  holds — 69 bordered boxes on one board is decoration.
+  {% endcomment %}
   .fc-tier { flex: none; width: auto; margin-left: auto; appearance: none; -webkit-appearance: none;
-    border: 1px solid transparent; border-radius: 999px; background: transparent;
-    padding: 1px 13px 1px 5px;
-    font-family: var(--font-mono); font-size: 10px; font-weight: var(--w-med);
+    border: 1px solid transparent; border-radius: var(--r-ctl); background: transparent;
+    padding: 1px 15px 1px 6px; min-height: 32px;
+    font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: var(--w-med);
     line-height: 1.6; color: var(--ink-3); cursor: pointer;
-    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-      linear-gradient(135deg, currentColor 50%, transparent 50%);
-    background-position: right 6px top 51%, right 3px top 51%;
+    background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%),
+      linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+    background-position: right 7px top 51%, right 4px top 51%;
     background-size: 3px 3px, 3px 3px; background-repeat: no-repeat;
     transition: border-color var(--t-fast), background-color var(--t-fast),
       color var(--t-fast); }
@@ -1532,6 +1787,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-name { font-weight: var(--w-bold); display: flex; gap: var(--s2);
     align-items: center; flex-wrap: wrap; }
   .cc-pill { font-size: 10px; padding: 1px 7px; }
+  {% comment %}
+  Muted on purpose. Park is a choice the student made, not a failure state,
+  so it takes the neutral confidence tokens rather than the danger or stale
+  family — it has to be legible beside the tier and region pills without
+  outranking the name they all sit under.
+  {% endcomment %}
+  .cc-pill.cc-parked { background: var(--conf-unrated-s); color: var(--conf-unrated-t);
+    border-color: var(--conf-unrated-l); }
   /* ONE line, may honestly ellipsise — same doctrine as `.net-mini-firm`
      two panels up, and for the same reason: the firm is context for the
      name, not a second thing to read, and real firm · role strings on the
@@ -1583,9 +1846,22 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      child (nothing precedes it to space away from), so the margin above
      that every other `.cd-opener` needs would just be a dead gutter here. */
   .cd-card > .cd-opener:first-child { margin-top: 0; }
+  {% comment %}
+  Three of these stack in the compose card and each measured 21px tall on a
+  phone — a text-height tap target for the page's three most-used controls.
+  `min-height: 44px` with the flex centring it already has turns the label
+  into a real target without moving the label itself: the box grows around
+  the text rather than under it.
+
+  `display: flex`, not `inline-flex`, so the target spans the card's width
+  the way a disclosure row is expected to. It was inline-flex to keep the
+  hit area off the empty space beside a short label; that argument loses to
+  a 21px target on a touch screen, and a full-width row is also what makes
+  the three of them read as a stack rather than three loose words.
+  {% endcomment %}
   .cd-opener > summary { cursor: pointer; list-style: none; font-size: var(--fs-s);
-    font-weight: var(--w-med); color: var(--ink-2); display: inline-flex;
-    align-items: center; gap: 7px; }
+    font-weight: var(--w-med); color: var(--ink-2); display: flex;
+    align-items: center; gap: 7px; min-height: 44px; }
   .cd-opener > summary::-webkit-details-marker { display: none; }
   .cd-opener > summary::before { content: "+"; transition: transform var(--t-med); }
   .cd-opener[open] > summary::before { transform: rotate(45deg); }
@@ -1610,9 +1886,27 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cd-ai-loading { margin-left: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
 
   /* Eight-week trace under the pace ring. */
+  {% comment %}
+  Eight bars with the last one navy, and until now the only place that said
+  what the horizontal axis was is the `aria-label` — a screen reader knew the
+  chart covered eight weeks and a sighted reader did not. One 10px mono
+  caption under the left end fixes it: that is where the oldest bar is, so
+  the label sits on the end it describes and the eye reads left to right into
+  "now".
+
+  Drawn as a `::after` on the container rather than a span in the markup,
+  because `crm/_cockpit.html` belongs to another workstream this week and
+  this is a caption on a chart the CSS already fully owns. `aria-hidden` is
+  unnecessary and unavailable on a pseudo-element: generated content is not
+  announced, and the `role="img"` label above already carries the same eight
+  weeks in words.
+  {% endcomment %}
   .pace-spark { display: flex; align-items: flex-end; gap: 3px; height: 26px;
     margin-top: var(--s3); padding-top: var(--s2);
-    border-top: 1px solid var(--line); }
+    border-top: 1px solid var(--line); position: relative; margin-bottom: 13px; }
+  .pace-spark::after { content: "8 wks"; position: absolute; left: 0; top: 100%;
+    font-family: var(--font-mono); font-size: var(--fs-nano); line-height: 13px;
+    color: var(--ink-3); letter-spacing: 0.04em; }
   .pace-spark-bar { flex: 1; min-height: 2px; height: var(--h, 0%);
     border-radius: 2px 2px 0 0; background: var(--line-strong);
     transform-origin: bottom;
@@ -1664,7 +1958,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     background: linear-gradient(115deg, transparent 34%,
       color-mix(in srgb, var(--accent) 8%, transparent) 50%, transparent 66%);
     background-size: 250% 100%; background-repeat: no-repeat;
-    animation: kin-sheen 7.5s ease-in-out infinite;
+    {% comment %}
+    ONE pass, not a loop, per motion rule M1 (coverage.css §15b): an infinite
+    animation has to be bound to a live state, and this card's state changes
+    once a day. Looping it made the sheen a property of the card rather than
+    of its arrival, on the page a student opens more often than any other —
+    the exact thing `.pagehead::after`'s own comment warns against. The sweep
+    still lands: the keyframes rest at -50% and `both` holds them there, so
+    the card ends where the loop's own quiet phase already put it.
+    {% endcomment %}
+    animation: kin-sheen 7.5s ease-in-out 1 both;
   }
   @media (prefers-reduced-motion: reduce) { .daily-brief::after { animation: none; } }
   .daily-brief-head { position: relative; display: flex; align-items: center;
@@ -1684,6 +1987,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      bold. `chat_format` (assistant_extras) is what turns the model's
      **word** into this <strong> in the first place. */
   .daily-brief-text strong { color: var(--accent-ink); font-weight: var(--w-med); }
+  {% comment %}
+  The provenance line, styled to match the Talk composer's own `.as-meta`
+  note it copies its words from: the quietest text on the card, under the
+  sentence rather than above it, so it reads as a footnote to the claim and
+  never competes with it. `position: relative` for the same reason the
+  sentence above has it — the card's sheen is an ::after and this has to
+  sit on top of it.
+  {% endcomment %}
+  .daily-brief-note { position: relative; margin: var(--s2) 0 0;
+    font-size: var(--fs-xs); color: var(--ink-3); max-width: 68ch; }
   /* `.btn` (coverage.css) supplies the pill shape, padding and border — this
      only adjusts it to sit inside the tinted card: accent ink instead of
      the default border-strong/surface pairing, and flex:none so the parent
@@ -1701,8 +2014,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      surface cards, not the brief's tinted/animated treatment — these are
      bookkeeping facts, not the advisor's own voice, and should read as
      quieter than the sentence above them. */
-  .situation-strip { display: flex; flex-wrap: wrap; gap: var(--s3);
-    margin-bottom: var(--s4); }
+  {% comment %}
+  The strip got a named section around it (week.html) so the two cards read
+  as a block rather than as strays between the brief and the queue. The
+  bottom margin moves to the section, so the label sits on its own rule the
+  way every other `.sec-label` on the site does and the gap to the cockpit
+  below is unchanged from before the heading existed.
+  {% endcomment %}
+  .situation-section { margin-bottom: var(--s4); }
+  .situation-section > .sec-label { margin-bottom: var(--s3); }
+  .situation-strip { display: flex; flex-wrap: wrap; gap: var(--s3); }
   /* The whole card is the link now (2026-08-31, replacing a two-link
      footer row) -- one destination left once "Talk about it" was cut, so
      there is nothing left to disambiguate a card-wide click against. */
@@ -1749,7 +2070,17 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      lives: under 70% of the window is calm green, past it the halo warms,
      and a fully consumed clock is the danger colour. */
   .cc-avatar.stale-fresh::before { --ring: var(--ok-line); }
-  .cc-avatar.stale-warming::before { --ring: #c1652f; }
+  {% comment %}
+  `--stale-t`, not the literal `#c1652f` this carried. Its two neighbours are
+  already semantic (`--ok-line`, `--danger`), so the middle of the ramp was
+  the one step in a three-step scale that could not follow the theme: in dark
+  mode every ring at 70-99% of its window drew the LIGHT palette's orange on
+  a near-black card. `--stale-t` is the app's own warning colour — the same
+  token `.msg.warning` and `.pill.stale` use — and this class is named
+  `stale-warming`, so the scale it belongs to is the staleness one, not the
+  warmth ramp whose `--w-chatted-bar` happened to hold the identical hex.
+  {% endcomment %}
+  .cc-avatar.stale-warming::before { --ring: var(--stale-t); }
   .cc-avatar.stale-due::before { --ring: var(--danger); }
   @keyframes ring-sweep { from { opacity: 0; } to { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .cc-avatar::before { animation: none; } }
@@ -1771,6 +2102,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     color: var(--ok); font-weight: var(--w-med); }
   .act-moved i { width: 7px; height: 7px; border-radius: 50%;
     background: var(--ok); position: relative; }
+  {% comment %}
+  KEPT infinite, and it is the arguable one. Motion rule M1 (coverage.css
+  §15b) allows a loop only while it is bound to a live state, and "moved
+  this week" is the closest thing on the board to one: the badge renders
+  only on a card whose deadline actually shifted since the last look, it
+  disappears on its own, and it is at most one or two dots on the page —
+  not the ten `.rolling-dot` rings the feed carries for a permanent
+  condition. If it ever renders on more than a couple of cards at once,
+  this is the first thing that should go static.
+  {% endcomment %}
   .act-moved i::after { content: ""; position: absolute; inset: 0;
     border-radius: 50%; background: var(--ok); opacity: 0.5;
     animation: moved-pulse 2s ease-out infinite; }

@@ -120,11 +120,19 @@
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
              title="Tier {{ g.tier }} (×{{ g.tier_weight }}) × {{ g.label|lower }} ({{ g.gap_points }}){% if g.deadline_bonus %} + deadline in {{ g.days_out }}d ({{ g.deadline_bonus }}){% endif %} = exposure {{ g.exposure }}{% if g.open %} · {{ g.open }} open role{{ g.open|pluralize }} right now, which breaks ties on equal exposure{% endif %}">
+          {% comment %}
+          Firm first. The strip is a ledger of rows now (see `.gap-row` in
+          _styles.html for the argument), and a ledger's first column is the
+          thing the row is ABOUT — the same firm-leads ordering the feed and
+          the situation strip already use. The tier tag follows it instead of
+          heading the card, which is what it did when the card was a box and
+          the tag was its eyebrow.
+          {% endcomment %}
+          <div class="gap-name">{{ g.name|smart_title }}</div>
           <div class="gap-head">
             <span class="gap-tier-tag">T{{ g.tier }}</span>
             {% if g.deadline_bonus %}<span class="gap-due-tag">{{ g.days_out }}d to close</span>{% endif %}
           </div>
-          <div class="gap-name">{{ g.name|smart_title }}</div>
           {% comment %}
           No "N Open" badge here either. Asked for directly, pointing at a
           card in this strip: take the open count off all of these.
@@ -537,7 +545,15 @@
             {% endfor %}
           </div>
           {# Placeholder sits OUTSIDE the grid — a dropped card never shares a row with it; JS toggles it. #}
-          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>No firms on this tier.</p>
+          {% comment %}
+          The line carries the way to fix itself. On a first visit all three
+          tiers read "No firms on this tier" and the board became three
+          statements of absence with no route to Target Firms — which is
+          where the absence is actually resolved, one page away and not
+          named anywhere on this one.
+          {% endcomment %}
+          <p class="net-none tier-empty"{% if section.cards %} hidden{% endif %}>No firms on this tier.
+            <a href="{% url 'accounts:settings' %}#firms">Pick your firms</a>.</p>
         </div>
       {% endfor %}
       {% comment %}
@@ -649,16 +665,38 @@
           are the same warmth split by whether anything was ever
           sent.
 
-          All collapsed on load now (2026-08-31, the founder's direct
+          All collapsed on load (2026-08-31, the founder's direct
           call) — the warm sections used to open by default so the page
           landed on the most actionable people, but on a board with real
           size that meant the page arrived already several screens tall,
           contacts spilling out before a student had chosen to look. One
           click opens whichever bucket matters; nothing forces every
           section's cards into the DOM's visible flow before that.
+
+          Except the FIRST one, since 2026-09-01. Collapsing all five meant
+          a page called Network opened showing zero people: measured on the
+          demo board, the whole contact list rendered as five closed lines
+          under a firm grid. The founder's objection was to the page
+          arriving several screens tall, not to it showing anybody, and one
+          open row is the version that answers both — Replied is the first
+          bucket in the fixed order and the most actionable one, and the
+          `forloop.first` guard here fires on the first section that HAS
+          cards (the empty ones never reach this tag), so the row that
+          opens is always a row with people in it. Four remain closed, so
+          the page is still a page, not a dump.
+
+          `{% templatetag openblock %} cycle {% templatetag closeblock %}`,
+          not `forloop.first`, and the difference is the whole point:
+          `forloop` counts the five warmth keys the view always sends,
+          including the empty ones this template skips, so `forloop.first`
+          would put `open` on Replied even on an account where Replied has
+          nobody — and then nothing would be open at all. `cycle` advances
+          only when it is actually rendered, so "first" here means first
+          row that EXISTS. Five values because there are five buckets; the
+          list cannot grow past that without the view changing too.
           {% endcomment %}
           <details class="warmth-row warmth-row--{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"
-                   data-group>
+                   data-group {% cycle 'open' '' '' '' '' %}>
             <summary style="--share: {% widthratio section.cards|length contact_total 100 %}%">
               <i class="dot dot-{% if section.key == 'no_reply' or section.key == 'not_contacted' %}cold{% else %}{{ section.key }}{% endif %}"></i>
               <span class="warmth-row-label">{{ section.label }}</span>
@@ -696,6 +734,26 @@
                         title="{% if card.days_since is not None %}{{ card.days_since }}d of this contact's keep-warm window used{% else %}Never contacted{% endif %}">{{ card.initials }}</span>
                   <div class="cc-id">
                     <span class="cc-name">{{ card.c.name|smart_person_name|smart_title }}
+                      {% comment %}
+                      A parked thread is a state the board could not show.
+                      Measured on the CRM side: "Emailed, No Reply" mixes 92
+                      people still in play with 129 the student has stopped
+                      following up, and the Advocate row was two parked
+                      people — a bucket reading as live work when none of it
+                      was. This is a STATUS chip, so it keeps the pill (the
+                      control-shape rule in coverage.css §6 draws exactly
+                      that line), and it is muted rather than coloured: park
+                      is a decision the student made on purpose, not a
+                      warning.
+
+                      Both keys are checked and neither has to exist. The
+                      card context grows a `parked` bool and a `thread_state`
+                      on another branch; Django resolves a missing key to the
+                      empty string rather than raising, so this renders
+                      nothing at all until that branch lands and needs no
+                      coordination to merge in either order.
+                      {% endcomment %}
+                      {% if card.parked or card.thread_state == "parked" or card.c.thread_state == "parked" %}<span class="pill cc-pill cc-parked" title="You stopped following up on this thread. Nothing is scheduled against it.">Parked</span>{% endif %}
                       {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
                       {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
                       {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
@@ -753,14 +811,22 @@
                   {% comment %}
                   Log Touch and Edit are not equals: Log Touch is the verb
                   this whole board exists to prompt, Edit is the escape
-                  hatch for when a fact on the card is wrong. `btn-primary`
-                  is the same treatment `_contact_live.html` gives its own
-                  Log Touch button — one accent-filled control, one plain
-                  outline, instead of two identically-weighted boxes that
-                  only differed by how long their labels happened to be.
+                  hatch for when a fact on the card is wrong. So Log Touch
+                  keeps the emphasis and Edit stays plain.
+
+                  It is no longer `btn-primary`, though. Measured 2026-09-01
+                  on the demo board: 49 contact cards, 49 navy fills, 98
+                  buttons on one page — and the page's own primary action,
+                  "+ Add Contact" in the header, is a fiftieth navy button
+                  with nothing to distinguish it. When every card shouts,
+                  the page has no voice left for the one control that starts
+                  something new. `.act-ghost` is the treatment Today's queue
+                  already uses for a per-row verb, so the two boards now
+                  agree on what a row-level action looks like: quiet at
+                  rest, an outline on hover, navy reserved for the page.
                   {% endcomment %}
                   <span class="cc-btns">
-                    <a class="btn btn-primary" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
+                    <a class="btn act-ghost cc-log" href="{% url 'crm:contact_detail' card.c.id %}">Log Touch</a>
                     <a class="btn" href="{% url 'crm:contact_edit' card.c.id %}">Edit</a>
                   </span>
                 </div>
@@ -773,7 +839,14 @@
       {% endfor %}
     </div>
     {% else %}
-      <p class="net-none">No contacts yet.</p>
+      {% comment %}
+      An empty state says what to do next. This one said only that there was
+      nothing, on a phone where the header's own "+ Add Contact" is about
+      1,100px above this line — so the one moment the page is genuinely
+      empty was the one moment it offered no way out of being empty.
+      {% endcomment %}
+      <p class="net-none">No contacts yet.
+        <a href="{% url 'crm:contact_new' %}">Add your first</a>.</p>
     {% endif %}
       {% comment %}
       The bulk bar. Sticky to the bottom of the viewport and `hidden` until

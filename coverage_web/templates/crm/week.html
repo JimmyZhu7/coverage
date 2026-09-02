@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 {% load textstyle %}
 {% load assistant_extras %}
 
@@ -78,10 +79,34 @@
   {% endcomment %}
   <section class="ribbon" aria-label="Your firms and deadlines">
     <div class="ribbon-row">
-      <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
-        <span class="ribbon-num">{{ dash.at_your_firms }}</span>
-        <span class="ribbon-lbl"><span class="live-dot"></span> Open at your firms</span>
-      </a>
+      {% comment %}
+      ZERO IS NOT A NUMBER WORTH PRINTING HERE. "0 Open at your firms" is the
+      first figure a student who skipped firm selection meets, and it reads as
+      a product that found nothing rather than as a setup step nobody took —
+      the same mistake the class-year cell below already fixed for itself
+      ("Zero with NO class year stated is not 'caught up' — the check never
+      ran"). This cell follows that cell exactly: at zero it drops the digit,
+      states the action, and links to where the action happens.
+
+      One cell covers both routes to zero, deliberately. A student with no
+      target firms lands here, and so does a student with twenty whose firms
+      have nothing open this week — and "pick your target firms" is the right
+      next move for both, since the count only ever grows by adding firms.
+      Which of the two it is stays visible on the Settings page the link
+      goes to, in one click, rather than being guessed at here: this template
+      has no target-firm count to read, and `_dashboard_context` belongs to
+      another workstream this week.
+      {% endcomment %}
+      {% if dash.at_your_firms %}
+        <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'opportunities' %}">
+          <span class="ribbon-num">{{ dash.at_your_firms }}</span>
+          <span class="ribbon-lbl"><span class="live-dot"></span> Open at your firms</span>
+        </a>
+      {% else %}
+        <a class="ribbon-stat kin-reveal" style="--i: 0" href="{% url 'accounts:settings' %}#firms">
+          <span class="ribbon-lbl">Pick your target firms</span>
+        </a>
+      {% endif %}
       {% comment %}
       MIXED EVIDENCE, SAID OUT LOUD. The number is a count of deadlines, and
       `Opportunity.confidence` says where each of those deadlines came from:
@@ -160,9 +185,17 @@
           <span class="ribbon-lbl">{{ dash.funnel_label }}</span>
         </span>
       {% else %}
-        <span class="ribbon-stat ribbon-funnel is-empty kin-reveal" style="--i: 3">
-          <span class="ribbon-lbl">Nothing submitted yet.</span>
-        </span>
+        {% comment %}
+        A `<span>`, so the one cell in this row with nothing in it was also
+        the one cell you could not click. Every other empty state on this
+        page says what to do next; this one only said what was absent. Now
+        it is an anchor to the feed, where a role gets saved, which is the
+        step that puts the first number in the funnel.
+        {% endcomment %}
+        <a class="ribbon-stat ribbon-funnel is-empty kin-reveal" style="--i: 3"
+           href="{% url 'opportunities' %}">
+          <span class="ribbon-lbl">Nothing submitted yet. Save a role</span>
+        </a>
       {% endif %}
     </div>
   </section>
@@ -235,6 +268,19 @@
     link — no second control to disambiguate against, no `?about=role:`
     composer prefill to maintain.
     {% endcomment %}
+    {% comment %}
+    The strip needs a name. Two bordered sentences with arrows sat between
+    the brief and the queue with nothing saying what they were or what
+    period they covered, so they read as two stray cards rather than as a
+    section — the only block on the page with no heading.
+
+    "Moved this week" is what the code actually measures, not a nice phrase:
+    `assistant.situation.RECENT_DAYS` is 7, and `build_situation` filters
+    `since = now - timedelta(days=RECENT_DAYS)`. If that constant changes,
+    this label is wrong and should change with it.
+    {% endcomment %}
+    <section class="situation-section">
+    <h2 class="sec-label">Moved this week</h2>
     <div class="situation-strip">
       {% for e in situation_events %}
         <a class="situation-card kin-reveal" style="--i: {{ forloop.counter0 }}"
@@ -254,6 +300,7 @@
         </a>
       {% endfor %}
     </div>
+    </section>
   {% endif %}
 
   {% comment %}
@@ -272,6 +319,137 @@
        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
     {% include "crm/_cockpit.html" %}
   </div>
+
+  {% comment %}
+  ======================================================================
+  WHAT HAPPENS AFTER A CARD LEAVES THE QUEUE.
+
+  Every quick action on this page (Snooze, Skip, Log it, They replied) is
+  an htmx POST that swaps the whole of `#today-cockpit`'s innerHTML. Two
+  things were wrong with the moment right after that swap, and both are
+  handled here rather than in `crm/_cockpit.html` — the container survives
+  the swap, its contents do not, so the listeners belong on the survivor.
+
+  1. FOCUS FELL ON THE FLOOR. The button that was focused when you pressed
+     it is removed by the swap, and a removed element's focus goes to
+     `<body>`. For a keyboard or screen-reader user that means every single
+     action on this page ends by dumping them back at the top of the
+     document, to tab down through the header, the ribbon, the brief and
+     the situation strip before reaching the queue they never left. Nine
+     acts in a morning is nine round trips. So: remember where focus was,
+     and after the swap put it on the same position in the same lane — the
+     next card's first action, since the card that was there is exactly the
+     one that just went away. If the lane emptied, the lane's own heading
+     takes it (`tabindex="-1"` is added here, not in the markup, because it
+     is only ever a programmatic target and must not join the tab order).
+     If the lane itself is gone, the cockpit takes it. Focus never lands
+     nowhere.
+
+  2. THE COUNTS FLIPPED. The cards animate — a leaving card fades, a
+     surviving one glides, all of it the browser's own view transition —
+     and then "5 of 9 today" changed to "4 of 9 today" between two frames
+     with nothing to mark it. Motion rule M4 (coverage.css §15b) says a
+     number may move when it changes in response to the reader, and this
+     is that case exactly: the reader pressed something and the number is
+     the receipt. `chip-check` already exists for "a thing just became
+     true"; the count borrows it for 200ms. Nothing fires on a page load,
+     because the class is only ever added by comparing a value captured
+     before a swap against the value after one.
+  ======================================================================
+  {% endcomment %}
+  {% script %}
+  (function () {
+    var cockpit = document.getElementById("today-cockpit");
+    if (!cockpit) return;
+
+    // Keyed by the lane's own class list ("lane lane-critical"), which is
+    // the only stable identity a lane has across a swap — the sections are
+    // rebuilt, so an element reference would be stale by the time it is
+    // read, and the lanes carry no ids.
+    function laneKey(lane) { return lane.className; }
+
+    function readCounts() {
+      var out = {};
+      cockpit.querySelectorAll(".lane").forEach(function (lane) {
+        var n = lane.querySelector(".lane-count");
+        if (n) out[laneKey(lane)] = n.textContent.trim();
+      });
+      return out;
+    }
+
+    var before = null;   // counts, captured before the swap
+    var focused = null;  // {lane: <class>, index: N}, likewise
+
+    document.body.addEventListener("htmx:beforeSwap", function (e) {
+      if (e.target !== cockpit) return;
+      before = readCounts();
+      focused = null;
+      var active = document.activeElement;
+      if (!active || !cockpit.contains(active)) return;
+      var card = active.closest(".act-card");
+      var lane = active.closest(".lane");
+      if (!card || !lane) return;
+      var cards = Array.prototype.slice.call(lane.querySelectorAll(".act-card"));
+      focused = { lane: laneKey(lane), index: cards.indexOf(card) };
+    });
+
+    document.body.addEventListener("htmx:afterSwap", function (e) {
+      if (e.target !== cockpit) return;
+
+      if (focused) {
+        var lane = null;
+        cockpit.querySelectorAll(".lane").forEach(function (l) {
+          if (laneKey(l) === focused.lane) lane = l;
+        });
+        var target = null;
+        if (lane) {
+          var cards = lane.querySelectorAll(".act-card");
+          // The card at the same position is the one that moved up into
+          // the gap. Past the end of a shortened lane, take the last card.
+          var card = cards[focused.index] || cards[cards.length - 1];
+          // In PREFERENCE ORDER, one selector at a time. `querySelector`
+          // with a comma-separated list returns the first match in DOCUMENT
+          // order, not the first match of the first selector — which landed
+          // focus on the contact's name link, since the identity block is
+          // above the actions in the markup. The verb is what a student was
+          // reaching for, so the verb is what receives the caret.
+          var wanted = [".act-primary .btn", ".act-ghost", "a[href]", "button"];
+          for (var i = 0; i < wanted.length && !target; i++) {
+            if (card) target = card.querySelector(wanted[i]);
+          }
+          if (!target) target = lane.querySelector(".lane-title");
+          if (target && target.classList.contains("lane-title")) {
+            target.setAttribute("tabindex", "-1");
+          }
+        }
+        if (!target) {
+          cockpit.setAttribute("tabindex", "-1");
+          target = cockpit;
+        }
+        // `preventScroll`: the view transition is still settling and the
+        // browser's own scroll-into-view would fight it. The queue is
+        // already on screen — this is about where the caret is, not about
+        // moving the page.
+        try { target.focus({ preventScroll: true }); } catch (err) { target.focus(); }
+        focused = null;
+      }
+
+      if (!before) return;
+      var after = readCounts();
+      Object.keys(after).forEach(function (key) {
+        if (!(key in before) || before[key] === after[key]) return;
+        cockpit.querySelectorAll(".lane").forEach(function (lane) {
+          if (laneKey(lane) !== key) return;
+          var n = lane.querySelector(".lane-count");
+          if (!n) return;
+          n.classList.add("is-changed");
+          setTimeout(function () { n.classList.remove("is-changed"); }, 400);
+        });
+      });
+      before = null;
+    });
+  })();
+  {% endscript %}
 
 </div>
 {% endblock %}

@@ -30,7 +30,18 @@ to hand off to `.cal-agenda` below 820px.
   <header class="cal-dayv-head">
     <span class="cal-num">{{ anchor.day }}</span>
     <p class="cal-dayv-date">{{ anchor|date:"l j F Y" }}{% if day_cell.is_today %} · today{% endif %}</p>
-    <a class="btn cal-dayv-add" href="{{ day_cell.add_url }}">Add on this day</a>
+    {% comment %}
+    "Add on this day" is gone (2026-09-01). Day view carried three ways to
+    add one thing on one screen — this button, the "+ Add to the calendar"
+    disclosure in the bar above it, and the `+` that appears on a hovered
+    cell in the grids you arrive from — and three affordances for one action
+    is a reader deciding which one is the real one.
+
+    The bar's is the one that survives, and it loses nothing: its form posts
+    `d = anchor.day` (see calendar.html), so opening it from this view
+    already prefills THIS date. That is the whole job this button was doing,
+    done by the control that was going to be on the screen anyway.
+    {% endcomment %}
   </header>
 
   {% if not day_cell.events %}
@@ -48,14 +59,46 @@ to hand off to `.cal-agenda` below 820px.
     </div>
   {% endif %}
 
-  {% for hour in hours %}
-    <div class="cal-dayv-row{% if hour.events %} has-events{% endif %}">
-      <span class="cal-dayv-hour">{{ hour.label }}</span>
-      <div class="cal-dayv-lane">
-        {% for ev in hour.events %}
-          {% include "crm/_calendar_event.html" with ev_open=1 %}
-        {% endfor %}
+  {% comment %}
+  THE RAIL ONLY DRAWS WHEN SOMETHING IS ON IT.
+
+  `_hour_rail` spans 8am to 9pm, so a day whose only entry is an all-day
+  deadline still rendered fourteen labelled, empty rows — 14 hour rules and
+  14 blank lanes to say nothing happened, on the view a student opens to see
+  one thing. The axis is what makes a timed entry readable ("this is at 4pm,
+  and that is late in the day"), and with no timed entry there is nothing for
+  it to position: it is scale without data.
+
+  So: if any event on this day carries a time, the full rail draws exactly as
+  before, unchanged, because then it is doing its job. If none does, one row
+  says so.
+
+  The test is `all_day_events` against `day_cell.events` — the day's events
+  minus the untimed ones. Both already come from `crm.calendar_views.
+  _period_context`, computed from the SAME `cur["events"]` list, so this
+  cannot disagree with the rail beside it about what is timed; no new context
+  key, and nothing here re-derives a fact the view already owns.
+  {% endcomment %}
+  {% if all_day_events|length < day_cell.events|length %}
+    {% for hour in hours %}
+      <div class="cal-dayv-row{% if hour.events %} has-events{% endif %}">
+        <span class="cal-dayv-hour">{{ hour.label }}</span>
+        <div class="cal-dayv-lane">
+          {% for ev in hour.events %}
+            {% include "crm/_calendar_event.html" with ev_open=1 %}
+          {% endfor %}
+        </div>
       </div>
+    {% endfor %}
+  {% elif day_cell.events %}
+    {% comment %}
+    Only when the day HAS something. With nothing at all, `.cal-empty` above
+    has already said so and a second empty line under it would be the page
+    telling you twice.
+    {% endcomment %}
+    <div class="cal-dayv-row cal-dayv-untimed">
+      <span class="cal-dayv-hour">8am to 9pm</span>
+      <div class="cal-dayv-lane"><p class="cal-dayv-none">Nothing timed.</p></div>
     </div>
-  {% endfor %}
+  {% endif %}
 </section>

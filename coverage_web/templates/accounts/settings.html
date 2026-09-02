@@ -6,6 +6,34 @@
 {% block title %}Settings · Coverage{% endblock %}
 
 {% block head %}
+{% comment %}
+THE SETTLING GATE. Set before first paint, dropped after it.
+
+Measured on this page: 23 `chip-check` pops fired on every load — every
+checked chip in every chipset, every cell of the work-authorization matrix,
+every target-firm chip — because CSS cannot tell "just became checked" from
+"was already checked when the stylesheet applied". A page a student opens to
+change ONE thing performed 23 confirmations of things they changed weeks ago,
+which is motion rule M2 (coverage.css §15b) broken 23 times on one screen.
+
+The class is on `document.documentElement` and set from the HEAD, which is
+the only place early enough: `<body>` does not exist during head parse, and a
+class added after the body opens has already missed the paint it was meant to
+gate. `requestAnimationFrame` twice, then remove — the first callback runs
+before the frame is composited, the second after it, so the gate lifts on the
+earliest tick that is guaranteed to be past the load state. From then on
+every pop is a real change by a real person.
+
+The rules it suppresses live in coverage.css beside the gate's own comment.
+{% endcomment %}
+{% script %}
+  document.documentElement.classList.add("is-settling");
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      document.documentElement.classList.remove("is-settling");
+    });
+  });
+{% endscript %}
 <style>
   html { scroll-behavior: smooth; }
 
@@ -400,7 +428,30 @@
     .settings-nav::before { display: none; }
     .settings-nav a::before { display: none; }
     .settings-nav a:hover { transform: none; }
-    .settings-nav-title, .settings-nav-group { display: none; }
+    .settings-nav-title { display: none; }
+    {% comment %}
+    THE GROUP HEADERS STAY (2026-09-01). They used to be hidden here with the
+    title, which turned the rail into eleven undifferentiated chips wrapped
+    over three rows — and "Danger Zone" landed on row three beside "Profile",
+    two items whose whole difference is that one of them deletes your
+    account. The desktop rail separates them with a labelled group for
+    exactly that reason; a phone does not need that distinction less.
+
+    `flex-basis: 100%` is what makes it work in a wrapping flex row: the
+    header claims a whole line, so the chips after it start a new row under
+    their own label instead of trailing off the end of the previous group's.
+    Four short mono lines against eleven chips whose grouping was otherwise
+    guesswork.
+
+    The rule the desktop version has (`::after`, a hairline to the right
+    edge) goes: it was drawing a 200px line across a 375px screen to fill
+    space beside a two-word label, which reads as a divider rather than as
+    part of the label. The accent colour and the mono case carry it here.
+    {% endcomment %}
+    .settings-nav-group { flex-basis: 100%; margin: var(--s3) 0 2px;
+      padding-left: 2px; font-size: var(--fs-micro); }
+    .settings-nav-group:first-of-type { margin-top: 0; }
+    .settings-nav-group::after { display: none; }
   }
   @media (max-width: 560px) {
     .set-form .grid-2 { grid-template-columns: 1fr; }
@@ -501,10 +552,25 @@
      below already states outright, so it stops dead under reduced-motion
      with nothing lost. Staggered per rail: three dots marching in lockstep
      read as a loading bar. */
+  {% comment %}
+  THREE PASSES, NOT FOREVER (2026-09-01). Motion rule M1 (coverage.css §15b)
+  reserves an infinite animation for a state that is actually live, and this
+  diagram is a static explanation of how the cadence engine paces a cold
+  contact — nothing about it is running. Three dots crossing three rails in
+  a permanent loop is the busiest thing on the page, on a page a student
+  opens about twice a cycle and then reads.
+
+  Three passes rather than one, because the point the comment above makes is
+  real: a single traverse is easy to miss entirely while the eye is still
+  arriving at the diagram, and this is the one mark that says the stretch is
+  a clock rather than a bar. Three (about ten seconds) is long enough to be
+  seen and short enough to end. `both` holds the final keyframe, which is
+  already the invisible one, so the rails settle clean.
+  {% endcomment %}
   .cad-fill::before { content: ""; position: absolute; top: 50%; left: 0;
     width: 5px; height: 5px; margin-top: -2.5px; border-radius: 50%;
     background: color-mix(in srgb, var(--ink) 55%, transparent);
-    animation: cad-travel 3.2s linear infinite; }
+    animation: cad-travel 3.2s linear 3 both; }
   .cad-rail-weeks .cad-fill::before { animation-delay: 1.05s; }
   .cad-rail-deadline .cad-fill::before { animation-delay: 2.1s; }
   @keyframes cad-travel { from { left: 0; opacity: 0; } 15% { opacity: 1; }
@@ -552,8 +618,21 @@
   .cad-mark-close .cad-lab { right: -2px; left: auto; }
   .cad-lab b { font-size: 10px; font-weight: var(--w-med);
     letter-spacing: 0.02em; color: var(--ink-2); }
+  {% comment %}
+  `--ink-2`, not `--ink-3`. Measured on this page: "Day 0" came out at
+  3.96:1 against the rail's own ground at 10px — the only visible text on
+  the site failing AA once the collapsed-details false positives were taken
+  out. 10px text needs 4.5:1 like any other body text; there is no large-text
+  exemption anywhere near this size.
+
+  The colour moves rather than the size, deliberately. The number is the
+  quiet half of a two-part label ("Park" then "day 17") and bumping it to
+  11px would make it the same weight as the name beside it, which is the
+  distinction this pair is drawn to make. `--ink-2` keeps the hierarchy and
+  clears the ratio.
+  {% endcomment %}
   .cad-lab u { text-decoration: none; font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums; font-size: 10px; color: var(--ink-3); }
+    font-variant-numeric: tabular-nums; font-size: 10px; color: var(--ink-2); }
   /* When the only follow-up is turned off (max cold touches = 1) its marker
      dims rather than vanishes: the rail should show what you gave up. */
   .cad-mark.is-off { opacity: 0.35; filter: grayscale(1); }
@@ -634,7 +713,7 @@
   .tf-board { display: flex; flex-direction: column; gap: var(--s3);
     margin: var(--s3) 0 var(--s5); }
   .tf-col { background: var(--surface); border: 1px solid var(--line);
-    border-left: 3px solid var(--line-strong); border-radius: var(--r-panel);
+    border-left: var(--edge-w) solid var(--line-strong); border-radius: var(--r-panel);
     padding: var(--s3) var(--s4);
     transition: border-color var(--t-fast), background-color var(--t-fast); }
   /* Escalating emphasis, not a severity colour (the Coverage Gaps strip's
@@ -757,8 +836,19 @@
     text-transform: uppercase; letter-spacing: 0.05em; }
   .tf-group-heading:first-child { margin-top: 0; }
   .tf-add-btns { flex: none; display: flex; gap: 6px; }
+  {% comment %}
+  `--r-ctl`. "Tier 1 / Tier 2 / Tier 3" beside a search result is a row of
+  three buttons that each add a firm — pressable, so squared, per the
+  control-shape rule in coverage.css §6. It read as a chip and it is not one:
+  a chip reports a state, and these do something. They were also the odd
+  shape out on a page that already carried nine button treatments.
+
+  Not a segmented choice either, which is the rule's one exception: the three
+  are alternative destinations for one firm, not a persistent selection with
+  a current member, and nothing here stays chosen after the click.
+  {% endcomment %}
   .tf-add-btn { border: 1px solid var(--line); background: var(--surface);
-    color: var(--ink-2); border-radius: 999px; padding: 3px 11px;
+    color: var(--ink-2); border-radius: var(--r-ctl); padding: 3px 11px;
     font-family: var(--font-mono); font-size: 11px; font-weight: var(--w-med);
     cursor: pointer; transition: border-color var(--t-fast), background-color var(--t-fast),
       color var(--t-fast), transform var(--t-fast); }

@@ -379,7 +379,8 @@ def advocate_summary(
     Returns a dict rather than the bare line so a template can print the
     parts it wants: `advocates`, `firms` (tiered firm count), `covered`
     (firms at or above `target`), `target`, `low`/`high` (the range), and
-    `line` — "Advocates: 0 across 54 target firms · aim for 2-20". The
+    `line` — "Advocates: 0 across 54 target firms · aim for 2 per firm,
+    20 in all". The
     template is not touched here; `crm.views.contact_list` puts this in
     the context as `advocate_summary`.
     """
@@ -391,9 +392,14 @@ def advocate_summary(
     covered = sum(1 for n in per_firm if n >= target)
     low, high = ADVOCATE_RANGE
     firms_n = len(tiered)
+    # "aim for 2 per firm, 20 in all", not "aim for 2-20". The dash form read
+    # as a single range — "somewhere between two and twenty advocates" — when
+    # the pair is two different yardsticks: `low` is the per-firm target and
+    # `high` is the total across every target firm. Both numbers still come
+    # from `ADVOCATE_RANGE`; only the words between them changed.
     line = (
         f"Advocates: {advocates} across {firms_n} target "
-        f"firm{'' if firms_n == 1 else 's'} · aim for {low}-{high}"
+        f"firm{'' if firms_n == 1 else 's'} · aim for {low} per firm, {high} in all"
     )
     return {
         "advocates": advocates,
