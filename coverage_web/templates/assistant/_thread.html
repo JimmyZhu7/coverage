@@ -21,7 +21,7 @@ same shape as every AI chat surface a student has already used.
       <p class="as-empty-lead">Ask about your own campaign. Who to chase, where to spend the week, what closes next.</p>
       <div class="as-starters">
         {% for s in starters %}
-          <button type="button" class="as-starter">{{ s }}</button>
+          <button type="button" class="as-starter panel panel--flat">{{ s }}</button>
         {% endfor %}
       </div>
     </div>
@@ -67,7 +67,7 @@ same shape as every AI chat surface a student has already used.
   for the round trip rather than relying on the student not pressing Send
   again while the dots are up.
   {% endcomment %}
-  <form class="as-composer"
+  <form class="as-composer panel"
         hx-post="{% url 'assistant:send' %}"
         hx-target="#as-thread"
         hx-swap="outerHTML"

@@ -21,7 +21,7 @@ does not repeat a word the student has already read in their own inbox.
     </h2>
     <div class="act-grid">
       {% for e in app_events %}
-        <article class="act-card kin-reveal act-appevent" style="--i:{{ forloop.counter0 }}">
+        <article class="act-card kin-reveal act-appevent panel panel--edge" style="--i:{{ forloop.counter0 }}">
           <div class="act-ident">
             <div class="act-idtext">
               <span class="opp-firm">{% if e.row.firm %}{{ e.row.firm.name|smart_title }}{% else %}{{ e.row.firm_text|smart_title }}{% endif %}</span>

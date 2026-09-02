@@ -64,9 +64,7 @@
   .desk-stat .dash-lbl { white-space: nowrap; }
 
   /* The panel: a mini Today screen, framed like a real window. */
-  .desk-panel { min-width: 0; margin: 0; overflow: hidden;
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface); box-shadow: var(--shadow-2); }
+  .desk-panel { min-width: 0; margin: 0; overflow: hidden; }
   .desk-bar { display: flex; align-items: center; justify-content: space-between;
     gap: var(--s3); padding: 9px var(--s4);
     border-bottom: 1px solid var(--line);
@@ -103,10 +101,12 @@
   /* Rows arrive in a short staggered slide, so the panel reads as a queue
      filling itself rather than a static screenshot. Transform + opacity
      only: nothing reflows. Killed under reduced motion below. */
+  /* `panel panel--inset panel--flat`, keeping its own corner: these mockups
+     are a scale model of the product at about half size, and the radius is
+     part of the scale, not a divergence from the panel. */
   .desk-row { display: flex; align-items: center; justify-content: space-between;
     gap: var(--s3); min-width: 0;
-    border: 1px solid var(--line); border-radius: 10px;
-    background: var(--paper); padding: var(--s2) var(--s3);
+    border-radius: 10px; padding: var(--s2) var(--s3);
     animation: desk-row-in 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(300ms + var(--i, 0) * 120ms); }
   @keyframes desk-row-in {
@@ -231,9 +231,7 @@
     border-radius: 50%; background: var(--accent); transform: translateY(-2px); }
 
   /* Vignette shell: a framed mini-screen the CSS mockups sit inside. */
-  .vig { border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface); box-shadow: var(--shadow-2);
-    padding: var(--s5); overflow: hidden; position: relative; }
+  .vig { padding: var(--s5); overflow: hidden; position: relative; }
   .vig::before { content: ""; position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(120% 130% at 100% 0%,
       color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%); }
@@ -242,8 +240,7 @@
     margin: 0 0 var(--s3); }
 
   /* Vignette 1: a role card with a live fuse countdown. */
-  .v-role { border: 1px solid var(--line); border-left: 3px solid var(--danger);
-    border-radius: var(--r-panel); background: var(--paper); padding: var(--s3) var(--s4);
+  .v-role { border-left-color: var(--danger); padding: var(--s3) var(--s4);
     margin-bottom: var(--s3); }
   .v-role.rolling { border-left-color: var(--ok-line); }
   .v-role-tag { display: inline-block; font-size: 11px; font-weight: var(--w-med);
@@ -270,8 +267,7 @@
      hero shows WHAT the queue looks like, this shows what a row is FOR —
      why Coverage ranked this person today, the angle to open with, and the
      four one-click outcomes the copy beside it promises. */
-  .v-decide { border: 1px solid var(--line); border-left: 3px solid var(--accent);
-    border-radius: var(--r-panel); background: var(--paper);
+  .v-decide { border-left-color: var(--accent);
     padding: var(--s3) var(--s4); position: relative; }
   .v-flag { display: inline-block; font-size: 11px; font-weight: var(--w-med);
     border-radius: 999px; padding: 2px 10px; margin-right: 6px;
@@ -298,14 +294,13 @@
     padding: var(--s2); display: flex; flex-direction: column; gap: var(--s2); }
   .v-col-h { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--ink-3); padding: 0 2px; }
-  .v-card { border: 1px solid var(--line); border-radius: 8px; background: var(--paper);
-    padding: 6px 8px; font-size: 11px; font-weight: var(--w-med); color: var(--ink-2);
-    box-shadow: var(--shadow-1); }
+  .v-card { border-radius: 8px;
+    padding: 6px 8px; font-size: 11px; font-weight: var(--w-med); color: var(--ink-2); }
   .v-card.hot { border-color: var(--accent-line); color: var(--accent-ink); }
   .v-card.lift { transform: rotate(-3deg) translateY(-2px); box-shadow: var(--shadow-2); }
 
   /* Vignette 4: Gmail Live. */
-  .v-mail { border: 1px solid var(--line); border-radius: 10px; background: var(--paper);
+  .v-mail { border-radius: 10px;
     padding: var(--s3) var(--s4); font-size: var(--fs-s); margin-bottom: var(--s3); }
   .v-mail .hd { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3);
     display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--s2); }
@@ -329,9 +324,7 @@
     background:
       radial-gradient(110% 160% at 50% -40%,
         color-mix(in srgb, var(--accent) 11%, transparent), transparent 60%),
-      var(--surface);
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    box-shadow: var(--shadow-1); }
+      var(--surface); }
   .cta-band h2 { font: var(--w-black) clamp(var(--fs-display-3), 3vw, var(--fs-display-2))/1.1 var(--font-display);
     letter-spacing: -0.01em; margin: 0 0 var(--s2); }
   .cta-band p { color: var(--ink-2); margin: 0 auto var(--s5); max-width: 52ch; }
@@ -398,7 +391,7 @@
   are fictional and the caption says so outright — the same honesty the
   "Your data behaves like it's yours" band further down claims.
   {% endcomment %}
-  <header class="kin-hero desk-hero">
+  <header class="kin-hero desk-hero panel">
     <div class="desk-copy">
       <p class="desk-eyebrow">
         <span class="live-dot"></span>
@@ -422,7 +415,7 @@
       </div>
     </div>
 
-    <figure class="desk-panel">
+    <figure class="desk-panel panel panel--raised">
       <div class="desk-bar">
         <span>Today · your queue</span>
         <span class="desk-bar-live"><span class="live-dot"></span> live</span>
@@ -443,21 +436,21 @@
       {% endcomment %}
       <div class="desk-body">
         <div class="desk-queue">
-          <div class="desk-row" style="--i:0">
+          <div class="desk-row panel panel--inset panel--flat" style="--i:0">
             <span class="desk-row-main">
               <b>Sarah Lin</b>
               <span class="desk-why">VP · coffee chat 12d ago</span>
             </span>
             <span class="desk-go">Compose</span>
           </div>
-          <div class="desk-row" style="--i:1">
+          <div class="desk-row panel panel--inset panel--flat" style="--i:1">
             <span class="desk-row-main">
               <b>Marcus Ito</b>
               <span class="desk-why">Analyst · wrote back Tuesday</span>
             </span>
             <span class="desk-go">Log it</span>
           </div>
-          <div class="desk-row" style="--i:2">
+          <div class="desk-row panel panel--inset panel--flat" style="--i:2">
             <span class="desk-row-main">
               <b>Priya Nair</b>
               <span class="desk-why">Associate · new intro</span>
@@ -523,9 +516,9 @@
           <li>{{ region_names|join:", " }}</li>
         </ul>
       </div>
-      <div class="vig kin-reveal">
+      <div class="vig kin-reveal panel panel--raised">
         <p class="vig-label">Opportunities · live</p>
-        <div class="v-role">
+        <div class="v-role panel panel--inset panel--flat panel--edge">
           <span class="v-role-tag">Insight Programme</span>
           <p class="v-role-title">Women in Banking Networking Dinner</p>
           <div class="v-fuse">
@@ -533,7 +526,7 @@
             <span class="v-fuse-label">Closes in 9 days</span>
           </div>
         </div>
-        <div class="v-role rolling">
+        <div class="v-role rolling panel panel--inset panel--flat panel--edge">
           <span class="v-role-tag">Internship · 2027</span>
           <p class="v-role-title">Summer Analyst, Investment Banking</p>
           <div class="v-fuse">
@@ -560,9 +553,9 @@
           <li>Don't lose these first, then what you can move forward</li>
         </ul>
       </div>
-      <div class="vig kin-reveal">
+      <div class="vig kin-reveal panel panel--raised">
         <p class="vig-label">Today · one card, opened</p>
-        <div class="v-decide">
+        <div class="v-decide panel panel--inset panel--flat panel--edge">
           <p class="v-decide-why"><span class="v-flag">Don't lose these</span> Tier 1 · no reply in 12 days</p>
           <p class="v-decide-name">Sarah Lin <span>· VP, Investment Banking</span></p>
           <p class="v-decide-angle">Angle: she mentioned the Hong Kong desk rotation on your last call.</p>
@@ -587,7 +580,7 @@
           <li>Import your spreadsheet in one CSV</li>
         </ul>
       </div>
-      <div class="vig kin-reveal">
+      <div class="vig kin-reveal panel panel--raised">
         <p class="vig-label">Network · warmth board</p>
         {% comment %}
         Column headers read straight off the real board's own vocabulary
@@ -602,17 +595,17 @@
         <div class="v-board">
           <div class="v-col">
             <span class="v-col-h">Emailed, No Reply</span>
-            <div class="v-card">David Park · PE</div>
-            <div class="v-card">Ana Sousa · S&amp;T</div>
+            <div class="v-card panel panel--inset">David Park · PE</div>
+            <div class="v-card panel panel--inset">Ana Sousa · S&amp;T</div>
           </div>
           <div class="v-col">
             <span class="v-col-h">Emailed, Replied</span>
-            <div class="v-card lift">Marcus Ito · IBD</div>
-            <div class="v-card">Priya Nair · AM</div>
+            <div class="v-card lift panel panel--inset">Marcus Ito · IBD</div>
+            <div class="v-card panel panel--inset">Priya Nair · AM</div>
           </div>
           <div class="v-col">
             <span class="v-col-h">Advocate</span>
-            <div class="v-card hot">Sarah Lin · IBD</div>
+            <div class="v-card hot panel panel--inset">Sarah Lin · IBD</div>
           </div>
         </div>
       </div>
@@ -628,9 +621,9 @@
           <li>Revoke access any time from your Google account</li>
         </ul>
       </div>
-      <div class="vig kin-reveal">
+      <div class="vig kin-reveal panel panel--raised">
         <p class="vig-label">Gmail Live · in the works</p>
-        <div class="v-mail">
+        <div class="v-mail panel panel--inset panel--flat">
           <div class="hd">
             <span>From: sarah.lin@bank.com</span>
             <span>Subject: <b>Re: coffee chat</b></span>
@@ -666,7 +659,7 @@
     </div>
   </section>
 
-  <section class="cta-band">
+  <section class="cta-band panel">
     <h2>Start with the feed. Win with the follow-up.</h2>
     <p>The queue and the board are one account away.</p>
     <div class="actions">

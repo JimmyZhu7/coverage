@@ -1120,7 +1120,7 @@ def _rendered_thread(html: str) -> str:
     class names in its <style> block and in the JS that mirrors this markup
     for a streamed reply, and neither of those is a control anyone can
     click."""
-    return html[html.index('id="as-log"') : html.index('class="as-composer"')]
+    return html[html.index('id="as-log"') : html.index('class="as-composer')]
 
 
 @override_settings(ANTHROPIC_API_KEY="")

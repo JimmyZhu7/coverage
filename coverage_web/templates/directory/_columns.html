@@ -17,7 +17,7 @@ walks the same URL as a plain page load.
       {% comment %}`forloop.counter` (1-based), not `counter0`: the pinned
       Picked column is index 0, and a 0-based firm loop made the first firm
       animate in lockstep with it instead of after it.{% endcomment %}
-      <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal" style="--i:{{ forloop.counter }}">
+      <article class="firmcol{% if cl.is_mine %} is-mine{% endif %} kin-reveal panel" style="--i:{{ forloop.counter }}">
         <header class="firmcol-head">
           {% comment %}The firm's real mark when we have one, its monogram
           otherwise — never a broken-image icon, because the URL is only

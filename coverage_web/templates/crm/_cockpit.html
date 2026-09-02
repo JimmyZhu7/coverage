@@ -166,7 +166,7 @@ copy exactly once, and this is the once.
         </h2>
         <div class="act-grid">
           {% for p in chat_prep %}
-            <article class="act-card kin-reveal act-prep" style="--i:{{ forloop.counter0 }}">
+            <article class="act-card kin-reveal act-prep panel panel--edge" style="--i:{{ forloop.counter0 }}">
               <div class="act-top">
                 <span class="opp-firm">{% if p.contact.firm %}{{ p.contact.firm.name|smart_title }}{% else %}{{ p.contact.firm_text|smart_title }}{% endif %}</span>
                 <span class="prep-at">{{ p.when }}</span>
@@ -466,7 +466,7 @@ copy exactly once, and this is the once.
         </h2>
         <div class="act-grid">
           {% for p in proposals %}
-            <article class="act-card kin-reveal act-proposal" style="--i:{{ forloop.counter0 }}">
+            <article class="act-card kin-reveal act-proposal panel panel--edge" style="--i:{{ forloop.counter0 }}">
               <div class="act-ident">
                 <div class="act-idtext">
                   <span class="opp-firm">{% if p.firm %}{{ p.firm.name|smart_title }}{% else %}{{ p.email|slice:"-254:" }}{% endif %}</span>
@@ -616,7 +616,7 @@ copy exactly once, and this is the once.
         </h2>
         <div class="act-grid">
           {% for mf in mail_facts %}
-            <article class="act-card kin-reveal act-proposal" style="--i:{{ forloop.counter0 }}">
+            <article class="act-card kin-reveal act-proposal panel panel--edge" style="--i:{{ forloop.counter0 }}">
               <div class="act-ident">
                 <div class="act-idtext">
                   <span class="opp-firm">{{ mf.label }}</span>
@@ -852,7 +852,7 @@ copy exactly once, and this is the once.
     rung its contents would score. Collapsed, it costs one line of scroll.
     {% endcomment %}
     {% if held_total %}
-      <details class="upnext">
+      <details class="upnext panel">
         <summary>
           <span class="upnext-count">{{ held_total }} more queued</span>
           {% comment %}
@@ -896,7 +896,7 @@ copy exactly once, and this is the once.
         <h2 class="lane-title">Debrief <span class="lane-count" aria-live="polite">{{ debriefs|length }}</span></h2>
         <div class="act-grid">
           {% for d in debriefs %}
-            <article class="act-card kin-reveal act-debrief" style="--i:{{ forloop.counter0 }}">
+            <article class="act-card kin-reveal act-debrief panel panel--edge" style="--i:{{ forloop.counter0 }}">
               {% comment %}
               Same act-ident / act-context / act-quick shape _act_card.html
               uses for the queue below — this lane kept its own pre-ledger-row
@@ -1000,7 +1000,7 @@ copy exactly once, and this is the once.
         </h2>
         <div class="act-grid">
           {% for b in bench %}
-            <article class="act-card kin-reveal">
+            <article class="act-card kin-reveal panel panel--edge">
               <div class="act-ident">
                 <div class="act-idtext">
                   <span class="opp-firm{% if b.contact.school_affiliation %} is-school{% endif %}">{{ b.firm_name|smart_title }}{% if b.contact.school_affiliation %} · alum{% endif %}</span>
@@ -1096,7 +1096,7 @@ copy exactly once, and this is the once.
     this template having to know that happened.
     {% endcomment %}
     {% if getting_started %}
-      <div class="rail-card getting-started-card">
+      <div class="rail-card getting-started-card panel">
         <h3 class="rail-title">Getting started</h3>
         <ul class="getting-started-list">
           {% for item in getting_started %}
@@ -1140,7 +1140,7 @@ copy exactly once, and this is the once.
     blackout, or that the goal is hit), and the sparkline (how this week
     compares to the last eight).
     {% endcomment %}
-    <div class="rail-card pace-card">
+    <div class="rail-card pace-card panel">
       {% comment %}
       The number counts only touches YOU logged — replies and
       state-correction audit rows are not your work and never move it.
@@ -1198,7 +1198,7 @@ copy exactly once, and this is the once.
     dropping those rows to keep the card tidy would hide people.
     {% endcomment %}
     {% if schedule %}
-      <div class="rail-card">
+      <div class="rail-card panel">
         <h3 class="rail-title">Schedule
           <a class="rail-more" href="{% url 'crm:calendar' %}">Calendar</a>
         </h3>
@@ -1286,7 +1286,7 @@ copy exactly once, and this is the once.
     output again, unfiltered.
     {% endcomment %}
     {% if deadlines %}
-      <div class="rail-card">
+      <div class="rail-card panel">
         <h3 class="rail-title">Deadlines
           <a class="rail-more" href="{% url 'opportunities' %}">All</a>
         </h3>
@@ -1424,7 +1424,7 @@ copy exactly once, and this is the once.
     many rows in THIS region tab are here on a guess") and never expires.
     {% endcomment %}
     {% if unplaced_arrivals %}
-      <div class="rail-card unplaced-card">
+      <div class="rail-card unplaced-card panel">
         {% comment %}
         A QUESTION AND ITS VERB, not a state and a paragraph. This card read
         "No market set" over three lines of explanation ending "until you
@@ -1477,7 +1477,7 @@ copy exactly once, and this is the once.
       </div>
     {% endif %}
 
-    <div class="rail-card activity-card">
+    <div class="rail-card activity-card panel">
       <h3 class="rail-title">Recent Activity</h3>
       {% if activity %}
         <ul class="activity">

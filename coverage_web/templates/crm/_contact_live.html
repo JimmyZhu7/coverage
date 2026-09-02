@@ -54,7 +54,7 @@ values.
     </p>
 
     {# ---- Reach them ---- #}
-    <div class="cd-card kin-reveal" style="--i:0">
+    <div class="cd-card kin-reveal panel" style="--i:0">
       {% if contact.email %}
         <div class="cd-reach">
           <a class="btn btn-primary" href="{{ mailto }}">Compose</a>
@@ -141,7 +141,7 @@ values.
     {# --i renumbered after the relationship summary folded into the card #}
     {# above: the stagger counts CARDS, so a gap here would have delayed #}
     {# the whole left column by one step for a card that no longer exists. #}
-    <div class="cd-card kin-reveal" style="--i:1">
+    <div class="cd-card kin-reveal panel" style="--i:1">
       <div class="cd-state">
         <h2 class="cd-h">Warmth</h2>
         {% comment %}state_line is the WHOLE sentence — the view already
@@ -218,7 +218,7 @@ values.
     </div>
 
     {# ---- History, newest first ---- #}
-    <div class="cd-card kin-reveal" style="--i:2">
+    <div class="cd-card kin-reveal panel" style="--i:2">
       <h2 class="cd-h">History <span class="cd-count">{{ touch_rows|length }}</span></h2>
       {% if touch_rows %}
         <ol class="cd-log">
@@ -293,7 +293,7 @@ values.
 
   {# ---- The engine's read, off to the side ---- #}
   <aside class="cd-rail">
-    <div class="cd-card kin-reveal" style="--i:1">
+    <div class="cd-card kin-reveal panel" style="--i:1">
       <h2 class="cd-h">Fit Score
         <span class="band band-{{ contact_score.band }}">
           <span class="num">{{ contact_score.composite }}</span> {{ contact_score.band }}
@@ -377,7 +377,7 @@ values.
     </div>
 
     {% if firm_score %}
-      <div class="cd-card kin-reveal" style="--i:2">
+      <div class="cd-card kin-reveal panel" style="--i:2">
         <h2 class="cd-h">Firm Fit
           <span class="band band-{{ firm_score.band }}">
             <span class="num">{{ firm_score.composite }}</span> {{ firm_score.band }}

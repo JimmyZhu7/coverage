@@ -36,7 +36,7 @@
       <p class="sec-label">{{ parked_total }} parked</p>
       {% include "crm/_contact_search.html" with target="parked-contacts" %}
       {% for cohort in cohorts %}
-        <div class="panel" data-group>
+        <div class="panel panel--page" data-group>
           <form method="post" action="{% url 'crm:contact_parked_unpark' %}"
                 data-unpark-form data-count="{{ cohort.count }}" data-cold="{{ cohort.cold_count }}">
             {% csrf_token %}

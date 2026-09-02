@@ -1,13 +1,20 @@
 /* ==========================================================================
    Coverage design system — static/css/coverage.css  (v2)
    "An instrument, not a movement." Ledger look: paper, ink, hairlines,
-   one navy accent, squared badges, mono tabular figures for numbers.
-   Light mode only (deliberate; see design spec §0 + v2 addendum).
+   one navy accent, pill badges, mono tabular figures for numbers. Both
+   colour schemes ship (see design spec §0).
 
    v2 elevation (founder-directed, 2026-07-23): sticky translucent masthead,
    one soft shadow token for lift-on-hover, a stat-strip component, larger
    display type, and a wide page variant for the heat-mapped calendar. The
-   identity is unchanged — same paper, ink, navy, hairlines, system fonts.
+   identity is unchanged — same paper, ink, navy, hairlines.
+
+   Three of this header's claims were false and are corrected above rather
+   than left to be read as the spec: it said light mode only (dark landed in
+   `76f0e8a`), squared badges (`--r-badge` is 999px by decision) and system
+   fonts (three self-hosted variable families since `471b2f7`). The design
+   spec's §0 was rewritten on 2026-09-01 for the same three; this file is
+   the one a reader opens first.
    ========================================================================== */
 
 /* ---- 0. Typefaces — the "research desk" set, self-hosted ------------------
@@ -1048,18 +1055,69 @@ main { flex: 1 0 auto; }
 .count-line { color: var(--ink-2); font-size: var(--fs-s); margin: var(--s1) 0 var(--s4); }
 .count-line, .count-line * { font-variant-numeric: tabular-nums; }
 
-/* ---- 5. Panels / empty / honesty / flash ---------------------------------- */
+/* ---- 5. The panel primitive / empty / flash -------------------------------
+   ONE definition of the four properties that make a panel: the surface, the
+   hairline, the corner, the lift. Seventeen classes declared that same set
+   independently and four more diverged from it by a pixel or a token, so
+   every new surface picked one of seventeen definitions to copy — which is
+   how there came to be seventeen (D-13, `audit-ui.md §16.2`).
+
+   The primitive is deliberately thin. Padding, the space under a panel and
+   whether it reacts to a pointer are NOT panel properties: a rail card, a
+   queue row and an auth card each want a different one, so they stay in the
+   page's own class beside the layout that needs them. A modifier says only
+   what makes THIS panel different from the primitive, and there are five.
+
+   Where the line is: a site may override ONE of the four and still be this
+   panel wearing a modifier — `.ribbon-row` and `.kin-hero` their ground,
+   `.auth-card` its lift, `.src-panel` its hairline. A surface that overrides
+   two or three is a different component and stays out, which is why the
+   tinted strips (`.scope-line--act`, `.daily-brief`) are not here: their
+   ground, their border colour and their corner are all saying something the
+   surface and the hairline do not. Out for the same reason: the flat ledger
+   rows (`.frow`, `.cyc-obs-row`, `.gap-card`), which set border and radius
+   to zero on purpose, and `.contact-card`, which is transparent and
+   shadowless because it already sits on a panel. */
 .panel {
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-panel); padding: var(--s5);
-  margin-bottom: var(--s4); box-shadow: var(--shadow-1);
+  border-radius: var(--r-panel); box-shadow: var(--shadow-1);
+}
+
+/* --page: the full-width page panel — the shape `class="panel"` carried on
+   its own before the primitive was split out of it. Its inset, the space
+   under it and its hover lift live here, not on `.panel`, because they are
+   this panel's, not every panel's. */
+.panel--page {
+  padding: var(--s5); margin-bottom: var(--s4);
   transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med);
 }
 /* 1px, per the hover-lift rule in §15b (M3). It was 2px, which is the height
    at which the shadow reads as the card climbing rather than as the pointer
    being acknowledged — and `.btn`, `.act-card` and `.chipset` were all
    already at 1px, so the panel was the odd one out on pages carrying both. */
-.panel:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); transform: translateY(-1px); }
+.panel--page:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); transform: translateY(-1px); }
+
+/* --flat: nothing to lift off. A row inside a list, or a panel already
+   sitting on another panel. */
+.panel--flat { box-shadow: none; }
+
+/* --inset: on paper rather than on surface. A panel INSIDE a panel — a firm
+   card on the tier board, the cadence diagram in a settings card. */
+.panel--inset { background: var(--paper); }
+
+/* --raised: the deeper lift, for a panel that sits over the page rather than
+   in it. Every floating surface (a dropdown, a menu, a peek) plus the two
+   static cards that are meant to read as lifted: the auth card and the
+   landing vignettes. A modal keeps overriding this with its own longer
+   throw, because it casts over a backdrop. */
+.panel--raised { box-shadow: var(--shadow-2); }
+
+/* --edge: the claimed row's left rule (§1's `--edge-w`). WIDTH ONLY: the
+   colour is the thing the edge is actually saying — a lane's severity, a
+   tier's weight, a deadline's state — so each site sets its own
+   `border-left-color` and none of them may set the width. */
+.panel--edge { border-left-width: var(--edge-w); }
+
 .empty {
   border: 1px dashed var(--line-strong); border-radius: var(--r-panel);
   padding: var(--s7) var(--s5); text-align: center; color: var(--ink-2);
@@ -1436,8 +1494,9 @@ form p { margin: 0 0 var(--s2); }        /* allauth {{ form.as_p }} */
    (.palette) and directory/_drawer.html — reusing .palette's own
    csel-open animation and shadow recipe at a much smaller size, since
    this holds one field, not a results list. */
-.se-dialog { width: min(22rem, calc(100vw - 32px)); border: 1px solid var(--line);
-  border-radius: var(--r-panel); padding: var(--s4); background: var(--surface);
+/* `panel`, with the one property a modal overrides: a modal over a backdrop
+   casts further than a floating panel on the page does. */
+.se-dialog { width: min(22rem, calc(100vw - 32px)); padding: var(--s4);
   box-shadow: 0 24px 64px rgba(15, 27, 42, 0.22);
   margin: 14vh auto auto; animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
 .se-dialog::backdrop { background: rgba(15, 27, 42, 0.32); }
@@ -1957,8 +2016,10 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
    Motion: the row's hover nudge is the same `translateX(2px)` every row-shaped
    thing on the product uses, and §17's reduced-motion block already
    neutralises every transition site-wide, so it needs no local guard. */
-.rp { margin: var(--s3) 0 var(--s4); padding: var(--s3);
-  border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+/* `panel panel--inset panel--flat`, keeping its own 10px corner: this block
+   is nested inside a card that already has the panel radius, and two 12px
+   corners 12px apart read as one badly drawn one. */
+.rp { margin: var(--s3) 0 var(--s4); padding: var(--s3); border-radius: 10px; }
 /* On a My Applications card the surrounding card IS the panel, so the block
    drops the box and separates with a hairline instead — a panel inside a
    panel reads as a nested widget rather than as part of the card.
@@ -2062,7 +2123,10 @@ table.summary td:last-child { text-align: right; font-family: var(--font-mono);
 main > .page { animation: page-in 440ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-.page > .panel,
+/* `.panel--page`, not `.panel`: the primitive is now on rail cards, queue
+   rows and firm columns too, and a page-load stagger belongs to the handful
+   of full-width sections a page is built from, not to every surface on it. */
+.page > .panel--page,
 .page > section,
 .warmth-section,
 .net-coverage {
@@ -2159,10 +2223,9 @@ select:focus-visible, input:focus-visible {
       color-mix(in srgb, var(--accent) 12%, transparent), transparent 55%),
     linear-gradient(135deg, var(--surface) 0%,
       color-mix(in srgb, var(--accent) 7%, var(--surface)) 100%);
-  color: var(--ink); border-radius: var(--r-panel);
-  border: 1px solid var(--line);
+  color: var(--ink);
   padding: var(--s6) var(--s6) var(--s5);
-  margin-bottom: var(--s6); box-shadow: var(--shadow-1);
+  margin-bottom: var(--s6);
   animation: rise-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 /* Slow diagonal sheen — a faint navy-tinted highlight that crosses and rests
@@ -2331,8 +2394,6 @@ select:focus-visible, input:focus-visible {
    one changed without the other. */
 .csel-panel { position: absolute; top: calc(100% + 6px); left: 0; min-width: 100%;
   z-index: 60; display: flex; flex-direction: column; max-height: 320px;
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--r-panel); box-shadow: var(--shadow-2);
   transform-origin: top; animation: csel-open 140ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 /* `display: flex` above is an AUTHOR rule and beats the user-agent's
    `[hidden] { display: none }` regardless of specificity — same trap
@@ -2401,9 +2462,7 @@ select:focus-visible, input:focus-visible {
      cannot fit and gives up on one edge. `100dvw` rather than `100vw` so a
      mobile browser's collapsing toolbars do not briefly overstate it. */
   width: 520px; max-width: calc(100dvw - 24px); max-height: 360px; overflow-y: auto;
-  z-index: 60; margin: 0; list-style: none;
-  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-panel);
-  box-shadow: var(--shadow-2); padding: var(--s2);
+  z-index: 60; margin: 0; list-style: none; padding: var(--s2);
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 2px; align-content: start;
   scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
@@ -2537,8 +2596,7 @@ select:focus-visible, input:focus-visible {
    A native <dialog>: focus trap, Escape, and the top layer are the browser's
    job. The backdrop dims the page so the palette reads as a mode, not a
    dropdown. */
-.palette { width: min(560px, calc(100vw - 32px)); border: 1px solid var(--line);
-  border-radius: var(--r-panel); padding: 0; background: var(--surface);
+.palette { width: min(560px, calc(100vw - 32px)); padding: 0;
   box-shadow: 0 24px 64px rgba(15, 27, 42, 0.22);
   margin: 12vh auto auto; animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
 .palette::backdrop { background: rgba(15, 27, 42, 0.32); }

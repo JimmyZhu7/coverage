@@ -24,7 +24,7 @@
     </div>
   {% else %}
     {% for run in runs %}
-      <div class="panel">
+      <div class="panel panel--page">
         <p class="sec-label">
           {{ run.created|date:"M d, Y · H:i" }} —
           {% if run.status == "reviewed" %}reviewed, waiting for your tap on Today{% elif run.status == "applied" %}applied on your tap{% else %}{{ run.get_status_display|lower }}{% endif %}

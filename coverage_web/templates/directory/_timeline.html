@@ -8,7 +8,7 @@ is neither — it says so instead of picking a winner.
 {% if timeline %}
   <ul class="tl">
     {% for row in timeline %}
-      <li class="tl-row {{ row.state }}{% if row.is_past %} is-past{% endif %}">
+      <li class="tl-row {{ row.state }}{% if row.is_past %} is-past{% endif %} panel panel--flat">
         <span class="tl-date">{{ row.date_text }}</span>
         <span class="tl-event">
           {{ row.event_label }}

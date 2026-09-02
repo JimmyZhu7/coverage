@@ -37,7 +37,7 @@
   </header>
 
   {% if contact.archived %}
-    <div class="panel">
+    <div class="panel panel--page">
       <p><strong>Archived.</strong> They're off the board and out of the
       cadence queue. Their history is intact.</p>
       <form method="post" action="{% url 'crm:contact_unarchive' contact.pk %}">
