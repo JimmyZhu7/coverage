@@ -672,6 +672,11 @@ def _build_actions(user, *, pace: bool = True):
         # calls inbound, for the same reason.
         a["owed_reply"] = bool(last and last.kind in rel.INBOUND_TOUCH_KINDS)
 
+    # CAN THE STUDENT ACTUALLY SEND THIS? Runs after the dressing loop and
+    # before pacing, because both the pace clause and the blackout clause
+    # read the flag it sets. See `_mark_undeliverable`.
+    _mark_undeliverable(user, actions)
+
     # WHAT THE STUDENT HAS ALREADY SENT INTO EACH FIRM TODAY — the other half
     # of the per-firm daily budget `_gate_and_rank`'s fourth pass spends. Read
     # off the `touches` list already in hand, so this costs no query.
@@ -1196,6 +1201,110 @@ FIRM_PACEABLE_ACTIONS = frozenset({
 # kind added to the paceable set is charged automatically.
 FIRM_SEND_ACTIONS = FIRM_PACEABLE_ACTIONS | frozenset({"thank_you", "advance", "reping"})
 
+# What an undeliverable card asks for instead of the send it replaced. Not in
+# `crm.utils.ACTION_LABELS` on purpose: that map is keyed by the ENGINE's
+# action names and every key in it is a cadence branch. This is a view-layer
+# relabelling of a card the engine still (correctly) considers due, exactly
+# like the pace clause and the blackout clause are view-layer rewrites of a
+# reason the engine wrote.
+UNDELIVERABLE_LABEL = "Find an address"
+
+
+def _mark_undeliverable(user, actions: list[dict]) -> None:
+    """Stop the queue asking for an email to an address the mail system has
+    already rejected, and say so on the card instead.
+
+    THE DEFECT, in the founder's own words: "some emails bounce back but
+    Coverage still asks me to follow up." Measured read-only on his account
+    2026-09-02 — five live contacts with no email address at all, four of
+    them blanked by `capture.gmail.apply_findings`' hard-bounce block on
+    Aug 30, one by a `departed` auto-reply. Feeding his departed contact to
+    `cadence.due_actions` in isolation returns, today, `follow_up`: "no reply
+    7 business days after touch 1 — follow up", on a person with no address
+    to follow up AT. The card cannot be worked. It is the worst shape a
+    prompt can take: it costs a plan slot, it reads as the student's fault,
+    and the one click it offers goes nowhere.
+
+    WHY HERE AND NOT IN THE ENGINE (E4). `coverage_domain` is pure: no Django,
+    and a `MailFact` is a Django row, so the engine could only learn this by
+    having it threaded through the contact dict — which is a real pattern in
+    this file (`chat_scheduled_at`, `promised_action`). It is still the wrong
+    home. Those two are TIMING facts: they change when a contact is due, which
+    is the only question the engine answers. Deliverability changes nothing
+    about when this person is due — the engine is right that they are — it
+    changes whether the ASK the queue renders is one the student can carry
+    out. That is the same class of judgment as `_pace_by_firm` ("not into
+    this inbox today") and `_blackout_action` ("not on this day"), both of
+    which live here, and it arrives with the same obligation: P4, mark and
+    never drop. An engine-side exclusion would have to either delete the card
+    (an invisible filter, which P4 forbids) or invent an eighth branch and an
+    action kind for a fact the engine cannot see. So: the engine says who is
+    due, the view says what can be asked of them.
+
+    WHAT THE CARD BECOMES. Label "Find an address", a reason naming the dead
+    address and what it did, and no send: `_cockpit_context` withholds
+    `touch_kind` from a marked card, so the "Log it" button (which would
+    record an outreach that cannot have happened) is not drawn, and
+    `_act_card.html`'s existing no-email branch already points Compose at the
+    contact page instead. Snooze, Skip and Park are untouched — parking them
+    is the other honest answer and the card still offers it.
+
+    SOFT BOUNCES ARE NOT THIS, and the whole point is that the distinction
+    survives. A full mailbox or a deferral is a `routing_address` fact, never
+    a member of `MailFact.DEAD_ADDRESS_KINDS`, and the contact keeps their
+    address and their follow-up. `capture.gmail_live` drew that line first;
+    nothing here may blur it.
+
+    THE ADDRESS IS RE-CHECKED, not assumed. A fact names the address that
+    DIED. A student who has since typed a different one has a reachable
+    person again, and the card goes back to being an ordinary follow-up
+    without anybody having to undo anything.
+    """
+    # Local, like every other capture reference in this module: `capture.models`
+    # imports `crm.models`, so a top-level import here would close the loop.
+    from capture import mailfacts
+    from capture.models import MailFact
+
+    facts = mailfacts.dead_addresses(user)
+    if not facts:
+        return
+    for a in actions:
+        # Only the kinds that put an email in someone's inbox. A `park` card
+        # asks the student to stop chasing, which is if anything MORE right
+        # when the address is dead, and rewriting it would replace a good
+        # prompt with a worse one.
+        if a["action"] not in FIRM_SEND_ACTIONS:
+            continue
+        c = a["contact"]
+        fact = facts.get(c["id"])
+        if fact is None:
+            continue
+        current = (c.get("email") or "").strip().lower()
+        dead = (fact.about_email or "").strip().lower()
+        # Blank means the bounce block already cleared it, which is the
+        # common case. A DIFFERENT address means the student replaced it and
+        # this fact no longer describes how to reach them.
+        if current and current != dead:
+            continue
+        a["undeliverable"] = True
+        a["undeliverable_kind"] = fact.kind
+        a["undeliverable_email"] = fact.about_email
+        a["label"] = UNDELIVERABLE_LABEL
+        if fact.kind == MailFact.KIND_DEPARTED:
+            a["reason"] = (
+                "Their mailbox says they have left the firm, so "
+                f"{fact.about_email} is dead. Find a new address for them or "
+                "park them."
+            )
+        else:
+            a["reason"] = (
+                f"{fact.about_email} bounced. Mail to it will not arrive. "
+                "Find a new address for them or park them."
+            )
+        # Nothing to compose to, and no draft worth badging as ready.
+        a["mailto"] = ""
+        a["has_draft"] = False
+
 
 def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
     """Mark the actions that a firm's daily budget pushes to a later day.
@@ -1258,6 +1367,15 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
         a["paced_by"] = None
         key = _pace_firm_key(a["contact"])
         if key is None:
+            continue
+        # An undeliverable card neither paces nor spends, for exactly the
+        # reason a `park` doesn't (see the note further down): it puts no
+        # email in anyone's inbox. Charging a firm for it would push a real
+        # cold note to tomorrow on behalf of a send nobody is being asked to
+        # make, and appending "Citi already has 2 today, so this one is
+        # better tomorrow" to a card whose whole message is that the address
+        # is dead would be two sentences contradicting each other.
+        if a.get("undeliverable"):
             continue
         if _is_critical(a):
             if today is None or not _stale_critical(a, today):
@@ -3443,6 +3561,16 @@ def plan_split(actions: list[dict], *, cap: int, today) -> dict:
     blackout_resumes = _blackout_resumes(today, blackout) if blackout else ""
     if blackout:
         for a in rest:
+            # An undeliverable card is exempt, and it is the only exemption
+            # in `rest`. The blackout holds cards that would START an email
+            # thread in a window the research calls damaging; this card is
+            # not asking for an email at all, it is asking the student to
+            # find an address or park somebody, which is desk work no
+            # blackout applies to. "Bankers are off until Jan 4. This one is
+            # better then." is also just false about a dead address: it will
+            # be exactly as dead in January.
+            if a.get("undeliverable"):
+                continue
             _blackout_action(a, blackout, blackout_resumes)
     slots = max(0, cap - len(critical))
     planned_rest: list[dict] = []
@@ -3532,7 +3660,15 @@ def _cockpit_context(user) -> dict:
     cap = _daily_cap(pace["goal"], pace["done"], today)
 
     for a in actions:
-        a["touch_kind"] = _ACTION_TOUCH.get(a["action"])
+        # No send button on a card that cannot be sent. "Log it" records the
+        # outreach touch for this action's kind, and on an undeliverable card
+        # that is a touch which cannot have happened: the address bounced, so
+        # nothing went anywhere. The student who found a new address by hand
+        # logs it from the contact page, which is where the card's Email
+        # button already sends them. See `_mark_undeliverable`.
+        a["touch_kind"] = (
+            None if a.get("undeliverable") else _ACTION_TOUCH.get(a["action"])
+        )
         # Whether the card may offer Snooze/Skip. A card whose action is
         # snooze-exempt must not draw the buttons: writing snoozed_until on
         # an exempt card is worse than a no-op, it silently snoozes the

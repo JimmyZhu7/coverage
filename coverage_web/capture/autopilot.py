@@ -331,21 +331,24 @@ def _context_for(
 # WHAT STILL CANNOT BE RE-READ, stated rather than papered over (and said
 # out loud on every run — see `evidence_note`):
 #
-#   - HARD BOUNCES. A `bounced` finding writes no `MailFact` (mailfacts
-#     returns early on it) and touches only an existing Contact's address
-#     column. It is not a gap in practice for a row this pass can see: the
-#     deterministic ladder refuses the send a same-batch bounce killed
-#     (`discovery.BatchContext.bounced_emails`), so it never becomes a
-#     proposal. A bounce arriving in a LATER batch is a pre-existing,
-#     documented gap (`discovery.BatchContext`'s own docstring) and this
-#     module inherits it — it cannot see one, and says so.
-#   - MASS-SEND (`bulk`) FLAGS. Also not persisted anywhere; also already
-#     spent at capture time, where the ladder refused every bulk finding
-#     outright.
+#   - MASS-SEND (`bulk`) FLAGS. Not persisted anywhere; already spent at
+#     capture time, where the ladder refused every bulk finding outright.
 #
-# Both are signals the deterministic layer CONSUMED before a card existed,
+# That is a signal the deterministic layer CONSUMED before a card existed,
 # which is why the reconstructable half is the half that matters: the facts
 # that arrive about a person AFTER the card was made.
+#
+# HARD BOUNCES USED TO BE ON THIS LIST, and are not any more (2026-09-02). A
+# `bounced` finding wrote no `MailFact` — mailfacts returned early on it — so
+# a permanent delivery failure touched only an existing Contact's address
+# column and left nothing any later pass could read. It writes a `bounced`
+# row now (`mailfacts._record_bounce`), which is what lets the Today queue
+# stop asking for a follow-up to a dead address, and it means a bounce
+# arriving in a LATER batch is visible here too rather than being the
+# documented inherited gap it was (`discovery.BatchContext`'s docstring). The
+# same-batch case was never a gap in practice: the deterministic ladder
+# refuses the send a same-batch bounce killed
+# (`discovery.BatchContext.bounced_emails`), so it never became a proposal.
 _FACT_LEAD = {
     "departed": "Their mailbox says they have left the firm",
     "referral": "Their mailbox redirected you to someone else",

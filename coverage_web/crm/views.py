@@ -2799,6 +2799,21 @@ def _park_note(contact: Contact) -> str:
     return _PARK_NOTES.get(contact.warmth, "")
 
 
+def _dead_address_fact(user, contact: Contact):
+    """The `MailFact` explaining this contact's missing address, or None.
+
+    Reads the same rows and the same rule the Today queue reads
+    (`capture.mailfacts.dead_addresses`), so the page and the queue can never
+    disagree about whether somebody is reachable (P5). Scoped to ONE contact
+    and gated on the blank column, so it costs a query only on the page that
+    has something to explain."""
+    if (contact.email or "").strip():
+        return None
+    from capture import mailfacts
+
+    return mailfacts.dead_addresses(user, contact_id=contact.id).get(contact.id)
+
+
 def _contact_live_context(
     request: HttpRequest, contact: Contact, *, moved: dict | None = None
 ) -> dict[str, Any]:
@@ -3072,6 +3087,22 @@ def _contact_live_context(
         # generation is a deliberate POST (crm.views.contact_ai_summary).
         "summary_new_touches": ai_summary.touches_since_summary(contact, touches),
         "mailto": _mailto(contact.email, body=(contact.opener or "")),
+        # WHY there is no address, when there is no address.
+        #
+        # The Today queue stops asking for a follow-up to a dead address
+        # (`crm.today._mark_undeliverable`), and P4 says a decision the
+        # product makes on the student's behalf has to be visible somewhere
+        # they can read it. "No email on file. Add one to compose." was true
+        # and useless: it read as an omission the student had made, on a
+        # contact whose address the firm's own mail server rejected. The
+        # `MailFact` row says which address died and how, and the panel says
+        # it back.
+        #
+        # ONE QUERY, AND ONLY ON THE PAGE THAT NEEDS IT. Gated on the blank
+        # column, so every contact who has an address pays nothing — the
+        # common case by two orders of magnitude (277 of the founder's 282
+        # live contacts, 2026-09-02, read-only).
+        "dead_address": _dead_address_fact(user, contact),
     }
 
 

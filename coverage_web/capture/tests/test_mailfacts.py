@@ -695,3 +695,151 @@ class TestOooDismissedStaysDismissed:
         assert contact.snoozed_until is None, (
             "undo must not be silently reversed by a later automated pass"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Hard bounce: the address is dead, and now there is a row that says so
+# --------------------------------------------------------------------------- #
+#
+# WHAT A HARD BOUNCE DID BEFORE 2026-09-02. `capture.gmail.apply_findings`
+# cleared the address and appended a sentence to `Contact.notes`, and
+# `mailfacts.consider_finding` returned early on every `bounced` finding, so
+# the only artifact was prose. Nothing downstream could ask "is this person
+# reachable?", and the Today queue went on producing `follow_up` cards for
+# people whose address the receiving server had permanently rejected —
+# measured read-only on the founder's account the same day: five live
+# contacts with no address, four of them cleared by a bounce on Aug 30, zero
+# rows anywhere recording it.
+#
+# These tests pin the record. The queue's use of it is pinned in
+# crm/tests/test_undeliverable_queue.py, and the SOFT/HARD split is pinned in
+# both places, because losing it would clear working addresses.
+
+
+def hard_bounce_message(address="lidia@wellsfargo.example", thread_id="t-hard"):
+    """A sendmail-shaped DSN, the same shape as the JPMorgan bounce that hit
+    the founder's mailbox: no hyphen in the daemon, "Returned mail" subject,
+    permanent 5.1.1 in the transcript."""
+    return gmail_message(
+        from_header="mailerdaemon@mx.example (Mail Delivery Subsystem)",
+        subject="Returned mail: see transcript for details",
+        body=(
+            "The following addresses had permanent fatal errors:\n"
+            f"<{address}>\n550 5.1.1 User unknown\n"
+        ),
+        thread_id=thread_id,
+    )
+
+
+class TestHardBounceIsRecorded:
+    def test_bounce_writes_a_fact_naming_the_dead_address(self, student):
+        contact = Contact.all_objects.create(
+            user=student, name="Lidia M", email="lidia@wellsfargo.example"
+        )
+        finding = _classify_message(OWN, hard_bounce_message())
+        assert finding["bounced"] is True
+        apply_findings(student, [finding])
+
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_BOUNCED)
+        assert fact.about_email == "lidia@wellsfargo.example"
+        assert fact.contact_id == contact.id
+        # PENDING, never APPLIED: this module did not do the clearing, so it
+        # must not offer an Undo for it (see `_record_bounce`).
+        assert fact.status == MailFact.STATUS_PENDING
+        # The grounding is structural, so no prose quote — the subject is the
+        # message's own words and the card renders it in the quote's place.
+        assert fact.quote == ""
+        assert fact.subject == "Returned mail: see transcript for details"
+        # The action the OTHER module takes still happens, unchanged.
+        contact.refresh_from_db()
+        assert contact.email == ""
+
+    def test_bounce_with_no_contact_still_records(self, student):
+        """A bounce off an address nobody in the network holds is still a
+        fact about the mailbox. It lands with no contact, which is what keeps
+        it out of the queue's reach and in the "Your mail said" lane."""
+        finding = _classify_message(OWN, hard_bounce_message())
+        apply_findings(student, [finding])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_BOUNCED)
+        assert fact.contact_id is None
+
+    def test_second_bounce_writes_nothing_new(self, student):
+        Contact.all_objects.create(
+            user=student, name="Lidia M", email="lidia@wellsfargo.example"
+        )
+        for thread in ("t-a", "t-b"):
+            finding = _classify_message(
+                OWN, hard_bounce_message(thread_id=thread)
+            )
+            apply_findings(student, [finding])
+        assert MailFact.objects.for_user(student).filter(
+            kind=MailFact.KIND_BOUNCED
+        ).count() == 1
+
+    def test_soft_bounce_never_writes_a_bounced_fact(self, student):
+        """THE DISTINCTION, pinned at the source. Goldman's postmaster said a
+        real banker's mailbox was full. The address works; only today's
+        message did not land. It must stay a `routing_address` fact, and it
+        must never join `DEAD_ADDRESS_KINDS`."""
+        Contact.all_objects.create(
+            user=student, name="Noah Bauld", email="noah.bauld@gs.com"
+        )
+        finding = _classify_message(OWN, noah_dsn())
+        apply_findings(student, [finding])
+        assert not MailFact.objects.for_user(student).filter(
+            kind=MailFact.KIND_BOUNCED
+        ).exists()
+        assert MailFact.objects.for_user(student).filter(
+            kind=MailFact.KIND_ROUTING
+        ).exists()
+
+    def test_dry_run_records_nothing(self, student):
+        Contact.all_objects.create(
+            user=student, name="Lidia M", email="lidia@wellsfargo.example"
+        )
+        finding = _classify_message(OWN, hard_bounce_message())
+        out = mailfacts.consider_finding(student, finding, dry_run=True)
+        assert out.surfaced == 1
+        assert not MailFact.all_objects.filter(kind=MailFact.KIND_BOUNCED).exists()
+
+
+class TestDeadAddresses:
+    """`mailfacts.dead_addresses` — the one definition of "unreachable"."""
+
+    def test_bounce_and_departure_both_count_soft_bounce_does_not(
+        self, student, allen
+    ):
+        bounced = Contact.all_objects.create(
+            user=student, name="Lidia M", email="lidia@wellsfargo.example"
+        )
+        soft = Contact.all_objects.create(
+            user=student, name="Noah Bauld", email="noah.bauld@gs.com"
+        )
+        departed = Contact.all_objects.create(
+            user=student, name="Somil Agarwal", email="sagarwal@allenco.com"
+        )
+        for message in (hard_bounce_message(), noah_dsn(), somil_auto_reply()):
+            apply_findings(student, [_classify_message(OWN, message)])
+
+        dead = mailfacts.dead_addresses(student)
+        assert set(dead) == {bounced.id, departed.id}
+        assert soft.id not in dead
+        assert dead[bounced.id].kind == MailFact.KIND_BOUNCED
+        assert dead[departed.id].kind == MailFact.KIND_DEPARTED
+
+    def test_dismissed_still_counts_undone_does_not(self, student):
+        contact = Contact.all_objects.create(
+            user=student, name="Lidia M", email="lidia@wellsfargo.example"
+        )
+        apply_findings(student, [_classify_message(OWN, hard_bounce_message())])
+        fact = MailFact.objects.for_user(student).get(kind=MailFact.KIND_BOUNCED)
+
+        # Dismiss is "I have seen this card", not "the mail started arriving".
+        mailfacts.dismiss(fact)
+        assert contact.id in mailfacts.dead_addresses(student)
+
+        # Undo is the user saying the address stands. Same asymmetry
+        # `address_is_departed` makes.
+        fact.status = MailFact.STATUS_UNDONE
+        fact.save(update_fields=["status"])
+        assert contact.id not in mailfacts.dead_addresses(student)

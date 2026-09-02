@@ -334,6 +334,19 @@ class MailFact(PrivateModel):
     `directory.ai_extract` holds for deadlines. A message that gates in but
     yields no quotable fact becomes a `review` row: surfaced, never acted on.
 
+    ONE KIND IS GROUNDED IN STRUCTURE RATHER THAN PROSE, and it is not a hole
+    in the contract above. A `bounced` row is written off an RFC 3464 delivery
+    status notification — `Action: failed`, a 5.x.x `Status:`, a
+    mailer-daemon envelope, and `gmail_live._bounce_recipient`'s three-pass
+    refusal ladder naming the failed address — none of which is a sentence
+    anybody wrote. The quote field is therefore blank on purpose and the
+    message's own `subject` ("Returned mail: see transcript for details") is
+    what renders in its place, which is exactly what the card already does
+    for a quote-less row. The rule that matters is unchanged: a fact this
+    model records is one the pipeline can point at evidence for, and a
+    machine-readable failure code is stronger evidence than a sentence, not
+    weaker.
+
     ON §10 ("no email bodies in logs/notes"), read carefully rather than
     waved at: `quote` IS one sentence of body text, stored deliberately, and
     it is the ONLY place body text lands. It is the justification the user
@@ -359,6 +372,16 @@ class MailFact(PrivateModel):
     KIND_OOO = "out_of_office"
     KIND_ADDRESS_CHANGE = "address_change"
     KIND_ROUTING = "routing_address"
+    # A permanent delivery failure: the mail system itself said the address
+    # does not exist. `capture.gmail.apply_findings` has always ACTED on one
+    # (clears the address, notes it), but the only trace it left was a
+    # sentence in `Contact.notes` — so nothing downstream could ask "is this
+    # person reachable?" without grepping prose, and the Today queue went on
+    # asking for an email follow-up to an address the firm's own server had
+    # rejected. Measured on the founder's account 2026-09-02, read-only: four
+    # contacts cleared by a bounce on Aug 30, zero rows anywhere saying so.
+    # This kind is that row.
+    KIND_BOUNCED = "bounced"
     # Gated as an auto-reply, but no deterministic pattern (and no grounded
     # AI answer) could type it. Surfaced for the user, acted on never — the
     # "no quote, no action" fallback made visible instead of silent.
@@ -369,8 +392,16 @@ class MailFact(PrivateModel):
         (KIND_OOO, "Out of office"),
         (KIND_ADDRESS_CHANGE, "New email address"),
         (KIND_ROUTING, "Alternate routing address"),
+        (KIND_BOUNCED, "Address bounced"),
         (KIND_REVIEW, "Auto-reply to review"),
     ]
+    # The kinds that mean THE ADDRESS IS DEAD — no further mail will reach
+    # this person there. One tuple, read by `capture.mailfacts.dead_addresses`
+    # and through it by the Today queue and the contact page, so the three
+    # cannot disagree about what "undeliverable" means (P5). A soft bounce is
+    # deliberately absent: `routing_address` is what a full mailbox or a
+    # deferral writes, and that address WORKS.
+    DEAD_ADDRESS_KINDS = (KIND_BOUNCED, KIND_DEPARTED)
 
     STATUS_PENDING = "pending"      # surfaced, waiting for the user's look
     STATUS_APPLIED = "applied"      # acted on automatically; undo offered

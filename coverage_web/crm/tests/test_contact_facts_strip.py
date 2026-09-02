@@ -211,8 +211,17 @@ def test_the_page_stays_cheap(client, django_assert_max_num_queries):
     `FirmDate` rows the fit score already fetches, and the region and its
     source are columns on the contact itself.
 
-    11 is the ceiling, not the measurement — a max, so a future saving does
-    not fail the test, and a third query does.
+    RAISED 11 -> 12 ON 2026-09-02, and the twelfth query is named here so it
+    stays the only one. `_dead_address_fact` reads this contact's
+    `MailFact` rows to say WHY an address is missing, because "No email on
+    file. Add one." was reading as the student's omission on people whose
+    address a bounce or a departure auto-reply had cleared. It is gated on
+    the blank column: a contact who has an address does not pay it, and this
+    fixture's Pat has none, so the ceiling here is the worst case rather
+    than the ordinary one.
+
+    12 is the ceiling, not the measurement — a max, so a future saving does
+    not fail the test, and a thirteenth query does.
     """
     user = _user()
     firm = _goldman()
@@ -226,5 +235,5 @@ def test_the_page_stays_cheap(client, django_assert_max_num_queries):
         ChatDebrief.all_objects.create(user=user, contact=contact, touch=t,
                                        advocate_answer="yes")
     client.force_login(user)
-    with django_assert_max_num_queries(11):
+    with django_assert_max_num_queries(12):
         client.get(reverse("crm:contact_detail", args=[contact.pk]))
