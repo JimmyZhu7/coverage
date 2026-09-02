@@ -566,29 +566,51 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .getting-started-row.is-done .getting-started-label { color: var(--ink-3);
     font-weight: var(--w-reg); }
 
-  /* Unplaced arrivals: at most five names, no total, gone once the week's
-     arrivals are placed or age out (see crm.today._unplaced_arrivals). Every
-     row is a link now (2026-08-31) — every OTHER rail card's rows already
-     were, and a plain name and firm with no clickable feel read as
-     decoration. All rows share the one destination the heading's "All"
-     link already carries, since there is nowhere more specific to send a
-     single row (see the template's own comment). */
-  .unplaced-note { margin: 0 0 var(--s2); font-size: var(--fs-micro);
-    color: var(--ink-3); }
-  .unplaced-list { list-style: none; margin: 0; padding: 0;
-    display: flex; flex-direction: column; gap: var(--s1); }
-  .unplaced-row { font-size: var(--fs-s); }
-  .unplaced-link { display: flex; align-items: baseline;
-    justify-content: space-between; gap: var(--s2); color: inherit;
-    text-decoration: none; }
-  .unplaced-link:hover { text-decoration: underline; }
-  /* The firm holds its width and the name gives way: a long name truncating
-     is a nuisance, a truncated firm is the loss of the one fact that makes
-     the question answerable at all. */
-  .unplaced-name { color: var(--ink); font-weight: var(--w-med);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .unplaced-firm { flex: none; color: var(--ink-3);
-    font-family: var(--font-mono); font-size: var(--fs-micro); }
+  {% comment %}
+  ======================================================================
+  UNPLACED ARRIVALS: A FIGURE AND A BUTTON (2026-09-02, second pass).
+
+  What was here styled a roster: `.unplaced-note`, then `.unplaced-list` /
+  `-row` / `-link` / `-name` / `-firm` for up to five people, each a link
+  to the same destination, under a "Place them" text link in the heading's
+  corner. The founder's answer to it was to show how many people need
+  placing instead of who they are, and to make the verb a button. All six
+  of those classes are retired with the markup that used them; nothing
+  else on the site referenced any of them.
+
+  Three elements now, in the order the card is read: the question (the
+  shared `.rail-title`), the size of it, and the way to answer it.
+
+  `--fs-figure` is the token's own stated job, "a large number inside a
+  panel or a row", and this is the only card in the rail whose whole
+  content is one number. It is set on the numeral alone, not on the
+  caption around it, so "12" leads and "new this week, no market set"
+  stays at the rail's own small-print size. That contrast is what makes
+  the card readable at a glance from the queue beside it — the previous
+  version had five 13px names and no focal point at all.
+  ======================================================================
+  {% endcomment %}
+  /* A column, so the button below is a flex item and can shrink-wrap
+     without the `width: fit-content` hack an inline control in a block
+     would otherwise need. */
+  .unplaced-card { display: flex; flex-direction: column; }
+  .unplaced-count { margin: 0 0 var(--s3); font-size: var(--fs-micro);
+    color: var(--ink-3); line-height: 1.5; }
+  /* Baseline-aligned with the caption that follows it rather than set on
+     its own line: the number and what it counts are one sentence, and a
+     figure on a line of its own reads as a dashboard stat, which is the
+     genre this card is deliberately not in. `--w-bold` and `--ink` are the
+     only emphasis it takes; no colour, because the count is a size, not an
+     alarm. */
+  .unplaced-n { font-size: var(--fs-figure); font-weight: var(--w-bold);
+    color: var(--ink); line-height: 1; margin-right: 2px;
+    font-variant-numeric: tabular-nums; }
+  /* The card's one action, so it takes the accent fill. `align-self`
+     keeps it at its own width: a rail card is ~320px and a full-bleed navy
+     bar in a 320px column shouts louder than the queue it sits beside. The
+     shape, padding, min-height and every state are `.btn`'s — this rule
+     places the control and redefines none of it. */
+  .unplaced-act { align-self: flex-start; }
 
   /* Below 1024 the rail stacks under the queue, pace first. Cards flow
      in a row while they fit and wrap rather than shrinking. */
@@ -1008,21 +1030,30 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   and the visible overflow the drag-select handles want.
   {% endcomment %}
   {% comment %}
-  THE SLACK MOVED OUT OF COLUMN 1 (2026-09-02). The 1fr was on the firm
-  name, so at 1280px the name sat at the far left and the other four zones
-  were shoved against the right edge: measured, "HSBC" ended at x=90 and its
-  tier tag started at x=762 — 670px of nothing between a row's subject and
-  everything the row says about it. A reader had to cross the void to find
-  out why the firm was listed. The 1fr is on the STATE column now, so the
-  facts read left to right off the name they describe (name, tier, state)
-  and the two controls stay at the action end. One gutter, in the middle,
-  where a ledger puts it.
+  THE SLACK IS ITS OWN TRACK NOW (2026-09-02, second pass). It started on
+  the firm name, which put "HSBC" at x=44 and its tier tag at x=762 with
+  670px of nothing between a row's subject and everything the row says
+  about it. Moving it to the state column fixed the reading order and kept
+  the void: `.gap-state` became a 739px box holding two words, so "No
+  contacts" ended at x=380 and the next thing on the row started at x=1047.
+  The stranded look was the box, not the column order — reported again the
+  same night as "the empty stretch between the status phrase and the
+  controls".
+
+  So no zone carries the slack. Five auto columns hold the four facts and
+  the disclosure at their own widths, and track 5 is an EMPTY gutter that
+  absorbs whatever the row does not use. The facts and "Who to find" read
+  as one cluster off the name, the verb keeps the action end, and the space
+  between them belongs to neither, which is what a gutter is.
+
+  `minmax(var(--s5), 1fr)`: the floor is what stops the gutter collapsing
+  to nothing on a narrow desktop and running the disclosure into the button
+  — the adjacency this pass was asked to break.
   {% endcomment %}
   .gap-card { display: grid; align-items: baseline;
-    grid-template-columns: minmax(0, auto) auto minmax(9rem, 1fr) auto auto;
+    grid-template-columns: minmax(0, auto) auto auto auto minmax(var(--s5), 1fr) auto;
     gap: var(--s2) var(--s4);
     padding: var(--s3) var(--s4);
-    border-left: var(--edge-w) solid var(--line-strong);
     transition: background-color var(--t-fast); }
   {% comment %}
   Baseline, not centre. Three zones on this line carry three different type
@@ -1034,13 +1065,30 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   text's baseline.
   {% endcomment %}
   {% comment %}
-  The tier rail runs unbroken down the strip. It used to be a `border-top`
-  on every row, and a border-top meets a border-left in a MITRE: each row's
-  3px edge was cut off at 45 degrees top and bottom, so a strip of six T1
-  firms drew six separate red slabs with a notch between them and read as
-  six alarms rather than one ranked rail. The separator is a pseudo-element
-  inset past the edge now, so the rail is continuous and changes colour only
-  where the tier actually changes.
+  ======================================================================
+  THE TIER RAIL IS GONE (2026-09-02, second pass).
+
+  It was a 3px tier-coloured left edge on every row. The first fix made it
+  CONTINUOUS — a `border-top` separator was mitring against it and cutting
+  it into one slab per row — and the founder's answer to the continuous
+  version was that six identical coral edges read as a wall, not a signal.
+  He is right, and the measurement says why: `rank_gaps` sorts by exposure
+  and tier is the heaviest term in it, so the top of this strip is T1 on
+  every board that has T1 firms. On the demo board all six rows measured
+  `3px rgb(157, 43, 35)`. A channel that says the same thing on every row
+  is decoration; a 340px column of danger red is loud decoration.
+
+  Tier keeps BOTH of its channels, neither of them a rail. The text tag is
+  unchanged, and the second channel is now the tag's own contrast (see
+  `.gap-t1/2/3` below) rather than a hue, which leaves red on this strip
+  meaning one thing: a deadline is close. One row in six carries that tag
+  today, so it now reads as the alarm it is.
+
+  The row separator stays a pseudo-element rather than going back to
+  `border-top`. There is no edge left for it to mitre against, but it also
+  no longer has to reach the panel's edge, and an inset hairline is what
+  every other ledger surface on this page draws.
+  ======================================================================
   {% endcomment %}
   .gap-card + .gap-card::after { content: ""; position: absolute;
     left: 0; right: 0; top: 0; height: 1px; background: var(--line); }
@@ -1049,13 +1097,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   `crm/sourcing.py` has archetypes for the firm's tracks, and the Apply-gated
   firms swap their verb entirely. Left to flow, a row missing its sourcing
   panel would slide its button one column left and break the alignment that
-  is the whole reason this is a ledger.
+  is the whole reason this is a ledger. Track 5 is named by nothing on
+  purpose: it is the gutter, and a child placed into it would be a fact
+  sitting in the space that exists to hold the facts apart from the verb.
   {% endcomment %}
   .gap-card > .gap-name { grid-column: 1; }
   .gap-card > .gap-head { grid-column: 2; }
   .gap-card > .gap-state { grid-column: 3; }
   .gap-card > .src { grid-column: 4; }
-  .gap-card > .gap-act { grid-column: 5; }
+  .gap-card > .gap-act { grid-column: 6; }
   {% comment %}
   ======================================================================
   ONE SET OF TRACKS FOR ALL SIX ROWS (2026-09-02).
@@ -1088,7 +1138,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   {% endcomment %}
   @supports (grid-template-columns: subgrid) {
     .gap-row { display: grid;
-      grid-template-columns: minmax(0, auto) auto minmax(9rem, 1fr) auto auto; }
+      grid-template-columns: minmax(0, auto) auto auto auto minmax(var(--s5), 1fr) auto; }
     .gap-card { grid-column: 1 / -1; grid-template-columns: subgrid; }
   }
   {% comment %}
@@ -1124,34 +1174,53 @@ moved-flag all live in static/css/coverage.css (the animation contract for
       .gap-card { grid-template-columns: subgrid; }
     }
   }
-  /* Tier is the loudest term in the ranking, so it's the loudest signal on
-     the card too. */
-  .gap-t1 { border-left-color: var(--danger); }
-  .gap-t2 { border-left-color: var(--stale-t); }
-  .gap-t3 { border-left-color: var(--line-strong); }
-  /* Plain text, not pills — the tier is already the card's own border
-     colour (see .gap-t1/2/3 below), so a filled T1 badge restated the
-     same fact in a second shape. Text carries it for anyone the colour
-     doesn't reach; the mono face keeps it feeling like a tag without the
-     chrome.
+  {% comment %}
+  Tier's second channel, after the rail came off: WEIGHT, and one step of it.
+  T1's tag is bold, T2 and T3 sit at the regular weight the tag carries by
+  default, so the only distinction the eye is asked to make is the one worth
+  making on a six-row strip — is this one of my top firms, or is it here
+  because its deadline is close.
 
-     A "simplify this strip" pass looked at cutting this tag too, on the
-     same "the border already says it" logic used to cut the fraction and
-     the pill above. It stayed: border-left colour is the ONLY other place
-     tier appears on this card, and colour-only is exactly the failure mode
-     this comment was written to avoid. Cutting the badge without giving
-     colour-blind or low-vision readers a second channel would be redoing
-     the mistake this rule already fixed once, not simplifying past it. */
+  Two colour versions were tried first and both collided with the rest of the
+  row. A three-step ink ramp put T1 at `--ink`, which made the RANK tag the
+  loudest thing after the firm name and pushed the state phrase — the one
+  fact that differs row to row — into third place: the hierarchy complaint
+  this pass was given, restated in greys. Stepping T1 down to `--ink-2`
+  landed it on exactly the colour the state phrase uses, so on a T1 row (which
+  is most rows) the two were the same grey again. Weight is the channel with
+  nothing else parked on it: colour separates tag from state on every row,
+  size separates them, and weight is left free to rank.
+
+  Red is spent on `.gap-due-tag` alone now, so a deadline is the one thing
+  on this strip that can shout.
+  {% endcomment %}
+  .gap-t1 .gap-tier-tag { font-weight: var(--w-bold); }
+  /* Plain text, not pills. A filled T1 badge was rejected while the row
+     carried a tier-coloured border, on "the same fact in a second shape";
+     with the rail gone the tag is the only place tier appears, and it is
+     still text rather than a chip, because a chip on every row of a
+     six-row strip is the wall argument again in a smaller box. The mono
+     face keeps it reading as a tag without the chrome.
+
+     A "simplify this strip" pass looked at cutting this tag too. It stays:
+     it is now the ONLY carrier of tier, and it carries it in words, which
+     is what keeps this strip out of the colour-only failure mode however
+     quiet `.gap-t1/2/3` gets. */
   {% comment %}
   `--fs-xs`, not the 10px both tags carried. `--fs-nano`'s own token comment
   in coverage.css calls 10px "THE FLOOR" and reserves it for uppercase badge
   labels; a tier tag qualifies on a stretch, but "6d to close" is a fact a
   student is meant to read, and the row now has the horizontal room the
   150px box did not.
+
+  `--ink-3` on every row, whatever the tier: quiet is the point, because the
+  tag is the row's rank and the rows are already sitting in rank order.
+  `.gap-t1` above raises the WEIGHT and nothing else, so this colour is the
+  one the state phrase beside it is always measured against.
   {% endcomment %}
   .gap-head { display: flex; gap: var(--s2); align-items: baseline; flex: none; }
   .gap-tier-tag { font-size: var(--fs-xs); font-family: var(--font-mono);
-    color: var(--ink-3); font-weight: var(--w-med); }
+    font-weight: var(--w-reg); color: var(--ink-3); }
   .gap-due-tag { font-size: var(--fs-xs); font-family: var(--font-mono);
     color: var(--danger); font-weight: var(--w-med); }
   {% comment %}
@@ -1173,7 +1242,22 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      identically across all six cards regardless of firm (see
      contact_list.html for the full argument and the one state where the
      count still mattered). `title=` on this element carries it now. */
-  .gap-state { font-size: var(--fs-xs); color: var(--ink-3);
+  {% comment %}
+  The state phrase reads ABOVE the tier tag, not level with it. Measured
+  before this pass the two were indistinguishable by design: both
+  `--fs-xs`, both `--ink-3`, and the tag the heavier of them at `--w-med`
+  against regular. So the row's RANK looked more important than the row's
+  REASON, and "No contacts" — the one thing that differs row to row — read
+  as a second label rather than as the answer to "why is this firm here".
+
+  Three separations now, all in the same direction. Size: `--fs-s`, the
+  firm name's own size, against the tag's `--fs-xs`. Colour: `--ink-2`
+  against `--ink-3`. Face: the UI face against the tag's mono. The weight
+  stays regular, which is what keeps it a step behind the bold firm name —
+  the order these three facts answer in is which firm, what is missing,
+  how much it matters.
+  {% endcomment %}
+  .gap-state { font-size: var(--fs-s); color: var(--ink-2);
     white-space: nowrap; }
   /* `.gap-exp` is gone, and with it every number on this card's face. It
      held the raw "exposure" score, then the card's rank once that score
@@ -1221,21 +1305,31 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   baseline of whatever wrapped last.
   {% endcomment %}
   .gap-card .src { display: flex; align-items: center; min-height: 32px;
-    align-self: center; }
+    align-self: center; position: relative; }
   {% comment %}
-  The rule under "Who to find" went from dashed `--line-strong` to dotted
-  `--line` (2026-09-02). It sits one gap from a bordered button, and at the
-  border colour it read as a second control shape competing with the first —
-  the other thing flagged about this strip. Quieting it rather than removing
-  it keeps the affordance a disclosure needs at rest: the underline says
-  "this text does something" before a reader has hovered anything. It goes
-  back to `--ink-3` on hover, on keyboard focus and while the panel is open,
-  which is when it should be the loudest thing in the zone. The ↓ glyph is
-  the non-colour half of the signal and flips to ↑ when the panel opens.
+  THE RULE UNDER "Who to find" IS GONE AT REST (2026-09-02, second pass).
+  It was dashed at `--line-strong`, then dotted at `--line` when it was
+  flagged for reading as a second control shape 16px from a bordered
+  button. Quieting the hairline was not the fix: any permanent horizontal
+  rule under text sitting beside a bordered box is a box next to a box, and
+  the founder flagged it a second time.
+
+  Two changes instead, and neither costs the affordance. The gutter now
+  falls between this and the verb, so the two controls are no longer
+  neighbours at all (see `.gap-card`'s tracks). And the "this does
+  something" job goes entirely to the ↓ glyph, which is a better signal
+  than a rule ever was: an underline says "pressable", an arrow says "this
+  opens, downwards", and it flips to ↑ when the panel is open. It is not
+  colour, so it survives every mode a tint does not.
+
+  The underline comes BACK on hover, on keyboard focus and while the panel
+  is open — solid and in the text's own colour — because that is the moment
+  it should be the loudest thing in the zone, and a focus ring alone has
+  never been enough of a hit target cue on a text control.
   {% endcomment %}
   .src-toggle { list-style: none; cursor: pointer; width: fit-content;
     font-size: var(--fs-xs); color: var(--ink-2); font-weight: var(--w-med);
-    border-bottom: 1px dotted var(--line); padding-bottom: 1px;
+    border-bottom: 1px solid transparent; padding-bottom: 1px;
     transition: color var(--t-fast), border-color var(--t-fast); }
   .src-toggle::-webkit-details-marker { display: none; }
   .src-toggle::after { content: " ↓"; font-family: var(--font-mono);
@@ -1243,20 +1337,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   details[open] > .src-toggle::after { content: " ↑"; }
   .src-toggle:hover, .src-toggle:focus-visible,
   details[open] > .src-toggle { color: var(--ink);
-    border-bottom-color: var(--ink-3); }
+    border-bottom-color: currentColor; }
   {% comment %}
-  Anchored to the RIGHT of the row now, not the left. In the six-across grid
-  a card was ~200px wide and the panel grew rightwards from its left edge;
-  a row is the full width of the board, so growing from the left would open
-  a 250px panel under a firm name and leave it a page away from the "Who to
-  find" toggle that opened it. `right: 0` puts it under the row's action end,
-  which is where the toggle now lives. The four nth-child flip rules the grid
-  needed are gone with the grid.
+  Anchored to the TOGGLE, which is the only anchor that survives the toggle
+  moving. In the six-across grid a card was ~200px wide and this hung off
+  the card's left edge; when the strip became a full-width ledger the panel
+  was pinned to the ROW's right edge instead, because that is where "Who to
+  find" then sat. It no longer sits there — the gutter took the space
+  between the disclosure and the verb — so a row-anchored panel would open
+  half a board away from the word that opened it, the same disconnect
+  `right: 0` was written to fix.
+
+  Containing block is `.gap-card .src` (the `<details>` itself), so `left:
+  0` means "under the toggle" at every width and through any future column
+  move. The row is still the positioning context for nothing else; the
+  hairline separator keeps its own `position: relative` on `.gap-card`.
   {% endcomment %}
   /* `panel panel--raised`, with the stronger hairline a floating panel needs
      to read against the row it covers. */
   .src-panel { position: absolute; z-index: 20; top: calc(100% - var(--s2));
-    right: 0; left: auto; width: min(340px, 90vw); max-width: 78vw;
+    left: 0; right: auto; width: min(340px, 90vw); max-width: 78vw;
     border-color: var(--line-strong);
     padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
     /* Literal duration and easing, the way every other `animation:` in
@@ -1271,11 +1371,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   /* Said once, at the top, in plain words: these are guesses and the link
      leaves the app. The product has no roster and must not look like it
      does. */
-  /* The one line under "Coverage Gaps" that says how many advocates the
-     student actually has. Same register as `.src-note`: quiet, small, not a
-     second heading. */
-  .strip-note { font-size: var(--fs-xs); color: var(--ink-2);
-    margin: calc(-1 * var(--s2)) 0 var(--s3); }
+  /* `.strip-note` is retired (2026-09-02). It styled one caption line under
+     "Coverage Gaps" holding the advocate aggregate, and the founder asked
+     for that line off the page. The number it carried is not lost:
+     `crm.coverage.advocate_summary` still computes it, the view still puts
+     it in the context, and the strip heading's own `title=` still states
+     it in full. Nothing else on this site used the class, so the rule went
+     with the markup rather than sitting here waiting to be reused by
+     accident. */
   .src-note { font-size: var(--fs-micro); color: var(--ink-3); margin: 0;
     line-height: 1.4; }
   .src-list { list-style: none; margin: 0; padding: 0; display: flex;

@@ -1167,9 +1167,12 @@ def contact_list(request: HttpRequest) -> HttpResponse:
     # days apart, and nothing in the product said a word until this page read
     # "67 of these have no region set". A steady-state pool nobody nags about
     # is a policy; a pool nobody FINDS OUT ABOUT is a bug. So Today's rail now
-    # carries `crm.today._unplaced_arrivals` — at most five names, no total,
-    # and only while they are new, linking straight back to this tab rather
-    # than growing a second way to set a region. Read that function's module
+    # carries `crm.today._unplaced_arrival_count` — how many arrived this
+    # week and a button, no names, and only while they are new, linking
+    # straight back to this tab rather than growing a second way to set a
+    # region. The two counts are different on purpose and neither is wrong:
+    # that card counts the WEEK, this page counts the POOL. Read that
+    # function's module
     # note before changing either surface: this page owns the standing pool and
     # its passive caveat, that card owns the week's arrivals and expires.
     unplaced_total = sum(1 for c in contacts if not c.region)

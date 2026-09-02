@@ -1365,8 +1365,8 @@ copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
-    Unplaced arrivals. See crm.today._unplaced_arrivals' own module note for
-    the whole argument; the short version is that this product never infers a
+    Unplaced arrivals. See crm.today._unplaced_arrival_count's own module note
+    for the whole argument; the short version is that this product never infers a
     region it cannot entail, so a contact captured from Gmail at a firm
     running both a US and a Hong Kong desk arrives blank and stays blank until
     a person says otherwise. Correct, and the designed steady state. What was
@@ -1384,32 +1384,46 @@ copy exactly once, and this is the once.
     place with a fresher fact — so it goes last of the three rather than
     first.
 
-    THE HEADING AND NOTE, REWRITTEN THE SAME DAY (the founder's own words:
-    "this doesn't even make sense, make it more straightforward").
-    "Unplaced" named nothing a first-time reader could resolve on their
-    own — unplaced WHAT, and placed WHERE — and "Nobody has said where they
-    sit" restated the same fact obliquely instead of naming it. The real
-    fact is a market: Coverage cannot tell whether this person recruits out
-    of Hong Kong or the US, and it needs that answer to know which
-    deadlines are theirs. The heading now names the missing fact directly
-    ("No market set") and the note states the consequence in plain words
-    instead of hinting at it.
+    THE HEADING IS THE FOUNDER'S OWN, and so is the verb under it. "Where do
+    they sit?" replaced a heading that named a state ("Unplaced") nobody
+    could resolve unaided — unplaced WHAT, and placed WHERE — and "Place
+    them" is the same verb the Contacts caption on the Network page already
+    uses for this exact action, pointing at this exact tool. Both words are
+    fixed; every pass since has changed only how they are presented.
 
-    EVERY ROW IS NOW A LINK, not only "All". A card whose one clickable
-    surface was four words in the corner read as decoration to a student
-    scanning past it — nothing about a plain name and firm said "tap me".
-    Every other card in this rail (Schedule, Deadlines, Recent Activity)
-    already makes its rows links; this one now matches. Each row points to
-    the identical `?scope=unplaced` destination "All" already carries —
-    there is nowhere more specific to send a single row to, since
-    `crm:contact_detail` has no region control of its own (see the next
-    paragraph) and never has. The honest choice is the same door on every
-    row, not a link that reads specific and goes nowhere useful.
+    A COUNT AND A BUTTON, NOTHING ELSE (2026-09-02, the founder's own words:
+    "make Place them into a button, don't show people's names, just show how
+    many people need to be placed"). What was here was up to five names with
+    their firms, each row a link to the same tab, under a one-line note, with
+    "Place them" as a text link in the heading's corner.
 
-    AT MOST FIVE NAMES AND NO TOTAL. The count lives on the tab this links
-    to, where it belongs; a rail card reading "71" is a rail card students
-    learn to scroll past. "All" rather than a number is the same thing the
-    Deadlines card above does with its own cap.
+    Three things went and each was the same mistake. The NAMES were a roster
+    the card could not act on: the reader could not tell whether five was the
+    ask or the top of a pile, and reading a person and their firm here made
+    no part of the trip to the tool shorter. THE CAP went with
+    them — a count has one row whatever it counts, so there is nothing left
+    to cap. And THE NOTE went, because with a count on the face its two
+    facts are said twice: the count line states the window ("this week") and
+    the missing fact ("no market set"), and what the note added on top was
+    the mechanism, which is explanation and now lives in that line's own
+    `title=`.
+
+    THE COUNT IS THE WEEK'S, AND SAYS SO. `_unplaced_arrival_count` counts
+    the arrivals inside `UNPLACED_ARRIVAL_WINDOW_DAYS`, not the standing
+    pool, so on a board with a long backlog this card reads smaller than the
+    tab it opens. That is not a disagreement: the card's number is a
+    week's arrivals and its face says "this week", while the tab counts
+    every region-less contact under its own heading. The old argument for
+    printing nothing was that "71" makes a student close the tab — the
+    answer to that is a number that is honestly small, not no number.
+
+    THE VERB IS A REAL BUTTON, `btn btn-primary`, the shared control every
+    other action in this app uses. It was a `.rail-more` text link in the
+    corner of the heading, which is the right treatment for "see all" on the
+    Schedule and Deadlines cards above — those send you to a fuller version
+    of what the card is already showing. This one is not a "see all": it is
+    the only way to do the thing the card is asking for, and it is now the
+    only action on the card, which is what earns the accent fill.
 
     ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
     asks the question in its answerable shape (grouped by firm, select-all per
@@ -1423,57 +1437,39 @@ copy exactly once, and this is the once.
     always-available fallback; that line answers a different question ("how
     many rows in THIS region tab are here on a guess") and never expires.
     {% endcomment %}
-    {% if unplaced_arrivals %}
+    {% if unplaced_arrival_count %}
       <div class="rail-card unplaced-card panel">
         {% comment %}
-        A QUESTION AND ITS VERB, not a state and a paragraph. This card read
-        "No market set" over three lines of explanation ending "until you
-        say", which names a condition and buries what to do about it.
+        A QUESTION, ITS SIZE, AND ITS VERB. The heading asks; the figure says
+        how big the answer is; the button is where it gets answered.
 
-        Two more things were wrong with that sentence. It hardcoded "Hong
-        Kong or US" -- the founder's own two regions -- so any student
-        recruiting anywhere else read a card naming markets they do not
-        target. And "market" is the postings vocabulary: `crm/views.py`
-        already settled that people sit in COUNTRIES and the directory's
-        "Other Markets" wording belongs to roles, which is why the Network
-        scope tabs read "Hong Kong" and "United States" rather than a market
-        code.
+        THE CAPTION CARRIES TWO FACTS AND NO MECHANISM. "new this week" is
+        the seven-day arrival window (`crm.today.UNPLACED_ARRIVAL_WINDOW_
+        DAYS`) and is the reason this card exists rather than showing every
+        region-less contact on the account; it is also what makes the figure
+        honest against the fuller pool on the tab. "no market set" is the
+        missing fact itself, in the words the heading is asking for.
 
-        "Place them" is not a new phrase either -- it is the verb the
-        Contacts caption on the Network page already uses for this exact
-        action, pointing at this exact tool.
+        What is NOT here is why it matters. "Coverage matches a firm's
+        deadlines to a person by market" is a fact about how the product
+        works, not one the student acts on, so it is the caption's `title`.
+        Same rule the rest of this rail follows: keep the fact, cut the
+        explanation.
 
-        THE NOTE, CUT TO ONE LINE (2026-09-02, "the cards are wordy"). The
-        heading and the verb above are the founder's own and are untouched.
-        The note under them is what grew: "New this week. Coverage cannot
-        match them to the right deadlines until you say." wrapped to two
-        lines and spent most of them restating what the heading had already
-        asked and the link had already answered.
+        "market", not "region", stays deliberate here even though
+        `crm/views.py` settled that PEOPLE sit in countries: the thing this
+        card is short of is the key a firm's deadlines are matched on, which
+        is the postings vocabulary. The tool the button opens is where the
+        student answers in country terms.
 
-        Both of its facts survive. "New this week" is the seven-day arrival
-        window (`crm.today.UNPLACED_ARRIVAL_WINDOW_DAYS`) and is the reason
-        this card is here at all rather than showing every region-less
-        contact on the account. "Deadlines match by market" is the
-        consequence, which is what makes the question worth answering.
-        What went is the sentence around them -- "Coverage cannot ... until
-        you say" is the product explaining its own mechanism, and "until you
-        say" duplicated the verb sitting in the corner of the same heading.
-        The fuller version of the mechanism moved to the row's `title`.
+        The old two-line note hardcoded "Hong Kong or US" -- the founder's
+        own two regions -- so any student recruiting anywhere else read a
+        card naming markets they do not target. Nothing on this card names a
+        market now, which is the safest version of that fix.
         {% endcomment %}
-        <h3 class="rail-title">Where do they sit?
-          <a class="rail-more" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
-        </h3>
-        <p class="unplaced-note" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one.">New this week. Deadlines match by market.</p>
-        <ul class="unplaced-list">
-          {% for c in unplaced_arrivals %}
-            <li class="unplaced-row">
-              <a class="unplaced-link" href="{% url 'crm:contact_list' %}?scope=unplaced">
-                <span class="unplaced-name">{{ c.name|smart_person_name|smart_title }}</span>
-                <span class="unplaced-firm">{{ c.firm|default:"No firm" }}</span>
-              </a>
-            </li>
-          {% endfor %}
-        </ul>
+        <h3 class="rail-title">Where do they sit?</h3>
+        <p class="unplaced-count" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one."><span class="unplaced-n">{{ unplaced_arrival_count }}</span> new this week, no market set.</p>
+        <a class="btn btn-primary unplaced-act" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
       </div>
     {% endif %}
 

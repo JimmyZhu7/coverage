@@ -2884,7 +2884,7 @@ found is a data leak between students. Four blockers, all dispatched or decided 
 #### WS-OPS-07 · Today's remaining query shape
 - **size:** S
 - **status:** open
-- **files/seams:** `crm/today.py` (`_opening_bench`, `_unplaced_arrivals`, the funnel
+- **files/seams:** `crm/today.py` (`_opening_bench`, `_unplaced_arrival_count`, the funnel
   counts), `directory/open_runs.py::onboarding_cutoffs`,
   `crm/recruitment.py::hidden_contact_ids`
 - **measured defect:** `audit-perf-tests.md §1` defects 10, 11 and 12.
@@ -2896,7 +2896,7 @@ found is a data leak between students. Four blockers, all dispatched or decided 
   the funnel is three `COUNT(*)` queries where one `values().annotate(Count)` does it.
 - **the change:** cache `onboarding_cutoffs` per scrape run keyed on the latest
   `ScrapeRun`; pass the sets `_build_actions` already built into `_opening_bench` and
-  `_unplaced_arrivals`; collapse the funnel to one query.
+  `_unplaced_arrival_count`; collapse the funnel to one query.
 - **acceptance criteria:**
   - Today's query count drops by 5 from the WS-OPS-04 baseline; both numbers stated.
   - A test asserts the cached `onboarding_cutoffs` is invalidated by a new

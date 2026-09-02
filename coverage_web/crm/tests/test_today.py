@@ -1160,7 +1160,11 @@ def test_the_rail_orders_pace_before_deadlines_before_unplaced(client):
 
     ctx = _cockpit_context(user)
     assert ctx["deadlines"], "precondition: a deadline exists"
-    assert ctx["unplaced_arrivals"], "precondition: an unplaced arrival exists"
+    # `unplaced_arrival_count` since 2026-09-02: the card counts the week's
+    # arrivals instead of naming up to five of them. The precondition is the
+    # same one — something unplaced arrived — only the key and its shape
+    # changed.
+    assert ctx["unplaced_arrival_count"], "precondition: an unplaced arrival exists"
 
     body = _login_and_get(client, user)
     # No closing quote: the rail card also wears the shared panel primitive
