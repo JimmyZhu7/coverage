@@ -12,7 +12,13 @@ from core import views as core_views
 from directory import views as directory_views
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    # Not a literal "admin/": settings.ADMIN_URL_PREFIX (default "admin/",
+    # production sets an unguessable one) so the staff door that reads every
+    # tenant is not sitting on the path every scanner on the internet tries
+    # first. django-axes locks the form itself — see the AXES_* block in
+    # settings/base.py — and resolves `admin:index` to find it, so moving the
+    # prefix does not move the lockout off it.
+    path(settings.ADMIN_URL_PREFIX, admin.site.urls),
     # django-allauth: login/logout/signup + Google social-auth callback.
     path("accounts/", include("allauth.urls")),
     # The opportunities feed (insight programmes / internships /

@@ -78,6 +78,15 @@ dependencies = [
     # on the first rate-limit check — declare it, don't discover it.
     "redis>=5.0",
     "defusedcsv>=3.0.0",
+    # Brute-force lockout on Django's admin login form — the one password
+    # form in the app allauth's rate limits cannot see, and the one whose
+    # session reads every tenant. See the AXES_* block in settings/base.py
+    # for the scoping and the numbers. Floor is the version this was written
+    # and tested against; ceiling is the major, because axes has changed the
+    # meaning of its lockout settings across majors before (6.0 replaced
+    # AXES_LOCK_OUT_BY_COMBINATION_USER_AND_IP with AXES_LOCKOUT_PARAMETERS,
+    # which is exactly the setting this app depends on).
+    "django-axes>=8.3.1,<9.0",
     "django-csp>=4.0",
     "django-permissions-policy>=4.33.0",
     "requests>=2.34.2",

@@ -45,6 +45,24 @@ DEBUG = env.bool("DJANGO_DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
+# Where the Django admin is mounted (coverage_web/urls.py reads this).
+#
+# The default stays "admin/" so local development, every bookmark, and every
+# test that reverses an admin URL behave exactly as they did. Production sets
+# DJANGO_ADMIN_URL_PREFIX to something unguessable. This is not a substitute
+# for the lockout configured in the Auth section below — an unlisted door is
+# not a locked one — it is the cheap half of the pair: the scanners that walk
+# /admin/ on every host on the internet stop finding a login form to POST to
+# at all, so the lockout only ever has to deal with someone who already knows
+# where to look.
+#
+# Normalised here rather than trusted: a value with a leading slash makes
+# Django's own `path()` raise, and one without a trailing slash silently
+# mounts the whole admin one path segment shallower than intended.
+ADMIN_URL_PREFIX = env("DJANGO_ADMIN_URL_PREFIX", default="admin/").strip().lstrip("/")
+if ADMIN_URL_PREFIX and not ADMIN_URL_PREFIX.endswith("/"):
+    ADMIN_URL_PREFIX += "/"
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -68,6 +86,10 @@ INSTALLED_APPS = [
     # models, no urls, no runtime behaviour of its own. django-permissions-
     # policy needs no app entry; it is middleware-only (no apps.py to load).
     "csp",
+    # Brute-force protection for the ONE login form allauth's own rate limits
+    # cannot see: Django's admin (see the AXES_* block in the Auth section
+    # below for why that gap exists and why this is scoped to admin only).
+    "axes",
     "core",
     # docs/build-plan.md §2's multi-tenant data model, split by zone:
     "accounts",  # the custom User model (private zone's `users` table)
@@ -266,6 +288,11 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     # django-allauth requires this in addition to AuthenticationMiddleware.
     "allauth.account.middleware.AccountMiddleware",
+    # LAST, per django-axes' own docs: it exists to turn the
+    # AxesBackendPermissionDenied raised deep inside `authenticate()` into a
+    # readable 429 instead of Django's bare 403 page, so it has to wrap every
+    # view that can run an authentication.
+    "axes.middleware.AxesMiddleware",
 ]
 
 # ---------------------------------------------------------------------------
@@ -521,9 +548,84 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 SITE_ID = 1
 
 AUTHENTICATION_BACKENDS = [
+    # FIRST, per django-axes' own docs. It authenticates nobody; it raises
+    # when the caller is already locked out, which only works if it runs
+    # before the backend that would otherwise hand out a session.
+    "axes.backends.AxesStandaloneBackend",
     "django.contrib.auth.backends.ModelBackend",
     "allauth.account.auth_backends.AuthenticationBackend",
 ]
+
+# ---------------------------------------------------------------------------
+# django-axes — brute-force protection for the admin login form.
+#
+# WHY THIS EXISTS AT ALL. allauth's own rate limits (ACCOUNT_RATE_LIMITS'
+# `login_failed`, 5 per 5 minutes per identifier) cover /accounts/login/ and
+# nothing else. `/admin/login/` is Django's own `AuthenticationForm` on
+# Django's own view: it never touches allauth, so it was the one unthrottled
+# password form in the app — and it is the one door that opens EVERY tenant
+# at once, because a staff session reads across the whole database. An
+# audit on 2026-09-01 found it answering 200 to unauthenticated GETs with
+# nothing counting the POSTs behind it.
+#
+# WHY ONLY THE ADMIN SITE. AXES_ONLY_ADMIN_SITE keeps axes off
+# /accounts/login/ deliberately, for two reasons rather than timidity.
+# First, allauth already counts that form, so a second counter over it is
+# duplicated state that can only disagree with the first. Second, axes reads
+# the attempted identifier out of AXES_USERNAME_FORM_FIELD ("username"),
+# which is exactly what Django's admin form posts and exactly what allauth's
+# does NOT (its field is "login", and with ACCOUNT_LOGIN_METHODS={"email"}
+# the credential reaches the backend as `email=`) — so pointing axes at the
+# allauth form would silently degrade this from username+IP to IP-only and
+# lock out a shared campus NAT instead of an attacker. `is_admin_request`
+# resolves `admin:index` at check time, so this keeps working after
+# ADMIN_URL_PREFIX below moves the admin off /admin/.
+#
+# THE NUMBERS. Five failures on the same (username, IP) pair, then a one-hour
+# cool-off. A single lockout parameter list containing a LIST means the
+# combination, not either alone: locking on username alone would let anyone
+# who knows a staff address lock the founder out of his own admin at will.
+AXES_FAILURE_LIMIT = env.int("AXES_FAILURE_LIMIT", default=5)
+AXES_COOLOFF_TIME = env.int("AXES_COOLOFF_HOURS", default=1)
+AXES_LOCKOUT_PARAMETERS = [["username", "ip_address"]]
+# WHICH POSTED FIELD NAMES THE ACCOUNT, and the reason the line above is not
+# self-enforcing. axes defaults this to the user model's USERNAME_FIELD,
+# which here is "email" (accounts.User has no username column at all).
+# Django's admin form does not post a field called "email": its field is
+# literally named "username" and carries the email as its value. On the
+# default, axes therefore recorded `username=None` for every admin attempt
+# and the pair above collapsed to the IP alone. Found by reading the
+# AccessAttempt rows rather than reasoning about them — five failures wrote
+# one row with a null username, and the correct password on the sixth
+# attempt still handed out a staff session.
+AXES_USERNAME_FORM_FIELD = "username"
+# Both, and both are needed. `AXES_ONLY_ADMIN_SITE` is checked in axes'
+# `is_allowed` (may this authentication proceed) and NOT in its
+# `user_login_failed` (record the attempt, raise the lockout), so on its own
+# it leaves allauth's sign-ins counting toward an IP-only lockout — see
+# core/axes_scope.py for the full reasoning and the test that found it.
+# The whitelist callable is the hook both paths consult.
+AXES_ONLY_ADMIN_SITE = True
+AXES_WHITELIST_CALLABLE = "core.axes_scope.outside_the_admin"
+# A successful sign-in clears that pair's counter. Without this a staff
+# member who fumbles a password four times, gets it right, and fumbles twice
+# more next week is locked out by attempts a week apart.
+AXES_RESET_ON_SUCCESS = True
+# WHERE THE COUNTER LIVES, and the caveat the audit raised. gunicorn runs
+# `--workers 3`; a counter that lives in one worker's memory gives an
+# attacker three full allowances and resets all of them on every deploy.
+# So: the cache handler ONLY when REDIS_URL names a real shared cache
+# (CACHES above switches to RedisCache on the same condition), and the
+# database handler otherwise. The database handler is slower — one INSERT
+# and one SELECT per failed attempt — and that is the correct trade for a
+# form that should see single-digit legitimate POSTs a week. What it is
+# NOT is the cache handler over LocMemCache, which is the per-worker,
+# resets-on-deploy failure mode this whole block exists to avoid.
+AXES_HANDLER = (
+    "axes.handlers.cache.AxesCacheHandler"
+    if REDIS_URL
+    else "axes.handlers.database.AxesDatabaseHandler"
+)
 
 # /app/, not "/". Signing in used to land on the marketing homepage — the
 # pitch the person just accepted, with the product a further unlabeled click
@@ -541,6 +643,27 @@ ACCOUNT_SIGNUP_REDIRECT_URL = "/welcome/"
 
 # Google is the primary sign-in path (see docs/build-plan.md §3); email/
 # password signup via allauth's own forms is left at its defaults for now.
+#
+# "optional" MEANS AN UNVERIFIED ACCOUNT IS A FULLY WORKING ACCOUNT, and the
+# risk that carries is pre-registration squatting: anyone can sign up as
+# someone-else@their-school.edu without ever proving they read that mailbox.
+# The real owner then cannot register their own address, "Continue with
+# Google" will not auto-link a verified Google identity onto an existing
+# UNVERIFIED local account, and a password-reset mail goes to an address
+# nobody proved belongs to the account holder. For a product whose whole
+# audience is university students identified by a school address, that is
+# the wrong default the day strangers can register.
+#
+# It stays "optional" anyway, and that is a standing founder decision rather
+# than an oversight: "mandatory" makes signup depend on outbound email
+# actually being delivered, and email sending is in the deferred paid-setup
+# bucket (production.py's EMAIL_URL still defaults to the console backend,
+# where a verification link goes to Render's logs). Flipping this before
+# there is a real sending domain would not harden signup, it would break it.
+#
+# THE ORDER IS: configure a sending provider, then set this to "mandatory",
+# and do both before the first student who is not the founder signs up.
+# ACCOUNT_PREVENT_ENUMERATION is left at its default True either way.
 ACCOUNT_EMAIL_VERIFICATION = "optional"
 
 # accounts.User has no `username` field at all (email is USERNAME_FIELD —
@@ -656,12 +779,18 @@ GMAIL_LIVE_PUBSUB_SUBSCRIPTION = env("GMAIL_LIVE_PUBSUB_SUBSCRIPTION", default="
 # token unreadable, which reads to a user as "Coverage silently disconnected
 # my Gmail."
 GMAIL_LIVE_TOKEN_KEY = env("GMAIL_LIVE_TOKEN_KEY", default="")
-# Requested at connect time. Kept to exactly what capture/gmail_live.py's
-# deterministic classifiers read (headers, an .ics attachment's own fields,
-# a short snippet for bounce-pattern matching) — narrower than full message
-# bodies, which matters both for the privacy story and because a narrower
-# scope is the easier one to justify if this ever goes through Google's
-# verification (see the CASA discussion in build-plan.md's risk register).
+# Requested at connect time, and the narrowest scope that can do the job:
+# `gmail.metadata` cannot read an `.ics` attachment, and reading invites is
+# the feature. Everything above this line is right; the sentence that used
+# to sit here was not. It claimed the classifiers read only "headers, an
+# .ics attachment's own fields, a short snippet", i.e. narrower than full
+# message bodies. They do not: `capture/gmail_live.py` fetches with
+# `format="full"` and `_decode_body` walks every text part, because a
+# bounce's routing address is legible in the decoded body and mangled in
+# Gmail's snippet. The scope is correct and stays; the description of what
+# is done under it is now in templates/legal/privacy.html, corrected
+# 2026-09-01. Read in memory is not the same as stored, and the privacy
+# page says which is which — keep the two in step if either changes.
 GMAIL_LIVE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 # ---------------------------------------------------------------------------

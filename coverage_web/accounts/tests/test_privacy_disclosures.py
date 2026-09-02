@@ -103,6 +103,49 @@ def test_the_ai_sharing_section_discloses_autopilot_sends_the_email_address(page
     assert "Autopilot" in section and "email address" in section
 
 
+def test_the_policy_admits_the_whole_message_is_read(page):
+    """It used to say the opposite by omission.
+
+    `capture/gmail_live.py` fetches every message with `format="full"` and
+    `_decode_body` walks every text part, because a bounce's routing address
+    is legible in the decoded body and mangled in Gmail's snippet. The page
+    described only "headers, an .ics attachment, a short snippet" — narrower
+    than what runs. A student who reads this has to be able to tell that
+    Coverage sees the body, even though it does not keep it.
+    """
+    section = page.split("Where mail comes in", 1)[1]
+    section = section.split("Google API Limited Use", 1)[0]
+    assert "reads the whole message" in section
+    assert "in memory" in section
+
+
+def test_the_policy_admits_one_sentence_of_body_text_is_stored(page):
+    """`capture.models.MailFact.quote` is a 500-character CharField holding
+    a verbatim sentence from a message, and no fact is acted on without one.
+    The page said "we do not store your messages" and left it there, which
+    read as "no body text at all". Naming it is also the honest thing: the
+    quote exists so the student can audit an automated action, and a
+    justification nobody is told about cannot do that job."""
+    section = page.split("Where mail comes in", 1)[1]
+    section = section.split("Google API Limited Use", 1)[0]
+    assert "one verbatim sentence" in section
+    assert "500 characters" in section
+
+
+def test_the_gmail_scope_comment_and_the_page_do_not_disagree():
+    """settings/base.py carried the same understated sentence next to
+    GMAIL_LIVE_SCOPES. Two places describing one behaviour is two places to
+    drift, so the comment now points at this page and says so."""
+    from pathlib import Path
+
+    from django.conf import settings
+
+    source = Path(settings.BASE_DIR) / "coverage_web" / "settings" / "base.py"
+    text = source.read_text()
+    assert "a short snippet for bounce-pattern matching" not in text
+    assert "templates/legal/privacy.html" in text
+
+
 def test_the_page_is_still_marked_a_draft():
     """The disclosure gaps are filled; the lawyer review is not done. The
     banner comes off when counsel says so, not when a test stops caring."""

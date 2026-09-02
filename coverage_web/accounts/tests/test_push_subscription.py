@@ -2,10 +2,19 @@
 Notifications toggle POSTs to (static/js/push-subscribe.js), plus the
 Settings page context that gates the toggle on VAPID being configured.
 
-Covers: method requirements, malformed-payload handling, and tenant
-isolation (accounts.models.PushSubscription is a private-zone model —
-coverage_web/tenancy.py — so a write must never let one user touch another
-user's row).
+Covers: method requirements, malformed-payload handling, endpoint-host
+validation, and tenant isolation (accounts.models.PushSubscription is a
+private-zone model — coverage_web/tenancy.py — so a write must never let one
+user touch another user's row).
+
+EVERY ENDPOINT IN THIS FILE NAMES A REAL PUSH SERVICE. It did not use to:
+the fixtures posted `https://push.example.com/...`, which reads like a
+plausible stand-in and is exactly the shape of URL the subscribe view now
+refuses (accounts/push.py's allowlist, added 2026-09-01 — an arbitrary host
+here is a host the nightly alert cron will POST to unattended). A fixture
+that could not exist in production was pinning behaviour that must not
+exist either, so the constants below moved to FCM's real host rather than
+the view being loosened to keep them passing.
 """
 
 from __future__ import annotations
@@ -24,8 +33,10 @@ User = get_user_model()
 SUBSCRIBE = "accounts:push_subscribe"
 UNSUBSCRIBE = "accounts:push_unsubscribe"
 
+FCM = "https://fcm.googleapis.com/fcm/send/abc123"
+
 VALID_PAYLOAD = {
-    "endpoint": "https://push.example.com/abc123",
+    "endpoint": FCM,
     "keys": {"p256dh": "p256dh-value", "auth": "auth-value"},
 }
 
@@ -66,7 +77,7 @@ def test_subscribe_rejects_get(client, logged_in):
 
 
 def test_unsubscribe_requires_login(client):
-    resp = _post_json(client, UNSUBSCRIBE, {"endpoint": "https://push.example.com/x"})
+    resp = _post_json(client, UNSUBSCRIBE, {"endpoint": FCM})
     assert resp.status_code in (302, 403)
 
 
@@ -96,13 +107,13 @@ def test_subscribe_rejects_missing_endpoint(client, logged_in):
 
 
 def test_subscribe_rejects_missing_keys(client, logged_in):
-    resp = _post_json(client, SUBSCRIBE, {"endpoint": "https://push.example.com/x"})
+    resp = _post_json(client, SUBSCRIBE, {"endpoint": FCM})
     assert resp.status_code == 400
 
 
 def test_subscribe_rejects_a_blank_p256dh(client, logged_in):
     resp = _post_json(client, SUBSCRIBE, {
-        "endpoint": "https://push.example.com/x",
+        "endpoint": FCM,
         "keys": {"p256dh": "", "auth": "b"},
     })
     assert resp.status_code == 400
@@ -146,13 +157,88 @@ def test_unsubscribe_deletes_the_callers_own_subscription(client, logged_in):
 
 
 def test_unsubscribing_an_unknown_endpoint_is_a_harmless_no_op(client, logged_in):
-    resp = _post_json(client, UNSUBSCRIBE, {"endpoint": "https://push.example.com/never-existed"})
+    resp = _post_json(client, UNSUBSCRIBE, {"endpoint": "https://fcm.googleapis.com/fcm/send/never-existed"})
     assert resp.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# Endpoint host validation — the stored URL is what the nightly alert cron
+# POSTs to, so an arbitrary one is a blind SSRF with a scheduler attached.
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("endpoint", [
+    "https://example.invalid/x",                       # the audit's own probe
+    "http://fcm.googleapis.com/fcm/send/x",            # right host, wrong scheme
+    "https://169.254.169.254/latest/meta-data/",        # cloud metadata
+    "http://127.0.0.1:8000/ops/health/cron/",           # back at ourselves
+    "https://evil-notify.windows.com/x",                # suffix without the dot
+    "https://notify.windows.com.attacker.test/x",       # allowlisted host as a prefix
+    "https://fcm.googleapis.com.attacker.test/x",       # allowlisted host as a prefix
+    "https://fcm.googleapis.com@attacker.test/x",       # allowlisted host as userinfo
+    "ftp://fcm.googleapis.com/x",
+])
+def test_subscribe_refuses_an_endpoint_that_is_not_a_push_service(client, logged_in, endpoint):
+    resp = _post_json(client, SUBSCRIBE, {
+        "endpoint": endpoint, "keys": {"p256dh": "a", "auth": "b"},
+    })
+    assert resp.status_code == 400
+    assert not PushSubscription.all_objects.exists()
+
+
+@pytest.mark.parametrize("endpoint", [
+    "https://fcm.googleapis.com/fcm/send/x",
+    "https://android.googleapis.com/gcm/send/x",
+    "https://updates.push.services.mozilla.com/wpush/v2/x",
+    "https://web.push.apple.com/x",
+    "https://sin.notify.windows.com/w/?token=x",
+])
+def test_subscribe_accepts_every_real_browser_push_service(client, logged_in, endpoint):
+    resp = _post_json(client, SUBSCRIBE, {
+        "endpoint": endpoint, "keys": {"p256dh": "a", "auth": "b"},
+    })
+    assert resp.status_code == 201
+    assert PushSubscription.all_objects.filter(endpoint=endpoint).exists()
 
 
 # ---------------------------------------------------------------------------
 # Tenant isolation — the one write endpoint another user must never reach.
 # ---------------------------------------------------------------------------
+def test_subscribe_refuses_to_take_over_another_users_endpoint(client, user, other_user):
+    """Knowing the endpoint string used to be enough to seize the row.
+
+    `update_or_create(endpoint=...)` reassigned `user` to whoever posted
+    last, which meant anyone holding a leaked endpoint could both silence
+    the victim's deadline alerts and put their own on that browser. The
+    endpoint is a bearer credential for the BROWSER, not for an HTTP client
+    that merely learned the string.
+    """
+    PushSubscription.all_objects.create(
+        user=user, endpoint=FCM, p256dh="a", auth="b"
+    )
+    client.force_login(other_user)
+
+    resp = _post_json(client, SUBSCRIBE, VALID_PAYLOAD)
+
+    assert resp.status_code == 409
+    sub = PushSubscription.all_objects.get(endpoint=FCM)
+    assert sub.user_id == user.id
+    assert sub.p256dh == "a"
+
+
+def test_a_freed_endpoint_can_be_claimed_by_the_next_account_on_that_browser(
+    client, user, other_user
+):
+    """The shared-device case the old reassign-on-write behaviour existed
+    for still works, it just runs through the first account's own opt-out
+    instead of being taken from underneath it."""
+    client.force_login(user)
+    assert _post_json(client, SUBSCRIBE, VALID_PAYLOAD).status_code == 201
+    assert _post_json(client, UNSUBSCRIBE, {"endpoint": FCM}).status_code == 204
+
+    client.force_login(other_user)
+    assert _post_json(client, SUBSCRIBE, VALID_PAYLOAD).status_code == 201
+    assert PushSubscription.all_objects.get(endpoint=FCM).user_id == other_user.id
+
+
 def test_a_user_cannot_unsubscribe_another_users_subscription(client, user, other_user):
     PushSubscription.all_objects.create(
         user=user, endpoint=VALID_PAYLOAD["endpoint"], p256dh="a", auth="b"

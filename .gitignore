@@ -78,3 +78,11 @@ docs/research/
 data/
 scripts/import_hk_coffee_chats.py
 scripts/seed_founder.py
+
+# Undo files written by the backfill management commands next to manage.py.
+# They are an operational safety net, not source: each one is a row-by-row
+# map of "this id had this value before", so a single file carries real
+# account emails and a few hundred private-zone ids straight into a public
+# repo. `region_backfill_undo_20260826T062308.json` was tracked here until
+# 2026-09-01 and did exactly that. Keep writing them; keep them local.
+coverage_web/*_undo_*.json

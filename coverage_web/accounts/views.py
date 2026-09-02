@@ -33,7 +33,7 @@ from crm.models import Campaign, Contact, ContactMerge, UserFirm
 from directory.models import Firm
 
 from .models import PushSubscription
-from . import onboarding_preview, services, trials as pro_trials
+from . import onboarding_preview, push, services, trials as pro_trials
 from .forms import (
     CYCLE_SUGGESTIONS,
     REGION_CHOICES,
@@ -1039,20 +1039,37 @@ def push_subscribe(request):
         {"endpoint": "...", "keys": {"p256dh": "...", "auth": "..."}}
 
     `all_objects`, not `objects.for_user` (coverage_web/tenancy.py's
-    documented escape hatch): this is the one deliberate cross-tenant write
-    in the whole flow, because the row's owner is exactly what a
-    re-subscribe on a shared device is allowed to change — `for_user` can't
-    express "create for this user, possibly reassigning a row someone else
-    currently owns."
+    documented escape hatch): the row is looked up by its own unique key
+    before the caller's ownership of it is decided, and `for_user` cannot
+    express "does this endpoint exist at all, and if so whose is it."
+
+    TWO THINGS THIS REFUSES, both added 2026-09-01 after an audit reached
+    them from an ordinary account:
+
+    1. An endpoint that is not a browser push service (`push.
+       is_allowed_endpoint`). The stored URL is what the nightly
+       `send_deadline_push_alerts` cron POSTs to, unattended, from inside
+       the deploy — so an unchecked endpoint is a blind SSRF with a
+       scheduler attached. See accounts/push.py for the allowlist.
+
+    2. An endpoint that already belongs to somebody else. This used to
+       reassign the row to whoever posted last, on the theory that the Push
+       API treats endpoint+keys as that browser's bearer credential — which
+       is true of the BROWSER, and not true of an HTTP client that merely
+       learned the string. Anyone holding another user's endpoint could take
+       their subscription over, which both silences the victim's alerts and
+       puts the attacker's deadlines on the victim's lock screen. A row is
+       now written only when it is new or already the caller's; the
+       genuinely-shared-device case (a second account on one browser, where
+       `subscribe()` returns the SAME endpoint) is resolved by the first
+       account pressing the toggle off, which frees the endpoint through
+       `push_unsubscribe`.
 
     `update_or_create` keyed on `endpoint` (its own unique constraint): the
-    Push API mints a fresh endpoint on every `subscribe()` call, so this is
-    a plain create in the overwhelming case, and only ever an update when
-    the SAME browser registration posts again — the same device asking a
-    second time, or a different account signed into it since. Either way
-    the newest POST is the authoritative owner, matching how the Push API
-    itself treats "endpoint + keys" as a bearer credential for that
-    browser's channel.
+    Push API mints a fresh endpoint on every fresh `subscribe()`, so this is
+    a plain create in the overwhelming case and an update only when the same
+    registration posts again — a re-subscribe after a key rotation, or the
+    same device asking twice.
     """
     try:
         payload = json.loads(request.body or b"{}")
@@ -1067,6 +1084,16 @@ def push_subscribe(request):
     auth = (keys.get("auth") or "").strip() if isinstance(keys, dict) else ""
     if not endpoint or not p256dh or not auth:
         return HttpResponseBadRequest("endpoint and keys.p256dh/keys.auth are required")
+    if not push.is_allowed_endpoint(endpoint):
+        return HttpResponseBadRequest("endpoint is not a known push service")
+
+    owner_id = (
+        PushSubscription.all_objects.filter(endpoint=endpoint)
+        .values_list("user_id", flat=True)
+        .first()
+    )
+    if owner_id is not None and owner_id != request.user.id:
+        return HttpResponse("endpoint belongs to another account", status=409)
 
     PushSubscription.all_objects.update_or_create(
         endpoint=endpoint,

@@ -21,7 +21,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from analytics.events import record_event
-from capture import gmail_live
+from capture import gmail_live, google_revoke
 from capture.models import GmailConnection
 
 _STATE_SESSION_KEY = "gmail_live_oauth_state"
@@ -113,10 +113,20 @@ def gmail_callback(request):
 @login_required
 @require_POST
 def gmail_disconnect(request):
-    """Deletes the stored connection. Does NOT call Google's revoke
-    endpoint — the user already has a direct, more legible way to do that
-    (https://myaccount.google.com/permissions), and duplicating it here
-    would just be a second place for that call to silently fail."""
+    """Hands the grant back to Google, then deletes the stored connection.
+
+    This used to delete the row and stop there, on the reasoning that
+    myaccount.google.com/permissions is a better place to revoke and a
+    second call is a second thing that can fail silently. True about the
+    control; wrong about the promise. A button labelled "Disconnect" that
+    leaves a live grant on Google's side is telling the student something
+    that is not so, and the grant then outlives every trace of it in this
+    app. `capture/google_revoke.py` is best-effort and never raises, so the
+    row still goes either way and that Google control is still there —
+    it is the backstop now, not the only path.
+    """
+    for connection in GmailConnection.all_objects.filter(user=request.user):
+        google_revoke.revoke_connection(connection)
     GmailConnection.all_objects.filter(user=request.user).delete()
     messages.success(request, "Gmail disconnected.")
     return redirect(f"{reverse('accounts:settings')}#gmail-live")

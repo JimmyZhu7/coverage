@@ -1493,7 +1493,22 @@ def delete_user_and_data(user) -> dict[str, int]:
     structurally incapable of touching another tenant's rows. The final
     `user.delete()` is a belt-and-suspenders cascade that also sweeps
     allauth's own per-user rows (email addresses, social tokens).
+
+    THE ONE THING THIS CANNOT DELETE BY ITSELF is the OAuth grant behind a
+    connected Gmail: that lives at Google, not in this database, and until
+    2026-09-01 it simply stayed live after the account holding it ceased to
+    exist. The privacy policy calls this deletion immediate and complete, so
+    the grant is handed back first. Best-effort and outside the transaction,
+    both deliberately: `google_revoke` never raises, and a network call has
+    no business inside a transaction that is about to delete two dozen
+    tables. If it fails the deletion still runs — leaving a stale grant is
+    bad, refusing to delete someone's account because Google was slow is
+    worse — and the user's own myaccount.google.com control still works.
     """
+    from capture import google_revoke
+
+    google_revoke.revoke_all_for_user(user)
+
     counts: dict[str, int] = {}
     with transaction.atomic():
         for label, model in _DELETE_ORDER:

@@ -16,6 +16,54 @@ def pytest_configure(config):
         "sees an ordinary weekday (see `_ordinary_weekday` in "
         "coverage_web/conftest.py).",
     )
+    config.addinivalue_line(
+        "markers",
+        "robots_live: let core.robots run its own robots.txt fetch path. "
+        "Without it no test reaches the network for one (see "
+        "`_no_live_robots_fetches` in coverage_web/conftest.py).",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _no_live_robots_fetches(request):
+    """No test fetches a real robots.txt, and none inherits a cached one.
+
+    WHY THIS EXISTS: `enrich_postings` and `fetch_firm_logos` check
+    `core.robots.is_allowed` before every outbound request. Their tests fake
+    the POSTING fetch (`monkeypatch.setattr(enrich_mod.requests, "get", ...)`)
+    but the robots check goes out through `urllib`, not `requests`, so without
+    this fixture those tests would quietly start reaching higher.gs.com and
+    a dozen real careers hosts — slow, flaky, and rude, from a suite whose
+    whole point is that it runs offline.
+
+    Patched at `_fetch_parser`, which is the one seam between "what do the
+    rules say" and "go and read them": `is_allowed` still runs for real, and
+    a None parser means "rules unreadable", which the module documents as
+    ALLOW. So the default under test is exactly today's behaviour — every
+    URL permitted — and a test that wants a refusal seeds `_CACHE` with a
+    parser of its own.
+
+    `_CACHE` is cleared on both sides because it is module-level state that
+    outlives a test: one test seeding a host would otherwise decide the
+    answer for every later test that touches it.
+
+    This is a DEFAULT, not a lock, the same convention as `_ordinary_weekday`
+    below. A test ABOUT the fetch path itself opts out with
+
+        @pytest.mark.robots_live
+
+    and fakes `urllib.request.urlopen` instead.
+    """
+    from core import robots as core_robots
+
+    core_robots.reset_cache()
+    if request.node.get_closest_marker("robots_live"):
+        yield
+        core_robots.reset_cache()
+        return
+    with mock.patch.object(core_robots, "_fetch_parser", return_value=None):
+        yield
+    core_robots.reset_cache()
 
 
 @pytest.fixture(autouse=True)

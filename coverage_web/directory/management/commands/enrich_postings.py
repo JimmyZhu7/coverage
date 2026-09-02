@@ -26,8 +26,13 @@ WHAT IT REFUSES
 ---------------
 - Overwriting a deadline that exists. Provider fields and earlier reads win;
   this only answers where nothing has.
-- Hammering anyone: per-host spacing, one worker per host, a real UA, and a
-  bounded read. This is 800+ requests across ~50 hosts, not 800 at one.
+- Hammering anyone: per-host spacing, one worker per host, and a bounded
+  read. This is 800+ requests across ~50 hosts, not 800 at one.
+- Going where it is not wanted, or pretending to be someone else. Every
+  request names Coverage (see `UA` below) and is checked against the host's
+  own robots.txt first (`robots_ok`). A disallowed URL is skipped and
+  logged; the row keeps `detail_text` unset, exactly like an unreachable
+  page, rather than being recorded as answered.
 - Treating a fetch failure as "no deadline". A row it could not read keeps
   `detail_text` unset and will be retried next run; only a fetched page that
   genuinely states nothing is recorded as answered.
@@ -37,6 +42,7 @@ from __future__ import annotations
 
 import html as html_mod
 import json
+import logging
 import re
 import time
 from datetime import datetime
@@ -48,13 +54,23 @@ from django.core.management.base import BaseCommand
 from django.db.models import Q
 from django.utils import timezone
 
+from core import robots as core_robots
 from directory.boards import BOARDS
 from directory.classify import TARGET_BUCKETS, extract_deadline_from_text, extract_sponsorship
 from directory.ingest import _parse_deadline
 from directory.models import Opportunity, ScrapeRun
 
-UA = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"}
+logger = logging.getLogger(__name__)
+
+# OUR OWN NAME, not a browser's. This read `Mozilla/5.0 ... Chrome/126` until
+# 2026-09-01 — a lie told to every firm whose careers page this command
+# reads, and one the docstring above called "a real UA". The convention is
+# `coverage_connectors/http.py`'s, and every user-agent in this project now
+# follows the same shape: a bare product token first (that is the part a
+# robots.txt `User-agent:` line matches on), then a contact URL, then what
+# the fetcher is actually for.
+UA = {"User-Agent": "coverage-enrich/0.1 "
+                    "(+https://coverage.app; job posting detail fetcher)"}
 TIMEOUT = 15
 PER_HOST_DELAY = 0.8          # seconds between hits to the same host
 MAX_TEXT = 20_000             # chars of page text kept in raw["detail_text"]
@@ -317,6 +333,22 @@ def page_title(page_html: str) -> str:
     return html_mod.unescape(m.group(1)).strip() if m else ""
 
 
+def robots_ok(url: str) -> bool:
+    """False when the host's robots.txt disallows `url` for our user-agent.
+
+    Every outbound request this command makes goes through here first.
+    Nothing in this repo consulted robots.txt anywhere before 2026-09-01,
+    which for a command that reads 800+ pages across ~50 firms' own sites is
+    not a position worth defending. A refusal is logged rather than
+    swallowed: a board that walls its postings is a standing condition an
+    operator should be able to read off a run, not a silent gap in coverage.
+    """
+    if core_robots.is_allowed(url, UA["User-Agent"]):
+        return True
+    logger.info("robots.txt disallows %s - skipped", url)
+    return False
+
+
 def fetch_posting(url: str, *, greenhouse_token: str | None = None
                   ) -> tuple[str | None, str, str]:
     """(text, stated_location, stated_title) — the posting's own words plus
@@ -337,6 +369,8 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
     """
     api = workday_api_url(url)
     if api:
+        if not robots_ok(api):
+            return None, "", ""
         try:
             resp = requests.get(api, headers={**UA, "Accept": "application/json"},
                                 timeout=TIMEOUT)
@@ -359,6 +393,8 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
 
     gs = _GS_ROLE_URL.search(url or "")
     if gs:
+        if not robots_ok(_GS_ENDPOINT):
+            return None, "", ""
         try:
             resp = requests.post(
                 _GS_ENDPOINT,
@@ -392,6 +428,8 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
     if jid and greenhouse_token:
         gh = (f"https://boards-api.greenhouse.io/v1/boards/"
               f"{greenhouse_token}/jobs/{jid.group(1)}")
+        if not robots_ok(gh):
+            return None, "", ""
         try:
             resp = requests.get(gh, headers={**UA, "Accept": "application/json"},
                                 timeout=TIMEOUT)
@@ -412,6 +450,8 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
     if oracle_m:
         host, site, rid = oracle_m.groups()
         search_url = _ORACLE_SEARCH_URL.format(host=host, site=site, rid=rid)
+        if not robots_ok(search_url):
+            return None, "", ""
         try:
             resp = requests.get(search_url, headers={**UA, "Accept": "application/json"},
                                 timeout=TIMEOUT)
@@ -434,6 +474,8 @@ def fetch_posting(url: str, *, greenhouse_token: str | None = None
 
     if _ICIMS_URL.match(url or ""):
         url = f"{url}{'&' if '?' in url else '?'}in_iframe=1"
+    if not robots_ok(url):
+        return None, "", ""
     try:
         resp = requests.get(url, headers=UA, timeout=TIMEOUT)
     except requests.RequestException:
