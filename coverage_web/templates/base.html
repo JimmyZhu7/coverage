@@ -923,6 +923,122 @@ select on.
   {% endif %}
 
   {% comment %}
+  The confirm dialog, for every bulk write in the product.
+
+  Five confirmations stood between a student and a write that moves dozens of
+  people at once, and all five were the browser's own confirm(): an OS box
+  with OS buttons, drawn in the middle of a page that is otherwise entirely
+  ours, and unreachable by any stylesheet. The founder screenshotted the
+  proposals one and said so.
+
+  Same convention as the Cmd-K palette above: a native <dialog>, so the focus
+  trap, the top layer and Escape are the browser's job and not ours, plus the
+  one line for backdrop-click-to-close that a native dialog does not do
+  itself. `panel` is the shape; the two buttons are the shared `.btn` family.
+
+  It renders for everyone, not behind `is_authenticated` like the palette,
+  because a guard that is only sometimes in the DOM is a guard that
+  sometimes silently is not there.
+
+  WHY `<form method="dialog">` AND NOT TWO CLICK HANDLERS. The form does the
+  closing and sets `returnValue` to the pressed button's value, so exactly
+  one path in this file resolves the promise true: `returnValue === "ok"`.
+  Escape, a backdrop click, a close from anywhere else — none of them set it,
+  so every one of them means cancel by construction rather than by a listener
+  someone has to remember to write. Cancel is also first in source order,
+  which makes it the dialog's default button: Enter on a bulk-write guard
+  cancels.
+  {% endcomment %}
+  <dialog class="confirm panel" id="cov-confirm" aria-labelledby="cov-confirm-text">
+    <p class="confirm-text" id="cov-confirm-text"></p>
+    <form method="dialog" class="confirm-actions">
+      <button type="submit" class="btn" value="cancel">Cancel</button>
+      <button type="submit" class="btn btn-primary" value="ok" id="cov-confirm-ok">Continue</button>
+    </form>
+  </dialog>
+  {% script %}
+    (function () {
+      var DEFAULT_OK = "Continue";
+
+      // window.covConfirm(message, opts) -> Promise<boolean>. `opts.ok` is
+      // the confirm button's label and `opts.tone` is "danger" for the one
+      // verb that takes people off the board; everything else keeps the
+      // accent primary, because a reversible action drawn in red is a scare
+      // rather than a description.
+      //
+      // THE FALLBACK IS THE POINT. A confirm is the last thing between a
+      // student and a bulk write, so if the dialog is missing from the page,
+      // or the browser has no showModal(), or showModal() throws, this hands
+      // back the browser's own confirm() instead. Ugly beats absent: the
+      // guard is never simply gone.
+      window.covConfirm = function (message, opts) {
+        opts = opts || {};
+        var dlg = document.getElementById("cov-confirm");
+        var textEl = document.getElementById("cov-confirm-text");
+        var okBtn = document.getElementById("cov-confirm-ok");
+        if (!dlg || !textEl || !okBtn || typeof dlg.showModal !== "function") {
+          return Promise.resolve(window.confirm(message));
+        }
+        return new Promise(function (resolve) {
+          textEl.textContent = message;
+          okBtn.textContent = opts.ok || DEFAULT_OK;
+          okBtn.classList.toggle("btn-danger", opts.tone === "danger");
+          okBtn.classList.toggle("btn-primary", opts.tone !== "danger");
+          // Cleared before every open: `returnValue` persists across opens,
+          // so a dialog confirmed once and then dismissed with Escape would
+          // otherwise still be carrying "ok".
+          dlg.returnValue = "";
+          function onClose() {
+            dlg.removeEventListener("close", onClose);
+            resolve(dlg.returnValue === "ok");
+          }
+          dlg.addEventListener("close", onClose);
+          try {
+            dlg.showModal();
+          } catch (err) {
+            // Already open, or the element is not in the document. Same
+            // reasoning as above: fall through to the browser's box rather
+            // than resolving anything.
+            dlg.removeEventListener("close", onClose);
+            resolve(window.confirm(message));
+          }
+        });
+      };
+
+      // Backdrop click is "never mind", exactly as the palette treats it.
+      // `returnValue` is untouched here, so this lands on the cancel side of
+      // the check above.
+      var dlg = document.getElementById("cov-confirm");
+      if (dlg) {
+        dlg.addEventListener("click", function (e) { if (e.target === dlg) dlg.close(); });
+      }
+
+      // EVERY `hx-confirm` IN THE PRODUCT, with no change to a single one of
+      // them. htmx fires `htmx:confirm` before it issues a request; cancelling
+      // that event and calling `issueRequest()` ourselves is the documented
+      // seam, so the attributes keep their copy and no caller moves.
+      //
+      // The event fires for EVERY htmx request, with `question` null when the
+      // element carries no hx-confirm — hence the guard, without which this
+      // would put a dialog in front of every click on the site.
+      //
+      // `issueRequest(true)` and not `issueRequest()`: the argument is
+      // htmx 2.0.10's own `skipConfirmation`, and it gates TWO things in
+      // `issueAjaxRequest` — the event we are already inside, and a plain
+      // `confirm(question)` further down. Passing nothing sends `false`,
+      // which suppresses only the first, so the student would answer our
+      // dialog and then get the OS one anyway.
+      document.body.addEventListener("htmx:confirm", function (e) {
+        if (!e.detail || !e.detail.question) return;
+        e.preventDefault();
+        window.covConfirm(e.detail.question).then(function (ok) {
+          if (ok) e.detail.issueRequest(true);
+        });
+      });
+    })();
+  {% endscript %}
+
+  {% comment %}
   htmx failure feedback. Two dead ends, both watched live on the Today page
   (audit 2026-08-23), both previously silent:
 
