@@ -118,7 +118,7 @@ def test_dismissing_from_the_peek_moves_all_three_numbers_together(client):
     client.force_login(user)
 
     body, offered = _offer(client)
-    assert "4 open roles name your class year" in body
+    assert "4 roles fit you and name your year" in body
     assert "Save 4 roles to My Applications?" in body
     assert sorted(offered) == sorted(o.id for o in opps)
 
@@ -127,7 +127,7 @@ def test_dismissing_from_the_peek_moves_all_three_numbers_together(client):
 
     assert resp.status_code == 200
     # The banner, the confirm sentence, and the stash, in one breath.
-    assert "3 open roles name your class year" in after
+    assert "3 roles fit you and name your year" in after
     assert "Save 3 roles to My Applications?" in after
     assert sorted(client.session[BULK_SAVE_OFFER_SESSION_KEY]) == sorted(
         o.id for o in opps[1:]
@@ -183,11 +183,11 @@ def test_undo_from_the_peek_puts_the_role_back_in_the_offer(client):
 
     _offer(client)
     _dismiss(client, opps[0], origin="peek")
-    assert "1 open role names your class year" in _offer(client)[0]
+    assert "1 role fits you and names your year" in _offer(client)[0]
 
     after = _undismiss(client, opps[0], origin="peek").content.decode()
 
-    assert "2 open roles name your class year" in after
+    assert "2 roles fit you and name your year" in after
     assert sorted(client.session[BULK_SAVE_OFFER_SESSION_KEY]) == sorted(
         o.id for o in opps
     )
@@ -249,7 +249,7 @@ def test_a_card_dismissal_also_corrects_the_banner_out_of_band(client):
 
     assert 'id="cov-scope"' in after
     assert 'hx-swap-oob="true"' in after
-    assert "2 open roles name your class year" in after
+    assert "2 roles fit you and name your year" in after
     assert "Save 2 roles to My Applications?" in after
     assert sorted(client.session[BULK_SAVE_OFFER_SESSION_KEY]) == sorted(
         o.id for o in opps[1:]

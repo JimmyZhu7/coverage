@@ -835,6 +835,13 @@ def test_the_noscript_cols_link_renders_the_full_page(client):
 
 @pytest.mark.django_db
 def test_save_your_year_saves_exactly_the_year_ok_roles(client, student):
+    """The banner's sentence changed on 2026-09-02 and this asserts the new
+    one: the offer is no longer "roles that name your year" but roles that
+    name your year AND that the recommender would rank (`_offer_fits`), so
+    the number reads as a recommendation rather than a raw count. What this
+    test is actually here for is unchanged — a stated year that is not this
+    student's, and a posting silent on the question, are both outside the
+    offer."""
     from analytics.models import UserOpportunity
 
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
@@ -845,7 +852,7 @@ def test_save_your_year_saves_exactly_the_year_ok_roles(client, student):
 
     client.force_login(student)
     body = client.get("/opportunities/").content.decode()
-    assert "1 open role names your class year" in body
+    assert "1 role fits you and names your year" in body
 
     resp = client.post("/opportunities/track-eligible/", {"confirmed": "1"})
     assert resp.status_code == 302

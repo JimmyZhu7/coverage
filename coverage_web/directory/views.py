@@ -78,7 +78,8 @@ from directory.open_runs import (
     open_run_days,
 )
 from directory.recommend import (
-    Candidate, Profile, parse_target_cycle, recommend, role_function,
+    MIN_SCORE, Candidate, Profile, parse_target_cycle, recommend, role_function,
+    role_function_cached, role_matches_regions, score_candidate,
 )
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
 from directory.timeline import (
@@ -4109,8 +4110,18 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # banner is re-rendered on every one of them: whatever number is on screen
     # is the offer that is live. Stale offers cannot accumulate — there is one
     # key and the newest write wins.
+    #
+    # `profile` — the scorer's own, built once above for the Picked column —
+    # travels with it, because the offer is now the intersection of "names
+    # your year" and "the recommender would rank it" (see `_offer_fits`).
+    # Passing it rather than letting `_eligible_unsaved_ids` build its own is
+    # two queries saved on the page that already holds the answer; every
+    # `_eligible_unsaved_ids` caller ends up with the same profile either way.
+    # It is never None here: the only render that leaves it so returns above
+    # (`cols_fragment`), and an anonymous visitor has no `elig_profile`.
     bulk_save_offer = (
-        _eligible_unsaved_ids(request.user, rows, elig_profile)
+        _eligible_unsaved_ids(request.user, rows, elig_profile,
+                              rec_profile=profile)
         if elig_profile and elig_profile.get("class_year") else []
     )
     if request.user.is_authenticated:
@@ -4119,6 +4130,23 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # banner can show WHICH roles it is offering before the student commits.
     # Derived from `bulk_save_offer` and nothing else — see `_bulk_save_peek`.
     bulk_save_peek = _bulk_save_peek(bulk_save_offer, item_by_id)
+    # WHETHER "SAVE THEM ALL" IS OFFERED AT ALL. One click that commits to
+    # more roles than the peek can print is a commit to roles the student has
+    # not looked at — the panel names the first `BULK_SAVE_PEEK_MAX` and
+    # counts the rest, so above that number the button would be asking for
+    # agreement to a list nobody has read. At or below it, the panel IS the
+    # offer and the button is honest.
+    #
+    # `BULK_SAVE_PEEK_MAX` rather than a second number, deliberately: the
+    # threshold and the peek's cap are one fact ("what a student can see
+    # before deciding"), and two constants that happened to agree today would
+    # not agree after the first edit to either.
+    #
+    # Above the threshold the banner keeps its sentence and its peek: the
+    # roles are still there, still named, still savable one by one from the
+    # panel or the board. What is withheld is the bulk commitment, not the
+    # information.
+    bulk_save_all = 0 < len(bulk_save_offer) <= BULK_SAVE_PEEK_MAX
 
     # THE SCOPE BLOCK — every sentence at the top of the results that states
     # what this board is NOT showing you, plus the "Save them all" offer and
@@ -4139,10 +4167,15 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # checked/unchecked like every other filter-bar toggle.
         "dupes_shown": dupes_shown,
         # The lens→pipeline bridge's trigger: open roles whose text names the
-        # user's year and which they have never touched (tracked or
-        # dismissed both count as touched — "not for me" outranks "your
-        # year"). Computed over the FULL row set, not the paged slice.
+        # user's year, which the recommender would rank for them, and which
+        # they have never touched (tracked or dismissed both count as touched
+        # — "not for me" outranks "your year"). Computed over the FULL row
+        # set, not the paged slice.
         "eligible_unsaved": len(bulk_save_offer),
+        # Whether that number gets a one-click button under it, or only the
+        # peek. See `bulk_save_all` above for the rule and why it reuses the
+        # peek's own cap.
+        "bulk_save_all": bulk_save_all,
         # The peek panel behind that number: `rows` (capped), `more` (what the
         # cap left out) and `total` (== `eligible_unsaved`, by construction).
         "bulk_save_peek": bulk_save_peek,
@@ -4375,29 +4408,28 @@ def _drawer_sponsorship(o) -> dict:
     }
 
 
-def _drawer_pick_why(user, opp) -> list:
-    """The scorer's own reasons for THIS role and THIS student, or [].
+def _scoring_profile(user) -> Profile:
+    """The recommender's `Profile` for this student. Two queries.
 
-    Two queries for a signed-in reader (the tier map and the warmest contact
-    per firm), none for anyone else. They are the same two the Opportunities
-    page runs once for the whole board; here they run for one role, on a
-    panel the student opened deliberately, which is the cheapest place in the
-    product to ask a personal question.
+    The tier of every firm on their target list, and the warmest live
+    relationship they hold at each firm — the two personal maps the scorer
+    reads and this module owns the querying of (`recommend.py` never touches
+    the ORM). Collapsing warmth to one rank per firm is part of the fact, not
+    a caller's convenience: "chatted or advocate" is warm, "replied" is not
+    yet, and archived and campaign-hidden contacts are not relationships at
+    all (see `_network_fit` and `crm/campaigns.py`).
 
-    `Reason` objects, not a joined string: the template prints the short text
-    and hangs the full sentence on `title`, exactly as the card does. Joining
-    here would hand the drawer a display decision the card makes differently.
+    Extracted because three callers now need the same profile — the feed's
+    Picked column, the role drawer's "why this" panel, and the bulk-save
+    offer's fit gate — and the second and third would otherwise each restate
+    those two reads. One definition per fact (P5): a warmth rule that drifted
+    between them would make the drawer justify a pick on evidence the board
+    does not have.
 
-    [] whenever the student has stated nothing (`Profile.is_empty`) or the
-    role scores under the bar. Both are the same answer — the product has no
-    recommendation to justify — and neither is an error state.
+    The feed builds this inline instead, because it already holds the tier
+    map for the rest of the page and passes the result down; that is the same
+    profile by construction, not a fourth copy of the rule.
     """
-    from crm.models import Contact, UserFirm
-    from crm import campaigns as crm_campaigns
-    from directory.recommend import MIN_SCORE, score_candidate
-
-    if not user.is_authenticated:
-        return []
     tier_by_firm = dict(
         UserFirm.objects.for_user(user).values_list("firm_id", "tier")
     )
@@ -4410,7 +4442,29 @@ def _drawer_pick_why(user, opp) -> list:
         rank = "warm" if warmth in ("chatted", "advocate") else "replied"
         if warm_by_firm.get(fid) != "warm":
             warm_by_firm[fid] = rank
-    profile = Profile.from_user(user, tier_by_firm, warm_firms=warm_by_firm)
+    return Profile.from_user(user, tier_by_firm, warm_firms=warm_by_firm)
+
+
+def _drawer_pick_why(user, opp) -> list:
+    """The scorer's own reasons for THIS role and THIS student, or [].
+
+    Two queries for a signed-in reader (the tier map and the warmest contact
+    per firm — see `_scoring_profile`), none for anyone else. They are the
+    same two the Opportunities page runs once for the whole board; here they
+    run for one role, on a panel the student opened deliberately, which is
+    the cheapest place in the product to ask a personal question.
+
+    `Reason` objects, not a joined string: the template prints the short text
+    and hangs the full sentence on `title`, exactly as the card does. Joining
+    here would hand the drawer a display decision the card makes differently.
+
+    [] whenever the student has stated nothing (`Profile.is_empty`) or the
+    role scores under the bar. Both are the same answer — the product has no
+    recommendation to justify — and neither is an error state.
+    """
+    if not user.is_authenticated:
+        return []
+    profile = _scoring_profile(user)
     if profile.is_empty:
         return []
     score, reasons = score_candidate(profile, Candidate.from_opportunity(opp))
@@ -4513,8 +4567,104 @@ def role_description(request, pk):
     })
 
 
-def _eligible_unsaved_ids(user, rows, profile) -> list[int]:
+def _offer_fits(rec_profile, o) -> bool:
+    """Whether the recommender would rank this role for this student.
+
+    ELIGIBILITY IS NOT FIT, and the banner used to act as if it were. Its
+    only test was "the posting names your class year", which answers whether
+    the student is ALLOWED TO APPLY, and it drove a bulk SAVE, which is an
+    expression of INTENT. Measured on the founder's live board on 2026-09-02
+    (class 2029, tracks ib+st, regions hk+us), the 56 roles that offer would
+    have written in one click: 16 on one of his tracks, 22 silent on
+    function, 16 naming a function that is none of them (three Jefferies
+    Human Resources programmes, Jefferies Internal Audit and Marketing, two
+    SocGen audit/IT internships, Nomura Operations, three Optiver Shanghai
+    engineering roles) and 2 naming private capital, which he does not
+    recruit for; 14 in Hong Kong or the US against 32 in a market he never
+    named (15 EU, 10 outside the tracked six, 6 CN, 1 SG) and 10 the product
+    could not place at all. This gate removes 48 of the 56 — so the banner
+    was asking, in bulk and above the fold, for a commitment the column three
+    inches below it would not have made.
+
+    Three tests, each one the scorer's own and none of them a second
+    definition of anything (P5):
+
+    TRACK, the three cases `_track_fit` ranks with, read through
+    `role_function_cached` — the single definition of what function a title
+    names. A title that names one of the student's tracks fits; a title
+    silent on function fits, because the firm's own coverage is still there
+    to speak for it; a title that names a function outside the track
+    vocabulary ("none") does not, because the posting has stated what it is
+    and it is not this. Neither does one that names a DIFFERENT track: the
+    student said which desks they are recruiting for. A student who has
+    stated no tracks is filtered on none of this, exactly as
+    `role_matches_tracks` treats them — there is nothing to be relevant to.
+
+    REGION, `role_matches_regions`, plus "global". A stated market the
+    student never named is a stated non-fit, and a blank region fails the
+    same way it fails every other region filter on the board (that function's
+    docstring carries the argument, and diverging here would make the banner
+    the one surface where "you said Hong Kong" quietly includes rows nobody
+    can place). "global" passes because it is what the scorer does with it:
+    it is outside `_STATED_MARKETS`, so `_region_fit` scores it zero rather
+    than as a wrong place — the posting saying it has no single location is
+    not the posting naming somewhere else.
+
+    Note what this makes the offer on that one axis: STRICTER than ranking
+    alone. `recommend()` charges a wrong market `W_REGION_MISMATCH` and lets
+    a strong enough row survive it; this excludes the row outright, the way
+    every listing filter on the board already does. That is deliberate and it
+    is the axis the measurement turned on — 30 of the 48 rows this gate
+    removes are removed here. A ranked row a student scrolls past is a
+    suggestion they can ignore; a bulk save is a decision made once for all
+    of them, so the offer takes the filter's answer, not the ranker's
+    penalty.
+
+    THE BAR, `score_candidate` against `MIN_SCORE` — the same bar the ranker
+    applies before ordering anything, and the same one `_drawer_pick_why`
+    uses to decide whether there is a recommendation to justify at all. It
+    removes nothing on the founder's board today and is not expected to: a
+    row only reaches this function with a `year_ok` verdict, which means the
+    posting STATED his class, which is `W_CLASS_STATED` (30) before any other
+    axis speaks — already past `MIN_SCORE` (25). The three tests measured in
+    order on 2026-09-02 ran 56 → 38 → 8 → 8, the lowest survivor scoring 56.
+    It stays because it is the ranker's own number: while this reads it, the
+    offer cannot drift below the column it sits above, whatever the weights
+    become. `test_a_role_under_the_recommenders_bar_does_not_fit` pins it
+    here rather than through the feed, for exactly that reason.
+
+    What this deliberately does NOT do is re-run `recommend()`. Ranking the
+    whole board to answer a question about one row is the wrong shape (see
+    `_drawer_pick_why`, which declines it for the same reason), and the
+    remaining exclusions in that function — the rung of the ladder, a passed
+    deadline — are not part of the decision recorded here. Two of the eight
+    roles this gate keeps for the founder are PhD-level; the rung filter
+    would drop them, and that is a call for the next measurement, not a
+    fourth test invented inside a bulk-save offer.
+    """
+    fn = role_function_cached(o.title)
+    if rec_profile.tracks and (fn == "none" or (fn and fn not in rec_profile.tracks)):
+        return False
+    region = o.region or ""
+    if region != "global" and not role_matches_regions(region, rec_profile.regions):
+        return False
+    return score_candidate(rec_profile, Candidate.from_opportunity(o))[0] >= MIN_SCORE
+
+
+def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]:
     """The exact roles the "Save them all" banner is offering, as ids.
+
+    THE INTERSECTION OF ELIGIBILITY AND FIT. The posting has to name the
+    student's class year (`year_ok`, the verdict contract's own positive
+    case) AND the recommender has to be willing to rank it (`_offer_fits`,
+    which reads the scorer's track, region and score-floor rules). Either
+    half alone is the wrong question: the first is what the student is
+    allowed to apply for, the second is what the product would point at, and
+    a one-click bulk save is a claim of the second kind.
+
+    `rec_profile` is the scorer's `Profile`, passed in by the feed (which
+    already built one for its Picked column) and built here for callers that
+    have not (`crm.today`'s ribbon chip — two queries, once, not per row).
 
     Returns the LIST, not a count, and the caller stashes it in the session
     (`BULK_SAVE_OFFER_SESSION_KEY`) so the confirm writes precisely what the
@@ -4534,6 +4684,7 @@ def _eligible_unsaved_ids(user, rows, profile) -> list[int]:
     """
     from analytics.models import UserOpportunity
 
+    rec = _scoring_profile(user) if rec_profile is None else rec_profile
     touched = set(
         UserOpportunity.all_objects.filter(user=user)
         .values_list("opportunity_id", flat=True)
@@ -4550,6 +4701,10 @@ def _eligible_unsaved_ids(user, rows, profile) -> list[int]:
         # most. Measured 2026-09-02: 1 open campus row board-wide.
         and not _abandoned_note(o)
         and (lambda v: v and v["kind"] == "year_ok")(_eligibility(o, profile))
+        # Last, and only over what the year test already kept: this is the
+        # one line here that scores, and on the founder's board that is 56
+        # rows out of 2,857 rather than the whole feed.
+        and _offer_fits(rec, o)
     )
 
 
@@ -4609,7 +4764,7 @@ def _bulk_save_peek(offer_ids, item_by_id, *, cap=BULK_SAVE_PEEK_MAX):
     }
 
 
-def _eligible_unsaved_count(user, rows, profile) -> int:
+def _eligible_unsaved_count(user, rows, profile, *, rec_profile=None) -> int:
     """How many roles the "Save them all" offer covers, for surfaces that
     only print the number (Today's chip — `crm.today._cockpit_context`).
 
@@ -4619,7 +4774,7 @@ def _eligible_unsaved_count(user, rows, profile) -> int:
     Callers must pass a row list that has already been through
     `directory.dupes.fold_duplicates`, for the same reason — a repeat listing
     is one role, and counting it twice here is what made the third number."""
-    return len(_eligible_unsaved_ids(user, rows, profile))
+    return len(_eligible_unsaved_ids(user, rows, profile, rec_profile=rec_profile))
 
 
 # The session key `track_eligible` stashes its batch under, so a redirect to

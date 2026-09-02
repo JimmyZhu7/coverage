@@ -172,7 +172,10 @@ def test_the_footnote_is_silent_rather_than_partial(client, dupes):
 
 SQUARED = [
     (".track-btn", "Save / Saved — writes a row"),
-    (".scope-act", "Save them all — writes up to 310 rows"),
+    # "up to 310 rows" until 2026-09-02; the offer is scored now and capped at
+    # `BULK_SAVE_PEEK_MAX`, so the button never commits to more than the peek
+    # above it printed. Still a control that writes, still squared.
+    (".scope-act", "Save them all — writes up to 8 rows"),
     (".rcd-undo", "Undo — reverses a dismissal"),
 ]
 

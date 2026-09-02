@@ -127,9 +127,18 @@ adds only what the platform does not give us for free: Escape, and keeping
 that attribute true while the panel is open. Hover and keyboard focus are
 pure CSS, so the panel opens with the script broken or still loading.
 {% endcomment %}
+{% comment %}
+WHAT THE NUMBER MEANS. It used to say "N open roles name your class year",
+which was true and was the wrong fact to put above a Save button: naming your
+year is what you are ALLOWED to apply for, and a one-click save is what you
+INTEND. Measured on the founder's board 2026-09-02, 48 of the 56 roles that
+sentence counted named a function he does not recruit for or sat in a market
+he never named. The offer is scored now (see `_offer_fits`), so the sentence
+leads with fit and the year comes second.
+{% endcomment %}
 {% if eligible_unsaved %}
   <div class="scope-line scope-line--act">
-    <span>{{ eligible_unsaved }} open role{{ eligible_unsaved|pluralize }} name{{ eligible_unsaved|pluralize:"s," }} your class year and {{ eligible_unsaved|pluralize:"isn't,aren't" }} saved yet.</span>
+    <span>{{ eligible_unsaved }} role{{ eligible_unsaved|pluralize }} fit{{ eligible_unsaved|pluralize:"s," }} you and name{{ eligible_unsaved|pluralize:"s," }} your year. Not saved yet.</span>
     {% comment %}
     `data-peek-state="open"` on the render a peek dismissal caused, so the
     panel is still open when the swap lands. Pruning a list of eight roles
@@ -222,14 +231,26 @@ pure CSS, so the panel opens with the script broken or still loading.
         {% endif %}
       </div>
     </div>
-    <details class="scope-confirm">
-      <summary class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</summary>
-      <form method="post" action="{% url 'track_eligible' %}" class="scope-confirm-form">
-        {% csrf_token %}
-        <span class="scope-confirm-q">Save {{ eligible_unsaved }} role{{ eligible_unsaved|pluralize }} to My Applications?</span>
-        <button type="submit" name="confirmed" value="1" class="scope-act scope-act--confirm">Yes, save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
-      </form>
-    </details>
+    {% comment %}
+    THE BULK BUTTON, only where the panel above has shown the whole offer.
+    `bulk_save_all` is `0 < offer <= BULK_SAVE_PEEK_MAX` — the peek's own cap,
+    not a second number (see `directory.views.opportunities`). Past it the
+    panel names eight roles and counts the rest, so a click here would be a
+    commitment to roles the student has never seen, and the product does not
+    ask for that. The sentence and the peek stay: every one of those roles is
+    still named, still readable, still savable one at a time from the panel or
+    the board. Only the one-click commitment is withheld.
+    {% endcomment %}
+    {% if bulk_save_all %}
+      <details class="scope-confirm">
+        <summary class="scope-act">Save {{ eligible_unsaved|pluralize:"it,them all" }}</summary>
+        <form method="post" action="{% url 'track_eligible' %}" class="scope-confirm-form">
+          {% csrf_token %}
+          <span class="scope-confirm-q">Save {{ eligible_unsaved }} role{{ eligible_unsaved|pluralize }} to My Applications?</span>
+          <button type="submit" name="confirmed" value="1" class="scope-act scope-act--confirm">Yes, save {{ eligible_unsaved|pluralize:"it,them all" }}</button>
+        </form>
+      </details>
+    {% endif %}
   </div>
 {% endif %}
 </div>
