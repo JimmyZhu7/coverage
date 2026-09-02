@@ -15,7 +15,7 @@ from math import ceil
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count as models_Count, Max as models_Max, Q
+from django.db.models import Max as models_Max, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
@@ -2168,43 +2168,6 @@ def _daily_cap(goal: int, done: int, today) -> int:
     return max(TODAY_PLAN_MIN, min(TODAY_PLAN_MAX, ceil(remaining / _workdays_left(today))))
 
 
-def _pace_history(user, today, weeks: int = 8) -> list[dict]:
-    """The last N weeks of the user's own outbound work, oldest first.
-
-    The ring shows this week and forgets every other: goal hit, gone Monday.
-    A habit needs a trace — eight bars under the ring turn "how am I doing"
-    from a feeling into a shape. Same kind-filter as the ring
-    (PACE_TOUCH_KINDS), same Monday weeks (TruncWeek), so the last bar always
-    equals the ring's own number.
-    """
-    from django.db.models.functions import TruncWeek
-
-    start = today - timedelta(days=today.weekday(), weeks=weeks - 1)
-    counts = {}
-    for row in (Touch.objects.for_user(user)
-                .filter(kind__in=PACE_TOUCH_KINDS, ts__date__gte=start)
-                .annotate(week=TruncWeek("ts"))
-                .values("week")
-                .annotate(n=models_Count("id"))):
-        key = row["week"].date() if hasattr(row["week"], "date") else row["week"]
-        counts[key] = counts.get(key, 0) + row["n"]
-
-    goal = user.weekly_touch_goal or WEEKLY_TOUCH_GOAL
-    out = []
-    for i in range(weeks):
-        monday = start + timedelta(weeks=i)
-        n = counts.get(monday, 0)
-        out.append({
-            "n": n,
-            "hit": n >= goal,
-            "label": f"week of {monday:%b} {monday.day}: {n}",
-        })
-    scale = max([goal] + [w["n"] for w in out])
-    for w in out:
-        w["pct"] = round(100 * w["n"] / scale) if scale else 0
-    return out
-
-
 def _pace(user, today) -> dict:
     """The weekly pace ring: touches YOU logged since Monday, against the goal.
 
@@ -3989,7 +3952,6 @@ def _cockpit_context(user) -> dict:
         # what already happened rather than about the next outbound move.
         "debriefs": debriefs,
         "pace": pace,
-        "pace_history": _pace_history(user, today),
         # The timed layer. `schedule` merges real calendar datetimes with the
         # chats nobody has put a time on yet; `chat_prep` is the subset
         # happening today, with the last debrief pulled up alongside.

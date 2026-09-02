@@ -1141,14 +1141,29 @@ def test_the_rail_names_every_confirmed_date_a_firm_has(client):
 # Unplaced, Pace, Schedule, Deadlines — a standing question above the pace
 # ring and the confirmed dates it should trail.
 # ---------------------------------------------------------------------------
-def test_the_rail_orders_pace_before_deadlines_before_unplaced(client):
-    """Pins the DOM order, not just the context dict: a template can compute
-    the right data and still render it in the wrong slot. Getting Started is
-    not part of this claim — it is gated to an unfinished setup and, by its
-    own rule, outranks all three whenever it renders at all — so this fixture
-    leaves it unfinished-but-absent (no Firm/UserFirm/Gmail link needed to
-    make that true for a fresh test user) and checks only the three cards
-    the founder actually named."""
+def test_the_rail_orders_pace_before_deadlines_and_unplaced_rides_with_pace(client):
+    """REWRITTEN 2026-09-02; the third rung of its premise no longer exists.
+
+    It read `..._orders_pace_before_deadlines_before_unplaced` and pinned
+    three rail cards in the founder's own 2026-08-31 order. On 2026-09-02 he
+    asked for the first and the third to become one ("Combine this with
+    unsorted contacts, make into one widget"), so "then unplaced" is no
+    longer an order this rail can express: the unplaced block is inside the
+    pace card, which means it necessarily renders ABOVE Deadlines rather
+    than below it.
+
+    Both halves of what the old test was protecting survive and are pinned
+    here. Pace still leads (`pace < deadlines`), and the unplaced block is
+    still positioned rather than loose — it now has to sit inside the pace
+    card's own element, which is a stricter claim than "somewhere after
+    Deadlines" and is what would actually break if a future pass pulled it
+    back out into a card of its own without saying so.
+
+    Getting Started is not part of this claim — it is gated to an unfinished
+    setup and, by its own rule, outranks everything whenever it renders at
+    all — so this fixture leaves it unfinished-but-absent (no
+    Firm/UserFirm/Gmail link needed to make that true for a fresh test user).
+    """
     user = _user(weekly_touch_goal=14, regions=["hk", "us"])
     firm = Firm.objects.create(slug="gs4", name="Goldman Sachs",
                                 regions=["hk", "us"])
@@ -1171,10 +1186,22 @@ def test_the_rail_orders_pace_before_deadlines_before_unplaced(client):
     # since 2026-09-02 (D-13). The card's own name still identifies it.
     pace = body.index('class="rail-card pace-card')
     deadlines = body.index('<h3 class="rail-title">Deadlines')
-    unplaced = body.index('class="rail-card unplaced-card')
-    assert pace < deadlines < unplaced, (
-        f"expected pace ({pace}) < deadlines ({deadlines}) < "
-        f"unplaced ({unplaced}) in rendered order"
+    assert pace < deadlines, (
+        f"expected pace ({pace}) before deadlines ({deadlines}) in rendered "
+        "order"
+    )
+    # And the merged half is INSIDE the pace card, not a card of its own.
+    # `unplaced-card` with no `rail-card` in front of it is the whole
+    # difference, so the assertion is on both facts at once.
+    unplaced = body.index('class="unplaced-card')
+    assert 'class="rail-card unplaced-card' not in body, (
+        "the unplaced block is back to being its own rail card; the founder "
+        "asked for one widget"
+    )
+    assert pace < unplaced < deadlines, (
+        f"expected the unplaced block ({unplaced}) between the pace card's "
+        f"opening tag ({pace}) and Deadlines ({deadlines}), i.e. inside the "
+        "pace card"
     )
 
 

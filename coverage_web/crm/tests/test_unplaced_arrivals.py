@@ -122,13 +122,19 @@ def _today(client, user) -> str:
 
 
 def _card(body: str) -> str:
-    """Just the rail card, so an assertion about it cannot accidentally be
-    satisfied by the rest of a 200KB page."""
-    # `[^"]*`: the rail card also wears the shared panel primitive since
-    # 2026-09-02 (D-13). Still anchored on `unplaced-card`, so it still
-    # cannot match any other rail card on the page.
+    """Just the unplaced block, so an assertion about it cannot accidentally
+    be satisfied by the rest of a 200KB page.
+
+    It stopped being a rail card on 2026-09-02 ("Combine this with unsorted
+    contacts, make into one widget") and is now an inset panel inside the
+    pace card, so the anchor is the CLASS NAME with anything allowed on
+    either side of it — `rail-card` in front of it is exactly what went
+    away, and `panel panel--inset panel--flat` is what arrived after it.
+    Anchoring on a whole class attribute is how four guards broke on the
+    night of 2026-09-01 and it is not repeated here.
+    """
     match = re.search(
-        r'<div class="rail-card unplaced-card[^"]*">(.*?)</div>', body, re.S
+        r'<div class="[^"]*\bunplaced-card\b[^"]*">(.*?)</div>', body, re.S
     )
     return match.group(1) if match else ""
 
@@ -580,25 +586,41 @@ def test_every_class_the_card_renders_is_styled(client):
     )
 
 
-def test_the_count_leads_and_the_verb_is_not_redefined():
-    """REWRITTEN 2026-09-02. It read `test_a_long_name_gives_way_and_the_firm_
-    does_not` and pinned the ellipsis on `.unplaced-name` against `flex: none`
-    on `.unplaced-firm`, because a truncated firm lost the one fact that made
-    the question answerable. Both classes are gone with the names.
+def test_the_count_leads_its_own_line_and_the_verb_is_not_redefined():
+    """REWRITTEN TWICE, and this pass changed which number is allowed to be
+    the biggest thing on screen.
 
-    What replaces it is the shape the card has now. The figure is the token
-    whose own comment names this job ("a large number inside a panel or a
-    row") and it is set on the numeral alone, so the caption beside it stays
-    small print. And the button takes NOTHING from this stylesheet except
-    where it sits: shape, padding, colour, min-height and every state are
-    `.btn`'s, which is the control-shape rule coverage.css §6 writes down.
+    It was `test_a_long_name_gives_way_and_the_firm_does_not` and pinned the
+    ellipsis on `.unplaced-name` against `flex: none` on `.unplaced-firm`.
+    Both classes went with the names. It then became
+    `test_the_count_leads_...` and pinned `--fs-figure` on `.unplaced-n`,
+    because a card whose whole content was one number should render that
+    number at the token whose own comment names the job.
+
+    The merge retired that premise on 2026-09-02: this is no longer a card
+    whose whole content is one number, it is the second half of the pace
+    card, and the pace card already has a `--fs-figure` numeral set in
+    `--font-display` at `--w-black`. Two 26px figures in one 320px card is
+    the same week-stated-twice mistake the pace ring was deleted for, so the
+    count is demoted to `--fs-l` and must NOT climb back to the pace
+    figure's size.
+
+    What did not change, and is still pinned: the count leads its own line
+    (the caption beside it stays `--fs-micro`), and the button takes NOTHING
+    from this stylesheet except where it sits — shape, padding, colour,
+    min-height and every state are `.btn`'s, which is the control-shape rule
+    coverage.css §6 writes down.
     """
     css = " ".join(STYLES.read_text().split())
     figure = re.search(r"\.unplaced-n \{(.*?)\}", css, re.S).group(1)
-    assert "font-size: var(--fs-figure)" in figure
+    assert "font-size: var(--fs-l)" in figure
+    assert "var(--fs-figure)" not in figure, (
+        "the count is back at the pace figure's size; the merged card may "
+        "only have one headline and it is the week's own number"
+    )
     caption = re.search(r"\.unplaced-count \{(.*?)\}", css, re.S).group(1)
     assert "font-size: var(--fs-micro)" in caption, (
-        "the caption grew to the figure's size, so the number stopped leading"
+        "the caption grew to the count's size, so the number stopped leading"
     )
     act = re.search(r"\.unplaced-act \{(.*?)\}", css, re.S).group(1)
     for redefinition in ("background", "border", "padding", "font-size",

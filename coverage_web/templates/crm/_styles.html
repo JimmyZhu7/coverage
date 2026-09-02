@@ -590,32 +590,60 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   {% comment %}
   ======================================================================
-  UNPLACED ARRIVALS: A FIGURE AND A BUTTON (2026-09-02, second pass).
+  UNPLACED ARRIVALS: THE SECOND HALF OF THE PACE CARD (2026-09-02, third
+  pass, "Combine this with unsorted contacts, make into one widget").
 
-  What was here styled a roster: `.unplaced-note`, then `.unplaced-list` /
-  `-row` / `-link` / `-name` / `-firm` for up to five people, each a link
-  to the same destination, under a "Place them" text link in the heading's
-  corner. The founder's answer to it was to show how many people need
-  placing instead of who they are, and to make the verb a button. All six
-  of those classes are retired with the markup that used them; nothing
-  else on the site referenced any of them.
+  It was its own rail card until this pass, and before that its content
+  was a roster: `.unplaced-note`, then `.unplaced-list` / `-row` /
+  `-link` / `-name` / `-firm` for up to five people, each a link to the
+  same destination, under a "Place them" text link in the heading's
+  corner. The second pass replaced all of that with a count and a button.
+  This one takes away the card around them.
 
-  Three elements now, in the order the card is read: the question (the
-  shared `.rail-title`), the size of it, and the way to answer it.
+  WHY AN INSET PANEL AND NOT A DIVIDED STACK. Both halves of the merged
+  card describe this week, which is why the founder wanted them together,
+  but one is a self-set goal you are being measured against and the other
+  is a queue of work waiting on you. A hairline rule between two blocks
+  says "and also" and would have left the card reading as the two cards
+  it used to be with the gap closed up. A contained panel on `--paper`
+  says "and inside this, something for you to do", which is the actual
+  difference. Every part of that shape comes from the shared primitive —
+  `panel` for the border and radius, `--inset` for the paper ground,
+  `--flat` for no shadow, because a panel inside a panel that casts is a
+  panel that looks like it is floating off its own card. The only
+  declarations left here are where it sits and how tightly it is padded.
 
-  `--fs-figure` is the token's own stated job, "a large number inside a
-  panel or a row", and this is the only card in the rail whose whole
-  content is one number. It is set on the numeral alone, not on the
-  caption around it, so "12" leads and "new this week, no market set"
-  stays at the rail's own small-print size. That contrast is what makes
-  the card readable at a glance from the queue beside it — the previous
-  version had five 13px names and no focal point at all.
+  THE COUNT IS NO LONGER THE FIGURE, and that is the merge's one real
+  demotion. `--fs-figure` was right when this was a card whose entire
+  content was one number; inside the pace card there is already a figure
+  at that size, in `--font-display` at `--w-black`, and two 26px numerals
+  in one 320px card is the "same week stated twice" mistake the ring was
+  deleted for, played back at a different pair. `--fs-l` keeps the count
+  emphatic inside its own sentence and unmistakably under the headline
+  above it. The caption around it stays `--fs-micro`, so the contrast
+  that made the number readable at a glance survives the demotion.
   ======================================================================
   {% endcomment %}
   /* A column, so the button below is a flex item and can shrink-wrap
      without the `width: fit-content` hack an inline control in a block
-     would otherwise need. */
-  .unplaced-card { display: flex; flex-direction: column; }
+     would otherwise need.
+
+     Its own padding, smaller than the `--s5` a rail card takes: this sits
+     inside a card that is already padded, and repeating the outer inset
+     would leave the button floating in the middle of the column. The top
+     margin is what separates it from the pace note above — the one piece
+     of spacing that used to be the rail's `gap` between two cards. */
+  .unplaced-card { display: flex; flex-direction: column;
+    margin-top: var(--s4); padding: var(--s3) var(--s4) var(--s4); }
+  /* The section label keeps its accent tick and loses its rule, HERE ONLY.
+     Everywhere else `.rail-title`'s hairline is what says "a section starts
+     below this"; inside an inset panel the panel's own top edge already
+     said it 12px earlier, and two hairlines that close together is the
+     same over-statement the pace ring was deleted for. The 18px accent
+     dash is the half of the signature that is still carrying meaning, so
+     it stays and only the full-width line goes. `padding-bottom` drops
+     with it because it existed to hold the heading off that line. */
+  .unplaced-card .rail-title { border-bottom: 0; padding-bottom: 5px; }
   .unplaced-count { margin: 0 0 var(--s3); font-size: var(--fs-micro);
     color: var(--ink-3); line-height: 1.5; }
   /* Baseline-aligned with the caption that follows it rather than set on
@@ -623,15 +651,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      figure on a line of its own reads as a dashboard stat, which is the
      genre this card is deliberately not in. `--w-bold` and `--ink` are the
      only emphasis it takes; no colour, because the count is a size, not an
-     alarm. */
-  .unplaced-n { font-size: var(--fs-figure); font-weight: var(--w-bold);
+     alarm. `--fs-l`, not `--fs-figure`: see the block above for why the
+     merge cost it the larger token. */
+  .unplaced-n { font-size: var(--fs-l); font-weight: var(--w-bold);
     color: var(--ink); line-height: 1; margin-right: 2px;
     font-variant-numeric: tabular-nums; }
-  /* The card's one action, so it takes the accent fill. `align-self`
-     keeps it at its own width: a rail card is ~320px and a full-bleed navy
-     bar in a 320px column shouts louder than the queue it sits beside. The
-     shape, padding, min-height and every state are `.btn`'s — this rule
-     places the control and redefines none of it. */
+  /* The merged card's ONE action, so it takes the accent fill — the pace
+     half above it has none at all, which is what earns this the only
+     primary in the widget. `align-self` keeps it at its own width: a rail
+     card is ~320px and a full-bleed navy bar in a 320px column shouts
+     louder than the queue it sits beside. The shape, padding, min-height
+     and every state are `.btn`'s — this rule places the control and
+     redefines none of it. */
   .unplaced-act { align-self: flex-start; }
 
   /* Below 1024 the rail stacks under the queue, pace first. Cards flow
@@ -2479,38 +2510,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .htmx-indicator { opacity: 0; transition: opacity var(--t-fast); }
   .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { opacity: 1; }
   .cd-ai-loading { margin-left: var(--s2); font-size: var(--fs-xs); color: var(--ink-3); }
-
-  /* Eight-week trace under the week's figure — the pace card's only
-     picture since the ring came out on 2026-09-02. */
-  {% comment %}
-  Eight bars with the last one navy, and until now the only place that said
-  what the horizontal axis was is the `aria-label` — a screen reader knew the
-  chart covered eight weeks and a sighted reader did not. One 10px mono
-  caption under the left end fixes it: that is where the oldest bar is, so
-  the label sits on the end it describes and the eye reads left to right into
-  "now".
-
-  Drawn as a `::after` on the container rather than a span in the markup,
-  because `crm/_cockpit.html` belongs to another workstream this week and
-  this is a caption on a chart the CSS already fully owns. `aria-hidden` is
-  unnecessary and unavailable on a pseudo-element: generated content is not
-  announced, and the `role="img"` label above already carries the same eight
-  weeks in words.
-  {% endcomment %}
-  .pace-spark { display: flex; align-items: flex-end; gap: 3px; height: 26px;
-    margin-top: var(--s3); padding-top: var(--s2);
-    border-top: 1px solid var(--line); position: relative; margin-bottom: 13px; }
-  .pace-spark::after { content: "8 wks"; position: absolute; left: 0; top: 100%;
-    font-family: var(--font-mono); font-size: var(--fs-nano); line-height: 13px;
-    color: var(--ink-3); letter-spacing: 0.04em; }
-  .pace-spark-bar { flex: 1; min-height: 2px; height: var(--h, 0%);
-    border-radius: 2px 2px 0 0; background: var(--line-strong);
-    transform-origin: bottom;
-    animation: mrail-grow 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: calc(var(--i, 0) * 40ms); }
-  .pace-spark-bar.is-hit { background: var(--ok-line); }
-  .pace-spark-bar.is-now { background: var(--accent); }
-  @keyframes mrail-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 
   /* The unfinished-setup banner on Today. Accent-soft, not warning-tinted:
      it is an invitation, and the one thing it must not do is read as an
