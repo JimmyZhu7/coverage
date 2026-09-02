@@ -398,7 +398,7 @@ def _build_actions(user, *, pace: bool = True):
     # is asking about.
     #
     # Gated on the candidate set, the same cost discipline `_starter_seeds`
-    # and `_unplaced_arrivals` hold to: only branch 2 reads this key, only a
+    # and `_unplaced_arrival_count` hold to: only branch 2 reads this key, only a
     # `chat_scheduled` contact reaches branch 2, and most accounts have none
     # (the founder has exactly one). On those days this costs no query at all.
     scheduled_chats: dict[int, object] = {}
@@ -2934,22 +2934,40 @@ def _getting_started_checklist(user) -> list[dict] | None:
 # batches landed four days apart, so a week-wide window catches a batch before
 # the next one lands on top of it, which is the whole job.
 UNPLACED_ARRIVAL_WINDOW_DAYS = 7
-# Five names, and no total anywhere on the card. "71" is a number that makes a
-# student close the tab; five names is a task. The card carries an "All" link
-# instead of a count — the same convention the Deadlines rail card already
-# uses — so it never claims to be exhaustive and never states a number that
-# could disagree with what it rendered.
-UNPLACED_ARRIVAL_MAX = 5
+# THE CARD COUNTS, IT NO LONGER NAMES (2026-09-02, the founder's own words:
+# "don't show people's names, just show how many people need to be placed").
+#
+# What was here was five names and no total, on the argument that "71" is a
+# number a student closes the tab over while five names are a task. The
+# rebuttal is that five names are five names: the reader could not tell
+# whether they were the whole ask or the top of a pile, and the rail card's
+# job is to say how big the ask is, not to start it. The tool it links to is
+# where placing actually happens, grouped by firm with select-all per group,
+# and nothing about a name printed here made that trip shorter.
+#
+# So `UNPLACED_ARRIVAL_MAX` is gone with the names it capped. There is
+# nothing left to cap: a count has one row whatever it counts. The window
+# stays and does the whole job it always did — it decides WHETHER the card
+# exists, which is what keeps a steady-state backlog from nagging forever.
 
 
-def _unplaced_arrivals(user, contacts, now) -> list[dict] | None:
-    """The newest contacts carrying no region, or `None` when there are none.
+def _unplaced_arrival_count(user, contacts, now) -> int:
+    """How many contacts arrived this week carrying no region. 0 for none.
+
+    A COUNT, not a roster: the card that reads this prints the number and a
+    verb, and nothing on it names a person (see `_cockpit.html`'s own note).
+    The count is of the arrivals in the window and says so on the face, so it
+    can disagree with nothing: the Unplaced tab it links to holds a superset
+    (every region-less contact, not just this week's) under its own heading
+    and its own count.
 
     `contacts` is the live, non-archived list `_build_actions` already loaded,
     so the candidate filter costs no query at all — and on the ordinary day,
     where nothing new arrived unplaced, this function costs nothing full stop.
     Every query below is gated behind a non-empty candidate set, the same cost
-    discipline `_starter_seeds` and `_next_wave` hold to.
+    discipline `_starter_seeds` and `_next_wave` hold to. Dropping the names
+    dropped the firm-name query with them: this is now at most the one
+    exclusion lookup, on the days it runs at all.
 
     Nothing here reads a region, writes a region, or guesses one. The only
     facts consulted are `region == ""` and `created`.
@@ -2962,40 +2980,17 @@ def _unplaced_arrivals(user, contacts, now) -> list[dict] | None:
     The two exclusions are the SAME pair `_next_wave` applies, for the same
     reason: `crm.views.contact_list` takes campaign-excluded and
     recruitment-hidden people off the board before it computes the unplaced
-    pool at all, so naming one of them here would send the student to a tab
+    pool at all, so counting one of them here would send the student to a tab
     that does not contain them.
     """
     cutoff = now - timedelta(days=UNPLACED_ARRIVAL_WINDOW_DAYS)
     fresh = [c for c in contacts if not c.region and c.created >= cutoff]
     if not fresh:
-        return None
+        return 0
     excluded_ids = (
         campaigns.excluded_contact_ids(user) | recruitment.hidden_contact_ids(user)
     )
-    fresh = [c for c in fresh if c.id not in excluded_ids]
-    if not fresh:
-        return None
-    # Newest first, id as the tie-break — a capture batch writes dozens of
-    # rows inside the same second, and without the second key the five names
-    # on the card could reshuffle between two renders of the same page.
-    fresh.sort(key=lambda c: (c.created, c.id), reverse=True)
-    picked = fresh[:UNPLACED_ARRIVAL_MAX]
-    # One query for at most five firms, not `select_related` on the shared
-    # `_build_actions` fetch: that list is every live contact and this card
-    # needs five names off it.
-    firm_names = dict(
-        Firm.objects.filter(
-            id__in={c.firm_id for c in picked if c.firm_id}
-        ).values_list("id", "name")
-    )
-    return [
-        {
-            "id": c.id,
-            "name": c.name,
-            "firm": firm_names.get(c.firm_id) or c.firm_text,
-        }
-        for c in picked
-    ]
+    return sum(1 for c in fresh if c.id not in excluded_ids)
 
 
 # ---------------------------------------------------------------------------
@@ -3908,14 +3903,16 @@ def _cockpit_context(user) -> dict:
         # anything due"). `None` once all three items are done, which the
         # template reads as "render nothing".
         "getting_started": _getting_started_checklist(user),
-        # Contacts that arrived this week with nobody having said where they
-        # sit. Unconditional like `getting_started` above and for the same
-        # reason — it answers "is anything about this account unanswered",
-        # not "is anything due" — and `None` (render nothing) the moment the
-        # week's arrivals are all placed or have aged out of the window. Costs
-        # zero queries on a day when nothing new arrived unplaced, which is
-        # most days. See `_unplaced_arrivals`.
-        "unplaced_arrivals": _unplaced_arrivals(user, contacts, timezone.now()),
+        # How many contacts arrived this week with nobody having said where
+        # they sit. Unconditional like `getting_started` above and for the
+        # same reason — it answers "is anything about this account
+        # unanswered", not "is anything due" — and 0 (render nothing) the
+        # moment the week's arrivals are all placed or have aged out of the
+        # window. Costs zero queries on a day when nothing new arrived
+        # unplaced, which is most days. See `_unplaced_arrival_count`.
+        "unplaced_arrival_count": _unplaced_arrival_count(
+            user, contacts, timezone.now()
+        ),
         # THE PLAN, in the plan's own order — carried through only so week()
         # (the full page view, below) and crm.views.daily_brief can hand it to
         # the daily brief. Deliberately NOT used by _cockpit.html itself: that

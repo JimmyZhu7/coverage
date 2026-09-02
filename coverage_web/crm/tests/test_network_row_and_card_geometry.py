@@ -20,7 +20,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.test import Client
 
-from crm.models import Contact
+from crm.models import Contact, UserFirm
+from directory.models import Firm
 
 pytestmark = pytest.mark.django_db
 
@@ -43,6 +44,20 @@ def _page_with_a_contact() -> str:
         email="net-geometry-cards@example.com", password="x" * 14
     )
     Contact.all_objects.create(user=user, name="Sarah Goldberg")
+    client = Client()
+    client.force_login(user)
+    return client.get(NETWORK).content.decode()
+
+
+def _page_with_a_gap() -> str:
+    """A board with one tiered, uncovered firm, so the Coverage Gaps strip
+    actually renders a row. `_page()` above has neither, which is fine for
+    reading the stylesheet and useless for reading the markup."""
+    user = get_user_model().objects.create_user(
+        email="net-geometry-gap@example.com", password="x" * 14
+    )
+    firm = Firm.objects.create(slug="exposed-co", name="Exposed Co")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
     client = Client()
     client.force_login(user)
     return client.get(NETWORK).content.decode()
@@ -121,16 +136,25 @@ def test_the_gap_rows_keep_a_working_fallback_without_subgrid():
     assert "grid-template-columns" in _rule(css, ".gap-card")
 
 
-def test_the_gap_rows_slack_is_not_in_front_of_the_tier_tag():
-    """The `1fr` was on column 1, so at 1280px the firm name sat at the left
+def test_the_gap_rows_slack_belongs_to_no_zone():
+    """UPDATED 2026-09-02; the same defect was reported twice and the second
+    report is what this now pins.
+
+    The `1fr` started on column 1, so at 1280px the firm name sat at the left
     edge and the four zones that explain it were shoved against the right
-    one: "HSBC" ended at x=90 and its tier tag started at x=762. A reader
-    crossed 670px of nothing to find out why the firm was on the list. The
-    flexible track is the state column now, so the facts read off the name
-    (name x=32, tier x=167, state x=292 on every row) and the gutter falls
-    between the facts and the two controls.
+    one: "HSBC" ended at x=90 and its tier tag started at x=762. Moving it to
+    the state column fixed the reading order and kept the hole — `.gap-state`
+    became a 739px box holding two words, so "No contacts" ended at x=380 and
+    the next thing on the row began at x=1047. Reported again as "the empty
+    stretch between the status phrase and the controls".
+
+    No zone carries it now. Five `auto` columns hold the four facts and the
+    disclosure at their own widths, and an empty fifth track takes the slack:
+    measured at 1280px, name x=41, tier x=164.4, state x=289.2, "Who to find"
+    x=413.5, and the button alone at the far end, x=1141.2.
     """
-    template = _rule(_styles(_page()), ".gap-card")
+    css = _styles(_page())
+    template = _rule(css, ".gap-card")
     columns = re.search(r"grid-template-columns:\s*([^;]+);", template)
     assert columns, f"the row no longer states its columns: {template.strip()}"
     tracks = columns.group(1)
@@ -142,6 +166,14 @@ def test_the_gap_rows_slack_is_not_in_front_of_the_tier_tag():
         "no track absorbs the row's slack, so the action end no longer sits "
         "at the right edge of the ledger."
     )
+    # Six tracks for five zones: the flexible one is track 5 and nothing is
+    # placed into it. A `1fr` that any zone sits in is the stranded-box bug
+    # again, wherever it moves to.
+    placed = re.findall(r"\.gap-card > \.[\w-]+ \{ grid-column: (\d+); \}", css)
+    assert "5" not in placed, (
+        f"a zone was placed into the gutter track: {placed}"
+    )
+    assert "6" in placed, "nothing sits past the gutter, so there is no action end"
 
 
 def test_every_gap_row_button_is_one_width():
@@ -162,32 +194,66 @@ def test_every_gap_row_button_is_one_width():
     )
 
 
-def test_the_tier_rail_is_not_cut_between_rows():
-    """A `border-top` meets a `border-left` in a mitre, so each row's 3px
-    tier edge was clipped at 45 degrees top and bottom and a strip of six T1
-    firms drew six separate red slabs. Reported as six equally urgent alarms
-    rather than one graded signal. The separator is a pseudo-element inset
-    past the edge now, so the rail runs unbroken and changes colour only
-    where the tier changes.
+def test_the_tier_rail_is_gone_and_tier_still_has_two_channels():
+    """REWRITTEN 2026-09-02; the rail it defended is the thing that was cut.
+
+    It read `test_the_tier_rail_is_not_cut_between_rows` and pinned a
+    continuous 3px tier-coloured left edge, after a `border-top` separator
+    was found mitring against it and cutting the rail into one slab per row.
+    That fix was correct and the founder rejected the result anyway: shown
+    the continuous version he said six identical coral edges read as a wall,
+    not a signal. The measurement agrees — `rank_gaps` weights tier heaviest,
+    so the top of this strip is T1 on any board that has T1 firms, and all
+    six rows measured `3px rgb(157, 43, 35)` on the demo board.
+
+    Tier keeps two channels, which is the rule that was actually load-bearing
+    and is what this test now pins: the text tag says "T1" and `.gap-t1`
+    raises that tag's weight. Neither is a rail, and red is left meaning one
+    thing on this strip — a deadline is close.
+
+    The hairline between rows stays a pseudo-element. There is no edge left
+    for a `border-top` to mitre against, but an inset rule is what every
+    other ledger surface on this page draws.
     """
     css = _styles(_page())
     card = _rule(css, ".gap-card")
-    assert "border-top" not in card, (
-        "the row separator is a border again, which mitres the tier edge and "
-        "cuts the rail into one slab per row."
+    assert "border-left" not in card, (
+        "the tier rail is back on the row; six rows of one tier draw it as a "
+        "single coloured bar down the strip."
     )
-    assert "border-left: var(--edge-w)" in card, "the tier edge itself is gone"
+    assert "border-top" not in card, (
+        "the row separator is a border again, and a border-top on a row is "
+        "how the mitre bug got in the first time."
+    )
     assert ".gap-card + .gap-card::after {" in css, (
         "nothing draws the hairline between rows any more."
+    )
+    assert ".gap-t1 .gap-tier-tag {" in css, (
+        "tier lost its second channel; the tag is the only place tier "
+        "appears now, so it is the only place a contrast step can live."
+    )
+    row = _page_with_a_gap()
+    assert '<span class="gap-tier-tag">T1</span>' in row, (
+        "the tier tag stopped printing the tier in words, which is the "
+        "channel that has to survive however quiet the other one gets."
+    )
+    assert 'gap-card kin-reveal gap-t1' in row, (
+        "the row lost the tier class, so the contrast step has nothing to "
+        "hang off."
     )
 
 
 def test_the_row_sits_its_text_on_one_baseline():
     """Three type sizes on one line — `.gap-name` bold at --fs-s, the mono
-    `.gap-tier-tag` at --fs-xs and `.gap-state` at --fs-xs — were each
+    `.gap-tier-tag` at --fs-xs and `.gap-state` at --fs-s — were each
     centred inside their own box, which left their baselines a pixel or two
     apart on every row. The two controls opt back out: a button centres
     against the line rather than sitting on it.
+
+    The state's size changed 2026-09-02 (--fs-xs to --fs-s, see
+    `test_the_state_phrase_outranks_the_tier_tag`), which makes the baseline
+    rule matter more than it did, not less: two sizes on a line is what the
+    rule is for and there are now three genuinely different ones.
     """
     css = _styles(_page())
     assert "align-items: baseline" in _rule(css, ".gap-card")
@@ -195,23 +261,79 @@ def test_the_row_sits_its_text_on_one_baseline():
     assert "align-self: center" in _rule(css, ".gap-card .src")
 
 
+def test_the_state_phrase_outranks_the_tier_tag():
+    """Reported by eye with the rest of this strip: the tier tag and the gap
+    state read as equals. Measured before, they were: both `--fs-xs`, both
+    `--ink-3`, and the TAG the heavier of the two at `--w-med` against
+    regular. So a row's rank looked more important than its reason, and "No
+    contacts" — the one phrase that differs row to row — read as a second
+    label rather than as the answer to "why is this firm here".
+
+    Three separations now, all the same way round and all on every row: size
+    (13px against 12px), colour (`--ink-2` against `--ink-3`) and face (the UI
+    face against the tag's mono). The state's weight stays regular, which is
+    what keeps it a step behind the bold firm name.
+
+    The tag's colour is flat across tiers on purpose. A first attempt ranked
+    tier by ink and put T1 on `--ink-2` — the state's own colour — so on a T1
+    row, which is most rows on this strip, the separation this test is about
+    disappeared. Tier ranks by weight instead
+    (`test_the_tier_rail_is_gone_and_tier_still_has_two_channels`), which is
+    the one channel the state phrase is not using.
+    """
+    css = _styles(_page())
+    state = _rule(css, ".gap-state")
+    tag = _rule(css, ".gap-tier-tag")
+    assert "font-size: var(--fs-s)" in state and "color: var(--ink-2)" in state
+    assert "font-size: var(--fs-xs)" in tag and "color: var(--ink-3)" in tag
+    assert "font-family: var(--font-mono)" in tag
+    assert "font-weight" not in state, (
+        "the state took a weight, which puts it back in a shouting match "
+        "with the firm name above it"
+    )
+    assert "color" not in _rule(css, ".gap-t1 .gap-tier-tag"), (
+        "tier is ranking by ink again, which lands T1 on the state phrase's "
+        "own colour and erases the separation above"
+    )
+
+
 def test_the_who_to_find_rule_stops_competing_with_the_button():
-    """A permanent dashed underline at `--line-strong` gave the row two
-    control shapes one 16px gap apart, and the disclosure read as loudly as
-    the button beside it. Dotted at `--line` keeps the affordance a
-    disclosure needs at rest and gives the glance back to the verb; hover,
-    keyboard focus and the open state all take it to `--ink-3`.
+    """REWRITTEN 2026-09-02; quieting the rule was not enough and the same
+    thing was reported twice.
+
+    The rule was dashed at `--line-strong`, which gave the row two control
+    shapes one 16px gap apart. It was quieted to dotted `--line` and flagged
+    again: any permanent horizontal rule under text sitting beside a bordered
+    box is still a box next to a box.
+
+    Two fixes replace it and this pins both. The row's flexible gutter now
+    falls BETWEEN the disclosure and the verb (measured at 1280px: the
+    toggle at x=413.5, the button at x=1141.2, 649.5px of gutter between
+    them, against 16px before), so they are not neighbours at all. And the
+    resting rule is transparent, leaving the "this opens" job to the ↓ glyph,
+    which says more than an underline did and is not a colour. Hover,
+    keyboard focus and the open state bring a solid underline back in the
+    text's own colour, which is when it should be the loudest thing there.
     """
     css = _styles(_page())
     toggle = _rule(css, ".src-toggle")
-    assert "border-bottom: 1px dotted var(--line)" in toggle, (
-        "the resting rule under 'Who to find' is loud again."
+    assert "border-bottom: 1px solid transparent" in toggle, (
+        "the resting rule under 'Who to find' is back; it is the second "
+        "control shape this strip was flagged for twice."
+    )
+    assert "border-bottom-color: currentColor" in css, (
+        "the underline no longer comes back on hover, focus or open, which "
+        "is the one moment it earns its place."
     )
     assert ".src-toggle:focus-visible" in css, (
         "the underline no longer answers the keyboard, only the mouse."
     )
     assert 'content: " ↓"' in css, (
-        "the caret is the non-colour half of this affordance and has to stay."
+        "the caret is the whole resting affordance now, and it is the "
+        "non-colour half of the signal."
+    )
+    assert 'details[open] > .src-toggle::after { content: " ↑"; }' in css, (
+        "the caret stopped reporting the open state."
     )
 
 

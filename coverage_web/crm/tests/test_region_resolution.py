@@ -473,7 +473,7 @@ def test_the_tab_is_absent_when_nobody_is_unplaced(client):
     """No badge and no permanent tab reading zero. An empty pool asks nothing
     — which is the posture: unplaced is an allowed state.
 
-    Today's rail card for the WEEK'S ARRIVALS (`crm.today._unplaced_arrivals`,
+    Today's rail card for the WEEK'S ARRIVALS (`crm.today._unplaced_arrival_count`,
     added 2026-08-31) holds the identical posture on its own page and is
     tested there: empty means the card does not render, not that it renders
     empty. Neither surface ever shows a zero."""

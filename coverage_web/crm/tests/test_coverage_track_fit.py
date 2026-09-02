@@ -17,6 +17,7 @@ prove the view hands the new facts over.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import pytest
@@ -328,6 +329,47 @@ def test_network_page_ranks_with_tracks_and_style_and_exposes_the_aggregate(clie
     summary = resp.context["advocate_summary"]
     assert summary["line"] == "Advocates: 0 across 3 target firms · aim for 2 per firm, 20 in all"
     assert summary["firms"] == 3 and summary["advocates"] == 0
+
+
+@pytest.mark.django_db
+def test_the_advocate_line_is_off_the_face_and_on_the_headings_title(client):
+    """The founder quoted this caption back word for word and asked for it
+    gone from the page. It was a rendered `<p class="strip-note">` under the
+    "Coverage Gaps" heading.
+
+    Cut the explanation, keep the fact: `advocate_summary` still computes it,
+    the view still puts it in the context (asserted directly above), and it
+    is in the heading's own `title=` — the same convention the rest of this
+    strip already runs on, where every number taken off a face is in the
+    `title` of the thing it describes.
+
+    Asserted on the STRIPPED text rather than on the raw HTML, because the
+    hover version of a sentence and the printed version of it are the same
+    characters and only one of them is the thing that was rejected.
+    """
+    user = User.objects.create_user(
+        email="advline@example.com", password="pw12345!", tracks=["ib"]
+    )
+    firm = Firm.objects.create(slug="hsbc-adv", name="HSBC", tracks=["ib"])
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+
+    client.force_login(user)
+    body = client.get(reverse("crm:contact_list")).content.decode()
+    line = "Advocates: 0 across 1 target firm · aim for 2 per firm, 20 in all"
+
+    heading = re.search(
+        r'<h2 class="strip-title strip-title-lg" title="([^"]*)">Coverage Gaps</h2>',
+        body,
+    )
+    assert heading, "the Coverage Gaps heading is gone or lost its tooltip"
+    assert line in heading.group(1), "the advocate count is not reachable at all"
+
+    assert 'class="strip-note"' not in body, "the caption element is back"
+    text = " ".join(re.sub(r"<[^>]+>", " ", body).split())
+    assert line not in text, (
+        "the advocate line is printed on the page again; it may only be a "
+        "hover on the heading"
+    )
 
 
 @pytest.mark.django_db

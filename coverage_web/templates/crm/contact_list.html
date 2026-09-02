@@ -107,15 +107,24 @@
   {% endcomment %}
   {% if gaps %}
   <section class="gap-strip">
-    <h2 class="strip-title strip-title-lg" title="Ranked by exposure: tier weight × how far this firm is from your advocate target, plus a bonus if its deadline is close. Hover a card for the exact math.">Coverage Gaps</h2>
-    {% if advocate_summary %}
-    {% comment %}One number, because it is the one the evidence says predicts
-    outcomes: across every self-reported funnel the count that tracked
-    success was how many people actually pushed for the student (2-20),
-    not how many were emailed. The 54 identical "0 of 2" tooltips below
-    say the same thing 54 times; this says it once.{% endcomment %}
-    <p class="strip-note">{{ advocate_summary.line }}</p>
-    {% endif %}
+    {% comment %}
+    THE ADVOCATE CAPTION IS OFF THE PAGE (2026-09-02). It was a rendered
+    line under this heading carrying `advocate_summary.line`, and the
+    founder asked for it gone by quoting it back word for word.
+
+    The number is still true and still the one the outcome evidence backs,
+    so it is kept where a reader can ask for it instead of being told it
+    six rows above the work: it is appended to this heading's own `title=`,
+    beside the ranking sentence that was already there. Same convention the
+    rest of this strip runs on, where every number taken off a face lives
+    in the `title=` of the thing it describes.
+
+    `crm.coverage.advocate_summary` is untouched and the view still puts it
+    in the context: `crm/tests/test_coverage_track_fit.py` reads it there,
+    and it is the one definition of that count for anything that renders it
+    later.
+    {% endcomment %}
+    <h2 class="strip-title strip-title-lg" title="Ranked by exposure: tier weight × how far this firm is from your advocate target, plus a bonus if its deadline is close. Hover a card for the exact math.{% if advocate_summary %} {{ advocate_summary.line }}.{% endif %}">Coverage Gaps</h2>
     <div class="gap-row panel">
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"

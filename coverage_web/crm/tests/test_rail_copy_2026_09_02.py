@@ -293,28 +293,43 @@ def _unplaced_user():
 
 def test_the_heading_and_the_verb_are_untouched():
     """Both are the founder's own words from 2026-08-31 and the template
-    comment holds the argument for them. A copy pass that shortens the note
-    under them must not quietly relitigate them."""
+    comment holds the argument for them. A copy pass that shortens the line
+    under them must not quietly relitigate them.
+
+    The verb's MARKUP changed on 2026-09-02 ("make Place them into a
+    button"), which is why this no longer looks for `>Place them</a>` inside
+    a `.rail-more`: the words are the claim, the element is not. That the
+    element is the shared `.btn` is pinned in
+    `crm/tests/test_unplaced_arrivals.py`.
+    """
     card = _card(_page(_unplaced_user()), "Where do they sit?")
     assert "Where do they sit?" in card
     assert ">Place them</a>" in card
 
 
-def test_the_note_is_one_line_and_keeps_both_its_facts():
-    """BEFORE: "New this week. Coverage cannot match them to the right
-    deadlines until you say." — two rendered lines, most of them restating
-    what the heading had already asked and the link had already answered, and
-    "until you say" duplicating the verb in the corner of that same heading.
+def test_the_line_under_the_heading_is_a_count_and_keeps_both_its_facts():
+    """REWRITTEN 2026-09-02; the note it pinned was cut later the same day.
 
-    Both facts stay. "New this week" is the seven-day arrival window that is
-    the reason this card exists rather than listing every region-less contact
-    on the account, and the market rule is why the question is worth
-    answering."""
+    It read `test_the_note_is_one_line_and_keeps_both_its_facts` and pinned
+    "New this week. Deadlines match by market." as the one-line survivor of a
+    two-line note. Then the names under it went ("just show how many people
+    need to be placed"), and with a count on the face the note's first fact
+    was said twice and its second was pure mechanism.
+
+    So the count line carries both facts the note was kept for: the window
+    ("new this week"), which is why this card exists rather than listing
+    every region-less contact on the account, and the missing fact itself
+    ("no market set"). The mechanism is a `title`, pinned by the next test,
+    which is the same place it was already living.
+    """
     card = _card(_page(_unplaced_user()), "Where do they sit?")
-    note = re.search(r'<p class="unplaced-note"[^>]*>(.*?)</p>', card, re.S).group(1)
-    assert note.strip() == "New this week. Deadlines match by market."
+    line = re.search(r'<p class="unplaced-count"[^>]*>(.*?)</p>', card, re.S).group(1)
+    assert re.sub(r"<[^>]+>", "", line).strip() == "3 new this week, no market set."
     assert "until you say" not in card
     assert "Coverage cannot match" not in card
+    assert "unplaced-note" not in card, (
+        "the note is back on top of the count line that replaced it"
+    )
 
 
 def test_the_mechanism_the_note_stopped_explaining_is_still_reachable():

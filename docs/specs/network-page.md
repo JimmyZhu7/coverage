@@ -31,8 +31,8 @@ Order, top to bottom, at every width:
    Profile "Regions of Interest", so a student recruiting US only does not carry
    a Singapore tab forever. "Other countries" renders only when it holds
    somebody or the reader is standing on it. No counts (Part 3, D1).
-3. **Coverage Gaps** (`.gap-strip`), when `gaps` is non-empty. One advocate
-   summary line, then six ledger rows.
+3. **Coverage Gaps** (`.gap-strip`), when `gaps` is non-empty. A heading and
+   six ledger rows. No caption line (Part 3, D9).
 4. **Unplaced** (`.net-unplaced`), only on `?scope=unplaced`. Not a tab. Its one
    route in is the "Place them" link in the caveat above the contact grid, which
    renders on a region tab and only when that tab is actually showing guesses.
@@ -74,36 +74,54 @@ The worst six tiered firms, worst first, from `coverage.rank_gaps` with
 `gap_points` is the ladder rung after `track_fit` halves it for an off-track
 firm and zeroes it for an assessment firm. Covered firms are dropped.
 
-Row anatomy, five grid columns that line up across all six rows:
+Row anatomy, five zones on six shared grid tracks. The sixth track is an empty
+gutter, between the facts and the verb:
 
 ```
-| firm name | T1  6d to close | No advocate | Who to find ↓ | Add Contact |
+| firm name | T1  6d to close | No advocate | Who to find ↓ |        | Add Contact |
 ```
 
 - **The face carries no number.** Not the exposure score, not the rank, not the
   advocate fraction, not the open-role count. All of it is in the row's own
   `title=`, spelled out with the word "exposure". Pinned by
   `crm/tests/test_coverage_gaps.py::test_the_gap_strip_shows_no_number_on_its_face`.
-- **Tier is both a colour and a text tag.** `.gap-t1/2/3` sets the left edge and
-  `.gap-tier-tag` prints "T1". Colour alone is the failure mode this rule was
-  written to avoid, so the tag does not come off.
+- **Tier is a text tag and a weight step, never a rail.** `.gap-tier-tag`
+  prints "T1" at `--ink-3` on every row and `.gap-t1` sets it bold. The tag
+  does not come off: it is the only place tier appears in words, and colour
+  alone is the failure mode this rule exists to avoid. The 3px tier-coloured
+  left edge that used to carry the second channel is gone (Part 4, item 6).
+  Weight rather than ink because the ink step landed T1 on the state phrase's
+  own `--ink-2`, which is the separation directly below this line.
+- **The state phrase outranks the tier tag,** by size (`--fs-s` against
+  `--fs-xs`), by colour (`--ink-2` against `--ink-3`) and by face (UI against
+  mono). It is the one thing that differs row to row; tier is a rank the rows
+  are already sorted by.
 - **Ties are broken by order, not by text.** Same tier and same gap state score
   identically, which is the formula being honest. `rank_gaps` then sorts on open
   campus roles. Open roles never enter the exposure formula: hiring volume is
   not a coverage gap.
-- **"Who to find"** is a native `<details>` so it opens with no JavaScript. The
-  panel is absolutely positioned and anchored `right: 0`, under the row's action
-  end. Three role archetypes from `crm/sourcing.py`, each a prefilled LinkedIn
-  search. `sourcing.DISCLOSURE` states that we hand over a query, not a person.
-  The script does two things on top: close the others when one opens, and POST
-  to `crm:sourcing_event` fire and forget.
+- **"Who to find"** is a native `<details>` so it opens with no JavaScript. It
+  sits with the facts, not with the verb: the gutter falls between it and the
+  button, which is what stopped the two reading as competing controls. The
+  panel is absolutely positioned `left: 0` against the toggle's own
+  `<details>`, so it opens directly under the word that opened it at every
+  width. Three role archetypes from `crm/sourcing.py`, each a prefilled
+  LinkedIn search. `sourcing.DISCLOSURE` states that we hand over a query, not
+  a person. The script does two things on top: close the others when one
+  opens, and POST to `crm:sourcing_event` fire and forget.
+- **The toggle carries no rule at rest.** The ↓ glyph is the affordance and
+  flips to ↑ when open; a solid underline appears on hover, on keyboard focus
+  and while the panel is open. A permanent hairline under text beside a
+  bordered button was flagged twice, dashed and then dotted.
 - **The verb is "Add Contact", or "Apply" at an assessment firm.** An assessment
   firm's own FAQ declines the coffee chat, so prompting for a contact there
   would send a student to manufacture a relationship the firm has said does not
   move the process. `verb_reason` carries the why in `title=`.
 
-`advocate_summary.line` sits above the rows: one number, the one the research
-says predicts outcomes, said once instead of 54 times in 54 tooltips.
+`advocate_summary.line` is not rendered. It is one number, the one the research
+says predicts outcomes, and it now hangs off the strip heading's `title=`
+instead of printing under it (Part 3, D9). `crm.coverage.advocate_summary` and
+the context key are both untouched.
 
 ### C. Unplaced
 
@@ -299,6 +317,21 @@ behind them are all a standing reproach for a state the product allows. The one
 exception is standing on the tab already: answering "London" for your first
 Other contact must not make the tab you are looking at vanish.
 
+**D9. The Coverage Gaps strip has no caption line.** Removed 2026-09-02 on the
+founder's direct call, quoting the line back word for word. `.strip-note` went
+with it and nothing else on the site used the class. The number is in the
+heading's `title=` and in the context, and
+`test_the_advocate_line_is_off_the_face_and_on_the_headings_title` pins that
+split. Do not render it under the heading again; if it must be seen without a
+hover, that is a new decision about where an aggregate belongs on this page,
+not a restoration of this one.
+
+**D10. Nothing on a gap row draws a coloured left edge.** Removed 2026-09-02:
+`rank_gaps` weights tier heaviest, so the top of the strip is T1 on any board
+with T1 firms, and six identical `--danger` edges read as a wall rather than a
+signal. Tier's second channel is the tag's weight. Red on this strip means a
+deadline is close and nothing else.
+
 ## Part 4. What the 2026-09-01 pass changed
 
 Recorded here so the spec starts true, and so a reader can tell a fresh decision
@@ -330,6 +363,33 @@ from an old one.
 
 All five are pinned in `crm/tests/test_ui_pass_2026_09_01.py`.
 
+The 2026-09-02 pass then took the gap strip twice more, both times off the
+founder's eye rather than off a measurement. The first pass gave the six rows
+one set of column tracks (`subgrid`), moved the flexible track off the firm
+name, and quieted the "Who to find" rule from dashed `--line-strong` to dotted
+`--line`. Shown that, he asked for the caption gone and said the widget still
+needed work, which produced the second:
+
+6. **The tier rail came off.** Six identical `--danger` edges, one continuous
+   3px bar down a 340px strip. Tier moved entirely into the tag: the word plus
+   one weight step (D10).
+7. **The slack became its own track.** Moving it from the name to the state
+   column had relocated the hole rather than closed it — `.gap-state` was a
+   739px box holding two words, so the state text was stranded mid-row. Six
+   tracks now, five zones, and the fifth track empty.
+8. **"Who to find" joined the facts and lost its rule.** With the gutter
+   between it and the button the two stopped competing, and the resting
+   underline came off in favour of the ↓ glyph. Its panel re-anchored to the
+   toggle.
+9. **The state phrase was promoted over the tier tag** in size, colour and
+   face. They had been identical but for the tag being the heavier.
+10. **The advocate caption was removed** (D9).
+
+Items 6 to 10 are pinned in `crm/tests/test_network_row_and_card_geometry.py`
+and `crm/tests/test_coverage_track_fit.py`. Measured at 1280px before and
+after: state text ended at x=380 with the next zone at x=1047, against a
+tight fact cluster ending at x=491.7 with the button alone at x=1141.2.
+
 ## Part 5. Honesty rules
 
 What this page must not imply.
@@ -347,8 +407,11 @@ What this page must not imply.
    Log Touch is a link to the contact page, not a one-click attestation.
 6. **Bulk verbs name their reach and their way back.** Archive and park confirm
    with the live count; park also leaves a one-shot Undo.
-7. **Colour is never the only signal.** Tier is a colour and a tag, warmth is a
-   dot and a word, sponsorship is a pill with text.
+7. **Colour is never the only signal.** Tier is a word ("T1") that a weight
+   step ranks, warmth is a dot and a word, sponsorship is a pill with text.
+   The rule is that the word can always stand alone, not that every fact owes
+   a hue: the gap strip proved the second reading wrong by painting six rows
+   the same alarming colour.
 8. **Progressive enhancement is a promise, not a nicety.** Every control this
    page reveals with script has a working no-script equivalent that posts to the
    same endpoint. "Select all", the per-firm chips and both bulk bars are all in
@@ -356,8 +419,9 @@ What this page must not imply.
 
 ## Part 6. Responsive and accessibility
 
-- **700px:** the gap row's five columns reflow. The firm name and the verb keep
-  their line; tier, state and "Who to find" stack under them. Still one surface.
+- **700px:** the gap row's columns reflow to two. The firm name and the verb
+  keep their line; tier, state and "Who to find" stack under them, and the
+  gutter track does not exist at this width. Still one surface.
 - **900px:** `.net-panel` drops its height cap and grows with its content.
 - **560px:** the search and sort toolbar stacks. Watch the flex-basis when
   touching it: `flex: 1 1 260px` reads against the main axis, and in a column it
