@@ -26,6 +26,15 @@ WHAT THIS MODULE DOES **NOT** DO, ON PURPOSE
    guessing here is worse than leaving it for the sync that already exists.
    The genuine-reply test added in 2026-08 (`capture.inbound`) is held to
    the same rule: it reads RFC headers and the recipient shape, never prose.
+
+   THE SAME RULE IS WHY `_ics_rsvp` (2026-09-01) OVERRIDES A BULK VERDICT.
+   A calendar acceptance is `Auto-Submitted: auto-replied`, so the bulk
+   test called it bulk and the bulk branch blanked its `chat_status` — and
+   every "Accepted: <> Coffee Chat" the founder ever received was thrown
+   away. That message is not prose the pipeline has to guess at: it is an
+   iTIP `METHOD:REPLY` naming him as ORGANIZER and stating one attendee's
+   `PARTSTAT` against a `DTSTART`. Reading it is this section's promise
+   kept, not broken.
 2. **No new-contact creation.** Mirrors `capture_gmail` (Step 1 of the daily
    sync), not `capture_discover` (Step 2). `apply_findings` only logs
    touches against contacts ALREADY in Coverage; a message from someone not
@@ -80,6 +89,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
 from email.utils import getaddresses, parseaddr
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -150,10 +160,38 @@ GMAIL_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
 # Same bounce-pattern vocabulary the manual daily sync's agents already use
 # (see daily-networking-gmail-sync's SKILL.md) — kept identical so the two
 # pipelines agree on what "bounced" means.
-_BOUNCE_FROM_RE = re.compile(r"mailer-daemon|postmaster", re.IGNORECASE)
-_BOUNCE_SUBJECT_RE = re.compile(
-    r"delivery status notification|undeliverable|delivery has failed",
+#
+# THE HYPHEN COST A REAL BOUNCE (2026-09-01). J.P. Morgan's mail system
+# answered one of the founder's cold emails from `mailerdaemon@jpmchase.com`
+# — no hyphen — with the subject "Returned mail: see transcript for details".
+# `mailer-daemon` required the hyphen and "Returned mail" was not in the
+# subject list, so the message was not a bounce at all: it became a
+# quote-less `review` MailFact and the dead address stayed on the contact,
+# still in the follow-up queue. Both spellings of the daemon are in use
+# (sendmail ships `MAILER-DAEMON`, plenty of gateways collapse it), and
+# "Returned mail" is sendmail's own subject, so both are matched now.
+_BOUNCE_FROM_RE = re.compile(
+    r"mailer[-_.]?daemon|postmaster|mail[-_. ]?delivery[-_. ]?(?:subsystem|system)",
     re.IGNORECASE,
+)
+_BOUNCE_SUBJECT_RE = re.compile(
+    r"delivery status notification|undeliverable|delivery has failed"
+    r"|returned mail|mail delivery (?:failed|failure)"
+    r"|returning message to sender",
+    re.IGNORECASE,
+)
+
+# THE STRUCTURAL SIGNAL, preferred wherever it is present. A real DSN is not
+# a message that happens to be worded like one: RFC 3464 defines it as a
+# `multipart/report; report-type=delivery-status` whose `message/delivery-status`
+# part states, in machine-readable fields, what happened to which recipient.
+# `Action: failed` (RFC 3464 §2.3.3) and a 5.x.x `Status:` (§2.3.4) are the
+# permanent-failure statement itself. Reading THAT, rather than a subject
+# line, is what makes this test survive the next mail system with its own
+# wording — and it is why the JPM shape is now caught twice over.
+_DSN_ACTION_FAILED_RE = re.compile(
+    r"^action:\s*failed\s*$|^status:\s*5\.\d{1,3}\.\d{1,3}\s*$",
+    re.MULTILINE | re.IGNORECASE,
 )
 
 # A bounce that does NOT mean "this address is wrong": the mailbox exists and
@@ -216,6 +254,32 @@ _ICS_FOLD_RE = re.compile(r"\r?\n[ \t]")
 _ICS_CANCELLED_RE = re.compile(
     r"^(?:METHOD:CANCEL|STATUS:CANCELLED)\s*$", re.MULTILINE | re.IGNORECASE
 )
+
+# iTIP (RFC 5546) — the three verbs and the RSVP state that make a calendar
+# message a STATEMENT about a specific event rather than mail about one.
+# `METHOD` is the message's verb (REQUEST = "here is an invitation",
+# REPLY = "here is my answer to yours", CANCEL = "it is off"); `ORGANIZER`
+# is whose event it is; `ATTENDEE ... PARTSTAT=` is one person's answer.
+# All line-anchored, for the reason `_ICS_CANCELLED_RE` is: a SUMMARY or
+# DESCRIPTION can contain any of these words as prose.
+_ICS_METHOD_RE = re.compile(r"^METHOD:([A-Za-z]+)\s*$", re.MULTILINE)
+_ICS_ORGANIZER_LINE_RE = re.compile(r"^ORGANIZER[;:][^\n]*", re.MULTILINE)
+_ICS_ATTENDEE_LINE_RE = re.compile(r"^ATTENDEE[;:][^\n]*", re.MULTILINE)
+# The address a CAL-ADDRESS property names. RFC 5545 spells it `mailto:`;
+# the value is the last one on the line, because parameters
+# (`DELEGATED-TO="mailto:..."`) can carry one too.
+_ICS_MAILTO_RE = re.compile(r"mailto:([^\s;:,\"<>]+@[^\s;:,\"<>]+)", re.IGNORECASE)
+_ICS_PARTSTAT_RE = re.compile(r"PARTSTAT=([A-Za-z-]+)", re.IGNORECASE)
+_ICS_CN_RE = re.compile(r'CN=(?:"([^"]*)"|([^;:]*))')
+
+# The most people who can be on an invitation before it stops describing a
+# chat. Same number, same argument, as `inbound.BULK_RECIPIENT_COUNT` — and
+# deliberately the same constant rather than a second one, because it is the
+# same fact ("how many recipients is a blast") asked of the invite instead of
+# the headers. Google Calendar mails each attendee separately, so a 200-seat
+# programme webinar arrives with ONE address on To: and 200 ATTENDEE lines:
+# the header-shape test in `capture.inbound` cannot see it and this can.
+ICS_ATTENDEE_LIMIT = inbound.BULK_RECIPIENT_COUNT
 
 
 def _ics_zone(tzid: str | None):
@@ -954,19 +1018,262 @@ def _extract_ics_schedule(
     return None, None, None, False
 
 
-def _looks_like_bounce(from_addr: str, subject: str) -> bool:
-    """True only from the FROM address or the SUBJECT — never from body text
-    alone. A genuine, personal reply can easily QUOTE bounce-style wording
-    ("I tried your old address and got 'recipient address rejected: 550
-    5.1.1'...") about a completely different address, or about nothing at
-    all still relevant; matching that against the body would misclassify
-    the reply itself as a bounce of whichever address `_bounce_recipient`
-    happens to find next in the text — including, in the worst case, the
-    real contact's own working address, since nothing excludes the
-    sender's own `From` from that scan. A real, system-generated bounce
-    reliably carries a mailer-daemon/postmaster sender or a DSN-style
-    subject, so requiring one of those two costs no real detections."""
-    return bool(_BOUNCE_FROM_RE.search(from_addr) or _BOUNCE_SUBJECT_RE.search(subject))
+@dataclass(frozen=True)
+class IcsRsvp:
+    """What an iTIP calendar message says, when it says something about a
+    chat between the account owner and one other person.
+
+    `kind` is one of:
+      - `"accepted"` — a `METHOD:REPLY` with `PARTSTAT=ACCEPTED` against an
+        event the account owner ORGANISED. They said yes to your invite.
+      - `"declined"` — the same shape with `PARTSTAT=DECLINED`. They said no,
+        which retires the chat rather than booking one.
+      - `"proposed"` — a `METHOD:REQUEST` from someone else, naming the
+        account owner as an attendee. They booked a time with you.
+
+    `counterparty` is the OTHER person's address as the `.ics` itself names
+    it, never the `From:` header. That is not a detail: two of the six
+    calendar acceptances on the founder's live account arrived From
+    `calendar-notification@google.com`, and attributing a coffee chat to
+    Google's notification robot is worse than attributing it to nobody.
+    """
+
+    kind: str
+    counterparty: str
+    name: str = ""
+
+    @property
+    def cancels(self) -> bool:
+        return self.kind == "declined"
+
+
+def _ics_address(line: str) -> str:
+    """The mailbox an ORGANIZER/ATTENDEE line names, lower-cased, or ""."""
+    found = _ICS_MAILTO_RE.findall(line)
+    return found[-1].strip().lower() if found else ""
+
+
+def _ics_cn(line: str) -> str:
+    """The display name an ORGANIZER/ATTENDEE line carries, or "". Google
+    routinely sets `CN=` to the address itself, which is no worse than the
+    localpart the caller falls back to."""
+    match = _ICS_CN_RE.search(line)
+    if not match:
+        return ""
+    return (match.group(1) or match.group(2) or "").strip()
+
+
+def _ics_rsvp(own_email: str, message: dict) -> IcsRsvp | None:
+    """The iTIP statement this message makes about a chat, or None.
+
+    WHY THIS EXISTS. `capture.inbound` calls a Google Calendar acceptance
+    bulk, correctly — no person typed it, it carries `Auto-Submitted:
+    auto-replied`, and the bulk branch of `_classify_message` blanks
+    `chat_status` on principle so that a programme blast's webinar `.ics`
+    cannot put "Chat with Caroline Baenen" on the calendar. The cost of that
+    principle, measured on the founder's live account (read-only,
+    2026-09-01): five of his six `review` MailFacts are "Accepted: ..."
+    replies to invites HE sent, every one of them carrying a `DTSTART`, and
+    not one of them produced a `CalendarEvent`. A banker accepting a coffee
+    chat takes the identical path.
+
+    The discriminator is structural, and it is the `.ics`, not the sender.
+    A blast's invitation is a `METHOD:REQUEST` the student never asked for;
+    an acceptance is a `METHOD:REPLY` naming the student as the ORGANIZER of
+    the event being answered. Nobody else's mass mail can carry that: the
+    organiser field is the student's own address, which is to say the
+    student's own invite. So:
+
+      - REPLY + `PARTSTAT=ACCEPTED` + organiser is the account owner
+        -> a chat is scheduled at that `DTSTART`, whoever sent the mail.
+      - REPLY + `PARTSTAT=DECLINED`, same organiser test
+        -> a cancellation. Reading only the `DTSTART` (which a decline still
+        carries — the whole event comes back with the answer) would have
+        booked the meeting the counterparty just refused.
+      - REQUEST from someone else, account owner among the attendees
+        -> a chat they proposed. This is the one shape a mass invitation can
+        also wear, so it is admitted only when the bulk verdict rests
+        entirely on "a machine composed this" (`InboundVerdict.machine_only`)
+        and the invite names at most `ICS_ATTENDEE_LIMIT` people. A
+        programme blast fails both.
+
+    Anything else — `PARTSTAT=TENTATIVE` ("maybe" is not a booking),
+    `NEEDS-ACTION`, a REPLY to somebody else's event, a REQUEST that does not
+    name the account owner — returns None and leaves today's behaviour
+    exactly as it was. Still deterministic, still no prose: every field read
+    here is an RFC 5545 property.
+    """
+    own = (own_email or "").strip().lower()
+    for part in _walk_parts(message.get("payload", {})):
+        mime = part.get("mimeType", "")
+        filename = part.get("filename", "")
+        if mime != "text/calendar" and not filename.endswith(".ics"):
+            continue
+        text = _ICS_FOLD_RE.sub("", _decode_body(part)).replace("\r\n", "\n")
+        method_match = _ICS_METHOD_RE.search(text)
+        if not method_match:
+            continue
+        method = method_match.group(1).upper()
+        organizer_line = _ICS_ORGANIZER_LINE_RE.search(text)
+        organizer = _ics_address(organizer_line.group(0)) if organizer_line else ""
+        attendees = [
+            (line, _ics_address(line))
+            for line in _ICS_ATTENDEE_LINE_RE.findall(text)
+        ]
+
+        if method == "REPLY":
+            if not own or organizer != own:
+                # A reply to an event somebody else organised says nothing
+                # about a chat with the account owner.
+                continue
+            for line, address in attendees:
+                if not address or address == own:
+                    continue
+                partstat = _ICS_PARTSTAT_RE.search(line)
+                state = (partstat.group(1) if partstat else "").upper()
+                if state == "ACCEPTED":
+                    return IcsRsvp("accepted", address, _ics_cn(line))
+                if state == "DECLINED":
+                    return IcsRsvp("declined", address, _ics_cn(line))
+            continue
+
+        if method == "REQUEST":
+            if not organizer or organizer == own or not own:
+                continue
+            if len(attendees) > ICS_ATTENDEE_LIMIT:
+                continue
+            if not any(address == own for _line, address in attendees):
+                continue
+            name = _ics_cn(organizer_line.group(0)) if organizer_line else ""
+            return IcsRsvp("proposed", organizer, name)
+    return None
+
+
+def _rsvp_finding(
+    message: dict,
+    rsvp: IcsRsvp,
+    *,
+    from_name: str,
+    from_addr: str,
+    ics_dt: str | None,
+    ics_summary: str | None,
+    ics_uid: str | None,
+    verdict,
+) -> dict:
+    """The finding an iTIP statement supports. Same shape as every other
+    inbound finding, and deliberately NOT `bulk`: `apply_findings` refuses
+    the calendar write, the pattern evidence and the ladder touch for
+    anything bulk, which is the whole reason these messages produced nothing.
+
+    A decline reports no time, for the same reason `_extract_ics_schedule`
+    reports none from a `METHOD:CANCEL`: there is no honest time to state
+    about a meeting that is not happening. It keeps the UID, which is what
+    `capture.gmail._retire_cancelled_chat` needs to find the row the original
+    invite wrote.
+    """
+    subject = _header(message, "Subject")
+    scheduled = bool(ics_dt) and not rsvp.cancels
+    title = ics_summary or subject
+    if rsvp.kind == "accepted":
+        evidence = f"Invite accepted: {title}"
+    elif rsvp.kind == "declined":
+        evidence = f"Invite declined: {title}"
+    else:
+        evidence = f"Calendar invite received: {title}"
+    # The From: display name is only theirs when the From: ADDRESS is theirs;
+    # when Google's robot sent the mail it reads "Google Calendar". The
+    # `.ics`'s own CN is the fallback, and the localpart after that.
+    if rsvp.counterparty == (from_addr or "").strip().lower():
+        name = from_name or rsvp.name
+    else:
+        name = rsvp.name
+    if name.strip().lower() == rsvp.counterparty:
+        # Google routinely sets `CN=` to the address. That is not a name.
+        name = ""
+    return {
+        "name": name or rsvp.counterparty.split("@")[0],
+        "email": rsvp.counterparty,
+        "found": True,
+        "bounced": False,
+        "outreach_sent": False,
+        # They answered the student's invite (or sent one): a real act by the
+        # counterparty, which is exactly what `replied` claims. The touch
+        # itself is `chat_scheduled` whenever a time survives — see
+        # `capture.gmail._touch_kind_for`.
+        "replied": True,
+        "chat_status": "scheduled" if scheduled else "none",
+        "chat_scheduled_at": ics_dt if scheduled else None,
+        "ics_uid": ics_uid,
+        "chat_cancelled": rsvp.cancels,
+        "bulk": False,
+        "threaded_reply": verdict.threaded_reply,
+        "addressed_to_user": verdict.addressed_to_user,
+        "snippet": (message.get("snippet") or "")[:600],
+        "evidence": evidence,
+        "thread_id": message.get("threadId", ""),
+        "subject": subject,
+        "occurred_at": _message_occurred_at(message),
+    }
+
+
+def _part_content_type(part: dict) -> str:
+    for header in part.get("headers", []) or []:
+        if (header.get("name") or "").strip().lower() == "content-type":
+            return header.get("value") or ""
+    return ""
+
+
+def _is_delivery_status_report(message: dict) -> bool:
+    """True when the message IS a delivery-status notification in RFC 3464's
+    own terms, rather than merely worded like one.
+
+    Two facts together, both structural: the message is a
+    `multipart/report; report-type=delivery-status`, and one of its
+    `message/delivery-status` parts states a permanent failure
+    (`Action: failed`, or a 5.x.x `Status:`). Neither half is read from
+    prose and neither can be produced by a person writing to you — an
+    ordinary reply is not a multipart/report, whatever it quotes.
+
+    This is deliberately the FIRST thing `_looks_like_bounce` asks. The
+    address-and-subject vocabulary is a list of the wordings mail systems
+    have used so far, and it is one unlisted wording away from missing a
+    real bounce again (`mailerdaemon@jpmchase.com` / "Returned mail" is
+    exactly how it missed one). The report structure is defined by the RFC
+    the systems implement, so it does not need a new entry per vendor.
+    """
+    parts = list(_walk_parts(message.get("payload", {})))
+    is_report = any(
+        part.get("mimeType", "").lower() == "multipart/report"
+        or "report-type=delivery-status" in _part_content_type(part).lower()
+        for part in parts
+    )
+    if not is_report:
+        return False
+    return any(
+        part.get("mimeType", "").lower() == "message/delivery-status"
+        and _DSN_ACTION_FAILED_RE.search(_decode_body(part))
+        for part in parts
+    )
+
+
+def _looks_like_bounce(message: dict, from_addr: str, subject: str) -> bool:
+    """True from the message's own DSN STRUCTURE, or from the FROM address or
+    the SUBJECT — never from body text alone. A genuine, personal reply can
+    easily QUOTE bounce-style wording ("I tried your old address and got
+    'recipient address rejected: 550 5.1.1'...") about a completely
+    different address, or about nothing at all still relevant; matching that
+    against the body would misclassify the reply itself as a bounce of
+    whichever address `_bounce_recipient` happens to find next in the text —
+    including, in the worst case, the real contact's own working address,
+    since nothing excludes the sender's own `From` from that scan. A real,
+    system-generated bounce reliably carries the RFC 3464 report structure, a
+    mailer-daemon/postmaster sender, or a DSN-style subject, so requiring one
+    of those three costs no real detections."""
+    return bool(
+        _is_delivery_status_report(message)
+        or _BOUNCE_FROM_RE.search(from_addr)
+        or _BOUNCE_SUBJECT_RE.search(subject)
+    )
 
 
 # The DSN's own machine-readable recipient fields (RFC 3464). Both real DSN
@@ -1212,7 +1519,7 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             return None
         return _outbound_finding(message, *recipients[0])
 
-    if _looks_like_bounce(from_addr, subject):
+    if _looks_like_bounce(message, from_addr, subject):
         recipient = _bounce_recipient(message, own_email)
         if not recipient:
             return None
@@ -1275,6 +1582,32 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
     # (it may carry a real deadline or event), just not as evidence that
     # anyone answered him.
     verdict = inbound.classify_inbound(own_email, message)
+
+    # THE CALENDAR EXCEPTION, and it is not an exception to the rule above —
+    # it is the rule the module docstring already states. "No prose" is what
+    # this pipeline refuses to read; an `.ics` is the structured case it was
+    # always meant to handle. A `METHOD:REPLY` naming the account owner as
+    # ORGANIZER is a named person answering an invite the student sent, and
+    # it arrives stamped `Auto-Submitted: auto-replied`, so the bulk verdict
+    # was throwing away the single most valuable message in the mailbox (five
+    # of six `review` MailFacts on the founder's live account, read-only
+    # 2026-09-01, are exactly this). See `_ics_rsvp` for why a programme
+    # blast's own `.ics` still cannot reach this branch.
+    rsvp = _ics_rsvp(own_email, message)
+    if rsvp is not None and (
+        rsvp.kind != "proposed" or not verdict.is_bulk or verdict.machine_only
+    ):
+        return _rsvp_finding(
+            message,
+            rsvp,
+            from_name=from_name,
+            from_addr=from_addr,
+            ics_dt=ics_dt,
+            ics_summary=ics_summary,
+            ics_uid=ics_uid,
+            verdict=verdict,
+        )
+
     if verdict.is_bulk:
         return {
             "name": from_name or from_addr.split("@")[0],
@@ -1289,6 +1622,10 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             # "Chat with Caroline Baenen" on the calendar. The invite's own
             # summary still rides in `evidence` below, so the date is not
             # thrown away — it is just not claimed as a relationship.
+            # Unchanged by the calendar exception above: that branch is
+            # reached only by an iTIP REPLY to the account owner's OWN event,
+            # or by a small REQUEST whose bulk verdict rests on nothing but
+            # "a machine composed this" — a list send is neither.
             "chat_status": "none",
             "chat_scheduled_at": None,
             # False for the same reason `chat_status` is "none" above: a

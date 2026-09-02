@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timedelta, timezone as dt_timezone
 
+import pytest
+
 from capture import gmail_live
 
 OWN_EMAIL = "jimmy@example.com"
@@ -361,6 +363,353 @@ class TestIcsCancellation:
         )
         when, _s, _u, _c = gmail_live._extract_ics_schedule(message)
         assert when == "2026-09-01T14:00:00+00:00"
+
+
+class TestCalendarRsvp:
+    """"Accepted: Coffee Chat @ ..." — the single most valuable message in a
+    recruiting mailbox, and until 2026-09-01 the pipeline threw every one of
+    them away.
+
+    Google Calendar stamps `Auto-Submitted: auto-replied` on an invitation
+    response, so `capture.inbound` called it bulk (correctly: no person typed
+    it) and `_classify_message`'s bulk branch blanked `chat_status` on
+    principle (also correctly: a programme blast's webinar `.ics` must not
+    put a coffee chat on the calendar). Between the two, five of the six
+    `review` MailFacts on the founder's live account — read-only, 2026-09-01
+    — were acceptances of invites HE sent, each carrying a DTSTART, and not
+    one produced a `CalendarEvent`.
+
+    Every fixture below is the real Google shape: `Auto-Submitted:
+    auto-replied`, a `text/calendar; method=REPLY` part, `ORGANIZER` set to
+    the account owner, and one `ATTENDEE` line carrying the PARTSTAT.
+    """
+
+    UID = "6f1s2ur3h4n5k6r7q8p9o0@google.com"
+
+    @staticmethod
+    def _ics(
+        *,
+        method="REPLY",
+        organizer=OWN_EMAIL,
+        attendees=((("alice@firm.com"), "ACCEPTED", "Alice Ng"),),
+        dtstart="20260902T013000Z",
+        summary="Jimmy <> Alice Coffee Chat",
+        uid=UID,
+    ) -> str:
+        lines = [
+            "BEGIN:VCALENDAR",
+            "PRODID:-//Google Inc//Google Calendar 70.9054//EN",
+            "VERSION:2.0",
+            "CALSCALE:GREGORIAN",
+            f"METHOD:{method}",
+            "BEGIN:VEVENT",
+            f"DTSTART:{dtstart}",
+            "DTEND:20260902T023000Z",
+            "DTSTAMP:20260901T230000Z",
+            f"ORGANIZER;CN={organizer}:mailto:{organizer}",
+            f"UID:{uid}",
+        ]
+        for address, partstat, cn in attendees:
+            lines.append(
+                "ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;"
+                f"PARTSTAT={partstat};CN={cn};X-NUM-GUESTS=0:mailto:{address}"
+            )
+        lines += [
+            "CREATED:20260830T000000Z",
+            "DESCRIPTION:",
+            "LAST-MODIFIED:20260901T230000Z",
+            "LOCATION:",
+            "SEQUENCE:0",
+            "STATUS:CONFIRMED",
+            f"SUMMARY:{summary}",
+            "TRANSP:OPAQUE",
+            "END:VEVENT",
+            "END:VCALENDAR",
+        ]
+        return "\r\n".join(lines) + "\r\n"
+
+    @classmethod
+    def _rsvp_message(cls, headers=None, ics=None, **ics_kwargs) -> dict:
+        base = {
+            "From": "Alice Ng <alice@firm.com>",
+            "To": OWN_EMAIL,
+            "Subject": (
+                "Accepted: Jimmy <> Alice Coffee Chat @ Wed Sep 2, 2026 "
+                "6:30pm - 7:30pm (PDT) (Jimmy Zhu)"
+            ),
+            "Auto-Submitted": "auto-replied",
+        }
+        base.update(headers or {})
+        return _message(base, parts=[{
+            "mimeType": "text/calendar",
+            "headers": [{"name": "Content-Type",
+                         "value": "text/calendar; charset=UTF-8; method=REPLY"}],
+            "body": {"data": _b64(ics if ics is not None else cls._ics(**ics_kwargs))},
+        }])
+
+    def test_the_verdict_on_these_messages_is_still_bulk(self):
+        """The premise, pinned so the fix cannot be misread as softening the
+        genuine-reply test: `Auto-Submitted: auto-replied` still means no
+        person typed this. The override happens on the `.ics`, downstream."""
+        from capture import inbound
+
+        verdict = inbound.classify_inbound(OWN_EMAIL, self._rsvp_message())
+        assert verdict.is_bulk is True
+        assert verdict.machine_only is True, (
+            "bulk because software composed it, not because a list got it"
+        )
+
+    def test_an_acceptance_of_my_own_invite_schedules_the_chat(self):
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message())
+        assert finding["chat_status"] == "scheduled"
+        assert finding["chat_scheduled_at"] == "2026-09-02T01:30:00+00:00"
+        assert finding["ics_uid"] == self.UID
+        assert finding["bulk"] is False
+        assert finding["chat_cancelled"] is False
+        assert finding["email"] == "alice@firm.com"
+
+    def test_the_person_is_read_from_the_ics_not_the_sender(self):
+        """Two of the founder's six live acceptances arrived From
+        `calendar-notification@google.com`. Attributing a coffee chat to
+        Google's notification robot is worse than attributing it to nobody,
+        and the `.ics` names the actual attendee either way."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            headers={"From": "Google Calendar <calendar-notification@google.com>"},
+        ))
+        assert finding["email"] == "alice@firm.com"
+        assert finding["name"] == "Alice Ng"
+        assert finding["chat_status"] == "scheduled"
+
+    def test_a_folded_attendee_line_still_carries_its_partstat(self):
+        """Google's ATTENDEE line runs well past RFC 5545's 75 octets and
+        arrives folded. Half a line is half an answer."""
+        ics = self._ics()
+        attendee = [ln for ln in ics.split("\r\n") if ln.startswith("ATTENDEE")][0]
+        folded = ics.replace(attendee, attendee[:60] + "\r\n " + attendee[60:])
+        finding = gmail_live._classify_message(
+            OWN_EMAIL, self._rsvp_message(ics=folded))
+        assert finding["chat_status"] == "scheduled"
+        assert finding["email"] == "alice@firm.com"
+
+    def test_a_decline_cancels_the_chat_instead_of_booking_it(self):
+        """A DECLINED reply carries the whole event back, DTSTART included —
+        read for its time alone it books the meeting the counterparty just
+        refused. Same failure as `METHOD:CANCEL`, different wording."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            headers={"Subject": "Declined: Jimmy <> Alice Coffee Chat"},
+            attendees=(("alice@firm.com", "DECLINED", "Alice Ng"),),
+        ))
+        assert finding["chat_status"] == "none"
+        assert finding["chat_scheduled_at"] is None
+        assert finding["chat_cancelled"] is True
+        assert finding["ics_uid"] == self.UID, "the UID finds the row to retire"
+
+    def test_a_tentative_reply_books_nothing(self):
+        """"Maybe" is not a booking, and there is no honest third state to
+        record — so this falls back to exactly the old behaviour."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            attendees=(("alice@firm.com", "TENTATIVE", "Alice Ng"),),
+        ))
+        assert finding["bulk"] is True
+        assert finding["chat_status"] == "none"
+        assert finding["chat_cancelled"] is False
+
+    def test_a_reply_to_someone_elses_event_is_not_my_chat(self):
+        """The organiser test is the whole gate. A REPLY the student was
+        merely copied on answers an invite they never sent."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            organizer="events@bigconf.example",
+        ))
+        assert finding["bulk"] is True
+        assert finding["chat_status"] == "none"
+
+    def test_an_invite_they_sent_is_a_chat_they_proposed(self):
+        """The other direction: a banker books the time. Google mails the
+        invitation with `Auto-Submitted: auto-generated`, so this was
+        arriving as bulk too."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            headers={
+                "From": "Alice Ng <alice@firm.com>",
+                "Subject": "Invitation: Coffee chat @ Wed Sep 2, 2026",
+                "Auto-Submitted": "auto-generated",
+            },
+            method="REQUEST",
+            organizer="alice@firm.com",
+            attendees=(
+                ("alice@firm.com", "ACCEPTED", "Alice Ng"),
+                (OWN_EMAIL, "NEEDS-ACTION", "Jimmy Zhu"),
+            ),
+        ))
+        assert finding["bulk"] is False
+        assert finding["chat_status"] == "scheduled"
+        assert finding["email"] == "alice@firm.com"
+
+    def test_a_programme_blast_invitation_is_still_only_bulk(self):
+        """THE CASE `capture.inbound` EXISTS FOR, unchanged. A mass
+        programme invitation is a `METHOD:REQUEST` too — the difference is
+        that it was sent to a LIST, and a list send is never machine-only."""
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            headers={
+                "From": "Caroline Baenen <cbaenen@westmonroe.com>",
+                "Subject": "Invitation: West Monroe Sophomore Series",
+                "Auto-Submitted": "auto-generated",
+                "List-Unsubscribe": "<https://westmonroe.example/u/1>",
+            },
+            method="REQUEST",
+            organizer="cbaenen@westmonroe.com",
+            attendees=(
+                ("cbaenen@westmonroe.com", "ACCEPTED", "Caroline Baenen"),
+                (OWN_EMAIL, "NEEDS-ACTION", "Jimmy Zhu"),
+            ),
+        ))
+        assert finding["bulk"] is True
+        assert finding["chat_status"] == "none"
+        assert finding["chat_scheduled_at"] is None
+
+    def test_a_webinar_sized_attendee_list_is_still_only_bulk(self):
+        """Google mails each attendee separately, so a 200-seat webinar
+        arrives with ONE address on To: and 200 ATTENDEE lines — invisible to
+        the header-shape test, and the reason the invite's own guest list is
+        counted."""
+        crowd = tuple(
+            (f"guest{i}@example.com", "NEEDS-ACTION", f"Guest {i}")
+            for i in range(gmail_live.ICS_ATTENDEE_LIMIT + 1)
+        ) + ((OWN_EMAIL, "NEEDS-ACTION", "Jimmy Zhu"),)
+        finding = gmail_live._classify_message(OWN_EMAIL, self._rsvp_message(
+            headers={
+                "From": "Programme <programme@bigfirm.example>",
+                "Subject": "Invitation: Sophomore Insight Webinar",
+                "Auto-Submitted": "auto-generated",
+            },
+            method="REQUEST",
+            organizer="programme@bigfirm.example",
+            attendees=crowd,
+        ))
+        assert finding["bulk"] is True
+        assert finding["chat_status"] == "none"
+
+    def test_prose_alone_still_schedules_nothing(self):
+        """The module docstring's rule, restated: this branch reads an
+        `.ics`, never words. "Great chatting yesterday" with no calendar part
+        is still not a chat."""
+        finding = gmail_live._classify_message(OWN_EMAIL, _message(
+            {"From": "Alice Ng <alice@firm.com>", "To": OWN_EMAIL,
+             "Subject": "Accepted: coffee chat"},
+            snippet="Accepted! Great chatting yesterday, see you Wednesday at 6.30.",
+        ))
+        assert finding["chat_status"] == "none"
+        assert finding["chat_scheduled_at"] is None
+
+
+class TestDeliveryStatusReports:
+    """A real J.P. Morgan bounce the pipeline missed (2026-09-01).
+
+    `mailerdaemon@jpmchase.com` — no hyphen — with the subject "Returned
+    mail: see transcript for details" matched neither the sender regex nor
+    the subject regex, so a hard bounce became a quote-less `review` MailFact
+    and the dead address stayed on the contact and in the follow-up queue.
+    The address is invented here; the domain and the shape are the live ones.
+    """
+
+    DELIVERY_STATUS = (
+        "Reporting-MTA: dns; smtp.jpmchase.com\r\n"
+        "\r\n"
+        "Final-Recipient: RFC822; avery.n.calloway@jpmchase.com\r\n"
+        "Action: failed\r\n"
+        "Status: 5.1.1\r\n"
+        "Diagnostic-Code: SMTP; 550 5.1.1 User unknown\r\n"
+    )
+    TRANSCRIPT = (
+        "The original message was received at Mon, 1 Sep 2026 16:22:04 -0700\r\n"
+        "from smtp.gmail.com\r\n\r\n"
+        "   ----- The following addresses had permanent fatal errors -----\r\n"
+        "<avery.n.calloway@jpmchase.com>\r\n"
+        "    (reason: 550 5.1.1 User unknown)\r\n"
+    )
+
+    @classmethod
+    def _dsn(cls, headers=None, *, delivery_status=None, transcript=None) -> dict:
+        base = {
+            "From": "Mail Delivery Subsystem <mailerdaemon@jpmchase.com>",
+            "To": OWN_EMAIL,
+            "Subject": "Returned mail: see transcript for details",
+            "Auto-Submitted": "auto-replied",
+            "Content-Type": "multipart/report; report-type=delivery-status; "
+                            "boundary=\"JPM.1756770000.A\"",
+        }
+        base.update(headers or {})
+        message = _message(base, snippet="Returned mail: see transcript for details")
+        message["payload"]["mimeType"] = "multipart/report"
+        message["payload"]["parts"] = [
+            {"mimeType": "text/plain",
+             "body": {"data": _b64(
+                 transcript if transcript is not None else cls.TRANSCRIPT)}},
+            {"mimeType": "message/delivery-status",
+             "body": {"data": _b64(
+                 delivery_status if delivery_status is not None
+                 else cls.DELIVERY_STATUS)}},
+        ]
+        return message
+
+    def test_the_jpm_shape_is_a_hard_bounce(self):
+        finding = gmail_live._classify_message(OWN_EMAIL, self._dsn())
+        assert finding["bounced"] is True
+        assert finding["email"] == "avery.n.calloway@jpmchase.com"
+        assert finding.get("bulk") is not True
+
+    def test_an_unhyphenated_daemon_matches_the_sender_regex(self):
+        assert gmail_live._BOUNCE_FROM_RE.search("mailerdaemon@jpmchase.com")
+        assert gmail_live._BOUNCE_FROM_RE.search("MAILER-DAEMON@googlemail.com")
+        assert gmail_live._BOUNCE_FROM_RE.search("postmaster@bank.example")
+
+    @pytest.mark.parametrize("subject", [
+        "Returned mail: see transcript for details",
+        "Delivery Status Notification (Failure)",
+        "Undeliverable: USC | Coffee chat request",
+        "Mail delivery failed: returning message to sender",
+    ])
+    def test_the_standard_dsn_subjects_are_recognised(self, subject):
+        assert gmail_live._BOUNCE_SUBJECT_RE.search(subject)
+
+    def test_the_report_structure_alone_is_enough(self):
+        """The vocabulary lists are one unlisted wording away from missing
+        the next bounce; `multipart/report` + `Action: failed` is defined by
+        RFC 3464 rather than by a vendor's taste in subject lines. This DSN
+        carries neither a daemon sender nor a DSN subject and is still read."""
+        message = self._dsn(headers={
+            "From": "Postmaster Service <bounces-11a2@mail.bank.example>",
+            "Subject": "Message status - delivery problem",
+        })
+        assert gmail_live._is_delivery_status_report(message) is True
+        finding = gmail_live._classify_message(OWN_EMAIL, message)
+        assert finding["bounced"] is True
+        assert finding["email"] == "avery.n.calloway@jpmchase.com"
+
+    def test_a_transient_failure_is_not_read_as_a_permanent_one(self):
+        """`Action: delayed` / 4.x.x is the retry class. The structural test
+        must not turn a deferral into a cleared address — that is the whole
+        argument `_SOFT_BOUNCE_RE` was written for."""
+        message = self._dsn(delivery_status=(
+            "Final-Recipient: RFC822; avery.n.calloway@jpmchase.com\r\n"
+            "Action: delayed\r\n"
+            "Status: 4.4.1\r\n"
+        ))
+        assert gmail_live._is_delivery_status_report(message) is False
+
+    def test_a_reply_quoting_dsn_wording_is_still_not_a_bounce(self):
+        """The guard that keeps the widened vocabulary safe: none of it is
+        read from the body, and a person's mail is not a multipart/report."""
+        message = _message(
+            {"From": "Alice <alice@firm.com>", "To": OWN_EMAIL,
+             "Subject": "Re: reaching you"},
+            snippet=(
+                "Your message to my old address came back as returned mail - "
+                "undeliverable, apparently. Use alice@firm.com from now on."
+            ),
+        )
+        finding = gmail_live._classify_message(OWN_EMAIL, message)
+        assert finding["bounced"] is False
+        assert finding["replied"] is True
 
 
 class TestTokenEncryption:
