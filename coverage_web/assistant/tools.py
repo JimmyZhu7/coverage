@@ -1903,6 +1903,44 @@ def _track_opportunity(user, args) -> dict:
     return result
 
 
+class MemoryFull(Exception):
+    """The cap is already reached. Raised by `save_memory` so each caller can
+    say so in its own register — a ToolError the model can act on, or a
+    sentence in the memory dialog the student can act on."""
+
+
+def save_memory(user, text: str) -> AdvisorMemory:
+    """THE one writer for AdvisorMemory. Two callers: the `remember` tool
+    below, and the "Remember this" input on the Talk page
+    (assistant.views.remember_fact).
+
+    It exists so the cap has one definition rather than two (P5). A second
+    copy of `count() >= MAX_MEMORIES` in the view is how the manual path
+    ends up with a different ceiling from the model's, and the ceiling is
+    the whole reason this row can never grow into a context tax.
+
+    KILL CRITERION, written here because this is the file the deletion
+    starts in. The manual input shipped 2026-09-02 against a table holding
+    zero rows for every user: the model was the only writer, and `remember`
+    was 0 of the founder's 31 tool calls. It is a test of whether anyone
+    wants the feature at all, not a bet that they do. If
+    `AdvisorMemory.objects.count()` is still 0 on 2026-10-02, delete the
+    whole feature — this function, `_remember`, the `remember` schema, the
+    tool's three prompt lines in agent.py (WHAT YOU CAN CHANGE), the view,
+    the URL, the dialog and the model. The prompt lines are the expensive
+    half: they are spent on every turn of every conversation whether or not
+    a memory is ever written.
+    """
+    text = _s(text, 200)
+    if not text:
+        raise ValueError("a memory needs text")
+    if AdvisorMemory.objects.for_user(user).count() >= MAX_MEMORIES:
+        raise MemoryFull(MAX_MEMORIES)
+    memory = AdvisorMemory(user=user, text=text)
+    memory.save()
+    return memory
+
+
 def _remember(user, args) -> dict:
     """Store one durable fact — read back into every future conversation's
     preamble (agent.build_preamble), not returned as a tool result the
@@ -1911,13 +1949,14 @@ def _remember(user, args) -> dict:
     text = _s(args.get("fact"), 200)
     if not text:
         raise ToolError("fact is required")
-    if AdvisorMemory.objects.for_user(user).count() >= MAX_MEMORIES:
+    try:
+        save_memory(user, text)
+    except MemoryFull:
         raise ToolError(
             f"Already remembering {MAX_MEMORIES} things, the most this page keeps. "
             "Ask the student which one to forget on the Talk page, or just answer "
             "this one without remembering it."
         )
-    AdvisorMemory(user=user, text=text).save()
     return {"remembered": text}
 
 

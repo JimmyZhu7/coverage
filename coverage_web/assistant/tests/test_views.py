@@ -871,6 +871,79 @@ def test_forget_memory_rejects_a_get(signed_in):
 
 
 # ---------------------------------------------------------------------------
+# The manual input (D-12, 2026-09-02)
+#
+# The table held zero rows for every user because the model was the only
+# writer. These pin the second writer: the student's own.
+# ---------------------------------------------------------------------------
+def test_the_student_can_write_a_memory_themselves(signed_in, user):
+    """The acceptance criterion the decision names: a count greater than zero
+    after one use of the input, on an account that has never talked to the
+    model."""
+    assert AdvisorMemory.objects.for_user(user).count() == 0
+
+    response = signed_in.post(reverse("assistant:remember_fact"), {"fact": "Ruled out PE."})
+
+    assert response.status_code == 200
+    assert list(AdvisorMemory.objects.for_user(user).values_list("text", flat=True)) == ["Ruled out PE."]
+    # The response is the whole dialog body, so the new row is visible and
+    # the box that wrote it comes back empty.
+    body = response.content.decode()
+    assert "Ruled out PE." in body
+    assert 'id="as-memory-panel"' in body
+
+
+def test_the_page_renders_the_input_that_writes_one(signed_in):
+    """The read half was built months ago. The dialog was list-and-forget with
+    no way in, which is the whole defect."""
+    body = signed_in.get(reverse("assistant:chat")).content.decode()
+
+    assert reverse("assistant:remember_fact") in body
+    assert 'name="fact"' in body
+
+
+def test_an_empty_box_writes_nothing_and_is_not_an_error(signed_in, user):
+    """The only way to send an empty box is to hit Enter on nothing. Red text
+    is louder than the mistake."""
+    response = signed_in.post(reverse("assistant:remember_fact"), {"fact": "   "})
+
+    assert response.status_code == 200
+    assert AdvisorMemory.objects.for_user(user).count() == 0
+
+
+def test_the_manual_path_obeys_the_same_cap_as_the_tool(signed_in, user):
+    """P5, one definition. A second `count() >= MAX_MEMORIES` written in the
+    view is how the two paths end up with two ceilings, and the ceiling is the
+    only thing keeping this row out of every preamble forever."""
+    from assistant import tools
+
+    for i in range(tools.MAX_MEMORIES):
+        AdvisorMemory(user=user, text=f"fact {i}").save()
+
+    response = signed_in.post(reverse("assistant:remember_fact"), {"fact": "one too many"})
+
+    assert response.status_code == 200
+    assert AdvisorMemory.objects.for_user(user).count() == tools.MAX_MEMORIES
+    assert "one too many" not in AdvisorMemory.objects.for_user(user).values_list("text", flat=True)
+    # And it says so, rather than swallowing the write in silence.
+    assert str(tools.MAX_MEMORIES) in response.content.decode()
+
+
+def test_a_manual_memory_is_scoped_to_its_own_student(client, user):
+    other = User.objects.create_user(email="memory-writer@example.com", password="pw12345!")
+    client.force_login(other)
+
+    client.post(reverse("assistant:remember_fact"), {"fact": "Only mine."})
+
+    assert AdvisorMemory.objects.for_user(other).count() == 1
+    assert AdvisorMemory.objects.for_user(user).count() == 0
+
+
+def test_remember_fact_rejects_a_get(signed_in):
+    assert signed_in.get(reverse("assistant:remember_fact")).status_code == 405
+
+
+# ---------------------------------------------------------------------------
 # The draft card's one-click "Log touch"
 #
 # The write itself is `crm.services.log_touch` — the same single audited path

@@ -529,6 +529,18 @@ materials.
   .as-memory-forget:hover { color: var(--danger); background: var(--surface); }
   .as-memory-forget svg { width: 12px; height: 12px; }
 
+  /* The "Remember this" input: LAYOUT ONLY. The box itself is the shared
+     input rule and the button is the shared `.btn.btn-primary`, so this
+     adds no control shape and no radius of its own (design spec §16.1 —
+     twelve pressable classes split across two radii is already the defect
+     here). It sits under the list so the list stays where the eye expects
+     it after a forget. */
+  .as-memory-add { display: flex; align-items: center; gap: var(--s2);
+    margin-top: var(--s3); padding-top: var(--s3); border-top: 1px solid var(--line); }
+  .as-memory-add input[type="text"] { flex: 1; min-width: 0; }
+  .as-memory-add .btn { flex: none; }
+  .as-memory-note { margin: var(--s2) 0 0; font-size: var(--fs-s); color: var(--ink-3); }
+
   /* ---- Composer: a pill that grows, an icon send button, like every AI
      chat surface a student has already used — drawn in the site's own
      radii and shadow rather than borrowed chrome. ---- */
@@ -821,11 +833,11 @@ how the asking looks.
 </dialog>
 
 {% comment %}
-What Coverage remembers — facts saved via the `remember` tool (agent.py),
-carried into every conversation's preamble regardless of which chat or
-folder it's in. Rendered once here with the page's own `memories` context;
-a forget swaps just #as-memory-list, same shape as every other list on
-this page.
+What Coverage remembers — facts saved via the `remember` tool (agent.py) or
+typed into the input at the bottom of this dialog, carried into every
+conversation's preamble regardless of which chat or folder it's in.
+Rendered once here with the page's own `memories` context; either write
+swaps #as-memory-panel, same shape as every other list on this page.
 {% endcomment %}
 <dialog class="as-confirm as-memory-dialog" id="as-memory">
   <div class="as-memory-head">
@@ -836,7 +848,7 @@ this page.
       </svg>
     </button>
   </div>
-  <p class="as-memory-sub">Facts it's picked up across your chats. Not your CRM data.</p>
+  <p class="as-memory-sub">Facts it's picked up across your chats, plus anything you add. Not your CRM data.</p>
   {% include "assistant/_memories.html" %}
 </dialog>
 

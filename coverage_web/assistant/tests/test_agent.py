@@ -1581,6 +1581,56 @@ def test_none_of_the_new_per_user_facts_reach_the_cached_system_prefix():
 
 
 # ---------------------------------------------------------------------------
+# remember: three named triggers, and a save the student is always told about
+# (D-12, 2026-09-02)
+# ---------------------------------------------------------------------------
+def test_the_prompt_names_three_concrete_triggers_for_remember():
+    """`remember` was 0 of the founder's 31 tool calls against a prompt that
+    said "something lasting about their own campaign" and then gave three
+    examples of the answer rather than three shapes of the question. The
+    triggers are now close to literal openers, which is what a model can
+    actually match on mid-conversation.
+    """
+    prompt = agent.SYSTEM_PROMPT
+
+    for trigger in ('"I\'ve ruled out ..."', '"I only want ..."', '"don\'t suggest ..."'):
+        assert trigger in prompt
+
+
+def test_the_prompt_requires_the_save_to_be_confirmed_in_the_reply():
+    """A memory changes every future conversation. A write the student is
+    never told about is the one shape of this feature that would be worse
+    than not having it, so the permission rule is stated both ways round:
+    no asking first, always saying afterwards.
+    """
+    prompt = agent.SYSTEM_PROMPT
+
+    assert "Always say what you saved, in your own reply" in prompt
+    assert "You do not have to ask permission first; you do have to say it afterwards." in prompt
+
+
+def test_nothing_seeds_a_memory_from_a_stated_or_derived_profile_fact():
+    """P1, and the reason the decision says so explicitly: a memory is a fact
+    the student stated in conversation, never one the product read off their
+    settings. Onboarding and the settings forms have no path into this table,
+    and the preamble already carries every stated column, so a seeded memory
+    would be either a duplicate or an inference.
+    """
+    from pathlib import Path
+
+    web = Path(agent.__file__).resolve().parents[1]
+    writers = []
+    for path in list((web / "accounts").rglob("*.py")) + list((web / "crm").rglob("*.py")):
+        if "/tests/" in str(path) or "/migrations/" in str(path):
+            continue
+        text = path.read_text()
+        if "AdvisorMemory(" in text or "save_memory(" in text:
+            writers.append(str(path.relative_to(web)))
+
+    assert writers == [], f"a memory is a stated fact, never a seeded one: {writers}"
+
+
+# ---------------------------------------------------------------------------
 # The drafting rules: one specific hook, short, no placeholders, no tells,
 # and honesty on a batch.
 # ---------------------------------------------------------------------------

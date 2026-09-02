@@ -157,6 +157,16 @@ this file is not redundant with it — see the note there.
      drifted off its section. The mono eyebrow keeps the position legible
      in words as well as on the rail.
      =================================================================== */
+  /* The post-signup verification line (D-4). Tinted, not warned: nothing is
+     blocked by an unverified address today, so this borrows the accent's
+     quiet surface rather than the danger palette, and it carries no
+     entrance animation of its own — a page load is not a state change. */
+  .ob-verify { display: flex; flex-wrap: wrap; gap: var(--s2);
+    margin: 0 0 var(--s5); padding: var(--s3) var(--s4);
+    border: 1px solid var(--accent-line); border-radius: var(--r-panel);
+    background: var(--accent-soft); color: var(--ink-2); font-size: var(--fs-s); }
+  .ob-verify a { color: var(--accent); font-weight: var(--w-med); }
+
   .ob-head { margin: 0 0 var(--s5);
     animation: ob-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both; }
   .ob-eyebrow {

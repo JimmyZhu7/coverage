@@ -1010,6 +1010,38 @@ def test_remember_refuses_past_the_cap_without_silently_dropping_anything(user):
     assert "one too many" not in AdvisorMemory.objects.for_user(user).values_list("text", flat=True)
 
 
+def test_the_tool_writes_through_the_same_function_the_page_does(user):
+    """P5. `save_memory` is the one writer; `remember` is a wrapper that
+    translates its refusal into a ToolError the model can read. If the tool
+    ever grows its own `AdvisorMemory(...).save()` again, the manual input on
+    the Talk page and the model will drift apart on the cap."""
+    from unittest import mock
+
+    with mock.patch.object(tools, "save_memory") as writer:
+        _call(user, "remember", {"fact": "Ruled out PE roles."})
+
+    writer.assert_called_once()
+    assert writer.call_args.args[0] == user
+    assert writer.call_args.args[1] == "Ruled out PE roles."
+
+
+def test_the_kill_criterion_is_written_where_the_deletion_starts():
+    """D-12 shipped a manual input against a table holding zero rows, as a
+    test of whether anyone wants the feature — not as a bet that they do. The
+    date and the list of what gets deleted live in the code, because a kill
+    criterion nobody can find is a feature nobody ever kills, and the prompt
+    lines it names cost tokens on every turn of every conversation.
+    """
+    from pathlib import Path
+
+    source = Path(tools.__file__).read_text()
+    note = source.split("def save_memory", 1)[1][:2000]
+
+    assert "KILL CRITERION" in note
+    assert "2026-10-02" in note
+    assert "agent.py" in note  # the prompt lines are half of what goes
+
+
 # ---------------------------------------------------------------------------
 # add_calendar_event
 # ---------------------------------------------------------------------------

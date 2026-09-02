@@ -225,6 +225,27 @@ def test_optional_email_verification_carries_its_risk_in_writing():
     source = Path(settings.BASE_DIR) / "coverage_web" / "settings" / "base.py"
     text = source.read_text()
     before = text.split('ACCOUNT_EMAIL_VERIFICATION = "optional"', 1)[0]
-    note = before[-2000:]
+    note = before[-3000:]
     assert "squatting" in note
     assert "mandatory" in note
+
+
+def test_the_comment_names_the_commit_that_is_allowed_to_flip_it():
+    """D-4, decided 2026-09-02. "Configure a provider first" was already
+    written down and is still true, but it does not say how far apart the two
+    changes may be — and the answer is zero. Between a "mandatory" that has
+    landed and an `EMAIL_URL` that has not, every account created is one that
+    can sign up and then never sign in, and nobody finds that window except
+    the first stranger who walks into it. So the comment names the pairing
+    exactly: one commit, both changes, never one before the other.
+    """
+    from pathlib import Path
+
+    from django.conf import settings
+
+    source = Path(settings.BASE_DIR) / "coverage_web" / "settings" / "base.py"
+    note = source.read_text().split('ACCOUNT_EMAIL_VERIFICATION = "optional"', 1)[0][-3000:]
+
+    assert "SAME COMMIT" in note
+    assert "EMAIL_URL" in note
+    assert "D-4" in note

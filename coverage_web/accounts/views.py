@@ -317,7 +317,50 @@ def onboarding(request):
     # htmx refresh below only ever replaces it with a newer version of the
     # same partial.
     context["preview"] = onboarding_preview.build(step, request, request.user)
+    # The one thing signup never said out loud. See _unverified_email.
+    context["unverified_email"] = _unverified_email(request.user)
     return render(request, "accounts/onboarding.html", context)
+
+
+def _account_email_row(user):
+    """allauth's own row for the address this account signs in with, or None.
+
+    ONE definition (P5), read by both the Settings security card's verified
+    badge and the wizard's post-signup line. Two lookups here is how the two
+    surfaces end up disagreeing about whether the same address is verified.
+
+    The fallback matters twice. A user created outside allauth's signup flow
+    (createsuperuser, a fixture, the cutover import) has no EmailAddress row
+    at all — nothing was ever sent to them, and both surfaces have to stay
+    silent rather than claim a state allauth never recorded. And a row that
+    exists but was never marked primary (the seeded demo account is one) is
+    still allauth's record of this address, so matching on the address itself
+    is what keeps it truthful.
+    """
+    return (
+        EmailAddress.objects.filter(user=user, primary=True).first()
+        or EmailAddress.objects.filter(user=user, email__iexact=user.email).first()
+    )
+
+
+def _unverified_email(user) -> str | None:
+    """The address a confirmation mail has gone to and nobody has clicked yet,
+    or None.
+
+    D-4, the honest half. `ACCOUNT_EMAIL_VERIFICATION` is "optional" and stays
+    that way until a provider exists (see the comment at the setting), so
+    verification is not a gate here and this is not a warning. It is the fact
+    that signup performed an action the student was never told about: allauth
+    really does send that mail today, and until now the only page that
+    admitted the address was unverified was /accounts/email/.
+
+    No row means no mail was ever sent, and P1 says the product does not tell
+    someone to check an inbox for something it cannot show it posted.
+    """
+    row = _account_email_row(user)
+    if row is None or row.verified:
+        return None
+    return row.email
 
 
 @login_required
@@ -841,14 +884,7 @@ def _security_context(user) -> dict:
     both are conditional on the real state rather than always drawn.
     """
     has_password = user.has_usable_password()
-    primary = (
-        EmailAddress.objects.filter(user=user, primary=True).first()
-        # A user created outside allauth's signup flow (createsuperuser, a
-        # fixture, the cutover import) has no EmailAddress row at all, so
-        # falling back to any row for this address keeps the badge truthful
-        # instead of showing "unverified" for a state allauth never recorded.
-        or EmailAddress.objects.filter(user=user, email__iexact=user.email).first()
-    )
+    primary = _account_email_row(user)
     return {
         "has_usable_password": has_password,
         "email_verified": bool(primary and primary.verified),

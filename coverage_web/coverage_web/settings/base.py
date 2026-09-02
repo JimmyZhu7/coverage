@@ -691,6 +691,22 @@ ACCOUNT_SIGNUP_REDIRECT_URL = "/welcome/"
 # THE ORDER IS: configure a sending provider, then set this to "mandatory",
 # and do both before the first student who is not the founder signs up.
 # ACCOUNT_PREVENT_ENUMERATION is left at its default True either way.
+#
+# THE PAIRING, EXACTLY (D-4, decided 2026-09-02). This line flips to
+# "mandatory" IN THE SAME COMMIT that sets EMAIL_URL to a real provider,
+# never in a commit before it. Not "soon after", not "in the next deploy":
+# the same commit, because the gap between the two is a window in which
+# every new account is locked out of the product it just signed up for, and
+# a window like that is only ever noticed by the first stranger to walk into
+# it. Reverting one without the other has the same failure, which is why
+# they are one change.
+#
+# What did NOT wait for the provider, because it is honest either way and
+# shipped 2026-09-02: the post-signup message (templates/accounts/
+# onboarding.html, via accounts.views._unverified_email) telling the student
+# a confirmation mail went out and that their address is not verified yet,
+# and the link from it to /accounts/email/, which owns the resend. Today
+# allauth really does send that mail; before this the UI never said so.
 ACCOUNT_EMAIL_VERIFICATION = "optional"
 
 # accounts.User has no `username` field at all (email is USERNAME_FIELD —
