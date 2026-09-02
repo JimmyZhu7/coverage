@@ -37,6 +37,18 @@ CONSECUTIVE_FAILURES = 3
 # scan.
 WALL_STREAK_SCAN_RUNS = 60
 
+# Where the standing "bot-walled" line points for its evidence. A wall is the
+# one health line that never resolves and that nobody here can fix, so the
+# reader's only reasonable question is "says who, and when was that checked?".
+# Before this, the answer lived in two research files that flatly contradicted
+# each other about whether tal.net was reachable at all. The probe recorded in
+# this document settled it — four of five tal.net boards answer the project's
+# own user agent with a real board, Nomura serves an Oleeo Protect challenge to
+# every user agent and cookie jar tried, and no user-agent choice changes that.
+# Citing the file keeps the line falsifiable: re-run the probe, update the
+# document, and the line is either still true or visibly out of date.
+WALL_EVIDENCE_DOC = "docs/talnet-2026-09.md"
+
 
 # Not every entry in `stats["errors"]` is a failure. Two of them are the
 # ingest's own safety guards REPORTING THEMSELVES: the truncation guard
@@ -666,7 +678,7 @@ def health_report() -> list[str]:
         lines.append(
             f"{marker} bot-walled (operator requires a human check; not a "
             f"config bug and not an empty board — check by hand): "
-            f"{', '.join(parts)}"
+            f"{', '.join(parts)}; evidence in {WALL_EVIDENCE_DOC}"
         )
     guarded = guarded_boards()
     if guarded:

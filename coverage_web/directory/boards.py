@@ -238,18 +238,15 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                          board_url="https://bankcampuscareers.tal.net/vx/mobile-0/brand-4/candidate/jobboard/vacancy/1/adv/")),
     ("bofa", TalnetBoard(firm="Bank of America", kind="events",
                          board_url="https://bankcampuscareers.tal.net/vx/mobile-0/brand-4/candidate/jobboard/vacancy/2/adv/")),
-    # Was live-verified 2026-07-23 (jobs board returned off-cycle
-    # internships). Re-checked 2026-08-18: the tenant now serves Oleeo
-    # Protect's "Quick Check Needed" interstitial (an ALTCHA proof-of-work
-    # challenge) on every request, tested with a plain, honest UA — a
-    # tenant-level anti-bot setting turned on sometime after the original
-    # check, not a scrape breaking. talnet.py's bot_challenge_reason()
-    # already recognizes this exact page and reports the board as
-    # unreadable rather than silently-empty, so nothing here is
-    # misbehaving. Kept configured in case the tenant turns the check back
-    # off; deliberately NOT worth building a challenge-solver for one
-    # board, which would cross from "read a public page" into defeating an
-    # employer's anti-bot control.
+    # Was live-verified 2026-07-23, then served Oleeo Protect's "Quick Check
+    # Needed" interstitial from 2026-08-18. THE WALL IS DOWN AGAIN: probed
+    # 2026-09-02, HTTP 200, 136,535 bytes, 50 vacancies, "Global Programs -
+    # Morgan Stanley Campus", under the project's own user agent
+    # (docs/talnet-2026-09.md). Oleeo Protect is a per-tenant
+    # setting a tenant can toggle at will, which is why this board has been
+    # both, and why the honest note is a date rather than a verdict about
+    # tal.net. Nothing here needs a challenge-solver: see the Nomura entry
+    # below for the one tenant still walled and why we leave it that way.
     ("ms", TalnetBoard(firm="Morgan Stanley", kind="jobs",
                        board_url="https://morganstanley.tal.net/vx/lang-en-GB/mobile-0/appcentre-1/brand-2/candidate/jobboard/vacancy/1/adv/")),
     ("ms", TalnetBoard(firm="Morgan Stanley", kind="events",
@@ -260,9 +257,20 @@ BOARDS: list[tuple[str, BoardConfig]] = [
                           path_filter="/emergingtalent/job/")),
     # Nomura's campus platform is also tal.net. Was live-verified
     # 2026-07-23 (jobs board returned off-cycle internships, events board
-    # the "Insider Series" insight evenings). Re-checked 2026-08-18: same
-    # Oleeo Protect challenge as Morgan Stanley above, same reasoning for
-    # leaving it configured rather than attempting to solve it.
+    # the "Insider Series" insight evenings). WALLED, and the only tal.net
+    # tenant that still is: probed 2026-09-02, HTTP 200, 4,621 bytes, zero
+    # vacancies, "Quick Check Needed" — identical under a browser user agent
+    # and with a cookie jar, so there is no request we could send that opens
+    # it (docs/talnet-2026-09.md). 48 open rows are frozen behind
+    # it and age in place; `health.walled_boards()` says so once, loudly,
+    # then quietly. Kept configured in case the tenant turns the check back
+    # off. Deliberately NOT worth building a challenge-solver for, which
+    # would cross from "read a public page" into defeating an employer's
+    # anti-bot control (do-not-build register §5.2 item 13).
+    #
+    # The 56 rows this board delivered while it was open carry their
+    # location under a "Location" column header, not the "City" the other
+    # tenants use — see talnet._LOCATION_COL_LABELS.
     ("nomura", TalnetBoard(firm="Nomura", kind="jobs",
                            board_url="https://nomuracampus.tal.net/vx/mobile-0/candidate/jobboard/vacancy/1/adv/")),
     ("nomura", TalnetBoard(firm="Nomura", kind="events",
@@ -277,11 +285,11 @@ BOARDS: list[tuple[str, BoardConfig]] = [
     ("lazard", OracleBoard(firm="Lazard", host="icbpjb.fa.ocs.oraclecloud.com",
                            site_number="CX_2", keywords=("intern", "graduate", "analyst"))),
     # Was live and EMPTY, not broken, as of 2026-08-05 (the page served
-    # ~108KB with zero vacancy links). Re-checked 2026-08-18: now the same
-    # Oleeo Protect "Quick Check Needed" challenge as Morgan Stanley/Nomura
-    # above — the tenant switched from "reachable but empty" to "not
-    # reachable" sometime in between. Same reasoning for leaving both
-    # boards configured rather than solving the challenge.
+    # ~108KB with zero vacancy links), then walled from 2026-08-18. Reachable
+    # again: probed 2026-09-02, HTTP 200, 66,293 bytes, 9 vacancies,
+    # "Students and Graduates - Evercore" (docs/talnet-2026-09.md).
+    # Three states in one month on one tenant is the reason this catalog
+    # records dates and measurements rather than a standing verdict.
     ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
                              board_url="https://evercore.tal.net/vx/lang-en-GB/mobile-0/channel-1/appcentre-ext/brand-5/candidate/jobboard/vacancy/2/adv/")),
     ("evercore", TalnetBoard(firm="Evercore", kind="jobs",
