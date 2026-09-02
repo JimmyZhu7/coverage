@@ -279,6 +279,28 @@ copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
+    The bulk-park Undo strip — same shape, same lifetime, same place as the
+    dismissal one above, because it answers the same question about a
+    different tap. 44 contacts left this queue in one click on 2026-09-01
+    with nothing on screen saying it could be taken back; the strip is that
+    sentence. It reverses exactly the ids that tap parked (crm.views.
+    _park_undo_offer), restoring each one to the resting state their own
+    warmth implies, and it names the durable surface for the day the strip
+    is gone.
+    {% endcomment %}
+    {% if park_undo %}
+      <div class="prop-undo" role="status">
+        <span class="prop-undo-said">
+          {% if park_undo.who %}Parked {{ park_undo.who|smart_title }}.{% else %}Parked {{ park_undo.count }} contacts.{% endif %}
+          <span class="prop-undo-note">They keep every touch. A reply un-parks anyone; the whole group is on <a href="{% url 'crm:contact_parked' %}">Parked contacts</a>.</span>
+        </span>
+        <button type="button" class="btn prop-undo-btn"
+                hx-post="{% url 'crm:contacts_park_undo' %}"
+                hx-vals='{"ids": "{{ park_undo.ids }}", "where": "today"}'>Undo</button>
+      </div>
+    {% endif %}
+
+    {% comment %}
     Autopilot's reviewed batch. The AI already read every card below and
     wrote up a verdict for each (capture/autopilot.py) — but decided only,
     never applied: this button is the single tap that commits the whole
@@ -410,9 +432,19 @@ copy exactly once, and this is the once.
           <span class="lane-count" aria-live="polite">{{ proposals|length }}{% if proposals_total > proposals|length %} of {{ proposals_total }}{% endif %}</span>
           {% if proposals|length > 1 %}
             <span class="lane-bulk">
+              {% comment %}
+              ONE CLICK STILL, but the count is on screen before the write.
+              39 contacts were created in one tap on 2026-09-01 — 38 with no
+              role, 23 with no region — and the number first appeared
+              afterwards, in the lane that had emptied. This is the one
+              confirm the accept side gets: Add-all creates rows, and the
+              per-card chips below are skipped wholesale by it, which is
+              exactly what the dialog says.
+              {% endcomment %}
               <button type="button" class="btn act-ghost"
+                      hx-confirm="Accept {{ proposals|length }} contacts? They're added as-is, without the role or region on each card."
                       hx-post="{% url 'crm:proposals_bulk' 'accept' %}"
-                      title="Add everyone listed here">Add all</button>
+                      title="Add everyone listed here">Add all {{ proposals|length }}</button>
               <button type="button" class="btn act-ghost"
                       hx-post="{% url 'crm:proposals_bulk' 'dismiss' %}"
                       title="Dismiss everyone listed here">Dismiss all</button>
@@ -499,10 +531,46 @@ copy exactly once, and this is the once.
                   <p class="act-reason act-replied">Autopilot left this one for you: <span class="act-replied-subj">&ldquo;{{ p.autopilot_quote }}&rdquo;</span></p>
                 {% endif %}
               </div>
+              {% comment %}
+              COMPLETE THE CARD. The two facts the ask can carry, at the one
+              moment somebody is looking at the evidence for this person.
+              Measured 2026-09-01: role blank on 136 of 151 capture rows, 90
+              rows with neither role nor region, and of the 39 that arrived
+              that night 23 sat at firms recruiting in both markets, where
+              the deterministic rule correctly refuses to guess and so leaves
+              the blank standing forever.
+
+              OPTIONAL, both of them, and blank is the default. Untouched
+              they post empty strings and `discovery.accept` behaves exactly
+              as it did — the role hint still becomes the role, the firm rule
+              still gets first refusal on the region. The role input is
+              pre-filled from `role_hint` where the signature parser found
+              one (1 of 137 accepted proposals on live data, which is the
+              measure of how little the From header carries).
+
+              `hx-include` on the Add button, not a <form>: the card lives
+              inside the cockpit's own swap target and a nested form would
+              submit on Enter to nowhere.
+              {% endcomment %}
+              <div class="act-fill" id="prop-fill-{{ p.id }}">
+                <label class="act-fill-lab" for="prop-role-{{ p.id }}">Role</label>
+                <input class="act-fill-in" type="text" id="prop-role-{{ p.id }}"
+                       name="role" maxlength="255" autocomplete="off"
+                       placeholder="Analyst, VP, Campus Recruiting…"
+                       value="{{ p.role_hint }}">
+                <label class="act-fill-lab" for="prop-region-{{ p.id }}">Region</label>
+                <select class="act-fill-in" id="prop-region-{{ p.id }}" name="region">
+                  <option value="">Not sure</option>
+                  <option value="us">United States</option>
+                  <option value="hk">Hong Kong</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
               <div class="act-quick">
                 <div class="act-primary">
                   <button type="button" class="btn btn-primary act-btn"
                           aria-label="Add {{ p.name }} to your network"
+                          hx-include="#prop-fill-{{ p.id }}"
                           hx-post="{% url 'crm:proposal_act' p.id 'accept' %}">Add to network</button>
                 </div>
                 <div class="act-ghosts">
@@ -943,10 +1011,18 @@ copy exactly once, and this is the once.
         <h2 class="lane-title">
           Gone quiet <span class="lane-count" aria-live="polite">{{ park_total }}</span>
           {% if park_bulk %}
+            {% comment %}
+            The count is in the dialog, not only in the flash afterwards.
+            44 people left this queue in one tap on 2026-09-01 and the first
+            place the number appeared was the ledger. `hx-confirm` names it
+            before the POST, and says both ways back so the confirm is a
+            description rather than a scare.
+            {% endcomment %}
             <button type="button" class="btn act-ghost park-all"
                     aria-label="Park all {{ park_total }} contacts who have gone quiet"
                     title="Park every contact in this strip"
-                    hx-post="{% url 'crm:today_park_all' %}">Park all</button>
+                    hx-confirm="Park all {{ park_total }}? A reply un-parks anyone, and you can undo this straight after."
+                    hx-post="{% url 'crm:today_park_all' %}">Park all {{ park_total }}</button>
           {% endif %}
         </h2>
         <div class="act-grid">

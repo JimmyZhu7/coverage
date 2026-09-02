@@ -135,7 +135,7 @@ from capture import inbound
 from capture.models import ContactProposal
 from capture.providers import normalize_email
 from crm import recruitment, services as crm_services
-from crm.models import Contact
+from crm.models import Contact, Touch
 from crm.relevance import is_recruiting_role
 from directory.models import Firm
 
@@ -1261,10 +1261,106 @@ def consider_finding(
 
 
 # --------------------------------------------------------------------------- #
+# Alumni filed at their school instead of their employer
+# --------------------------------------------------------------------------- #
+
+# Words that make a free-text firm a SCHOOL rather than an employer. Generic
+# and deliberately small: the specific case is answered by the student's own
+# institution domains below, and this list only has to catch the shape
+# ("Boston College", "NYU Stern School of Business") for anyone else.
+_SCHOOL_WORDS = frozenset({
+    "university", "univ", "college", "school", "institute", "academy",
+    "alumni", "alum", "polytechnic",
+})
+_WORD_RE = re.compile(r"[a-z]+")
+# Words that carry no identity and so must never be the thing two names have
+# in common. Without this, a student whose school is "University of Southern
+# California" contributes the token "of", and "Bank of America" then reads as
+# naming their school — the exact false positive that would re-file a banker
+# as an alum. Three-letter minimum for the same reason, which still admits
+# every abbreviation that matters here ("usc", "mit", "nyu").
+_STOPWORDS = frozenset({"the", "and", "for", "des", "der", "van", "von"})
+
+
+def school_tokens(user) -> frozenset[str]:
+    """The student's OWN school, as the handful of lowercase words a contact's
+    free-text firm would have to contain to be naming it: every word of
+    `User.school`, plus the first label of each institutional domain in
+    `_own_institution_domains` (so `usc.edu` yields `usc`, which is exactly
+    the string 19 of the founder's rows carry in `firm_text`).
+
+    Reuses `_own_institution_domains` rather than re-deriving: that function
+    is already the one place this codebase decides what "the student's own
+    institution" means, and it already drops freemail.
+    """
+    tokens = set(_WORD_RE.findall((getattr(user, "school", "") or "").lower()))
+    for domain in _own_institution_domains(user):
+        tokens.add(domain.split(".", 1)[0])
+    return frozenset(t for t in tokens if len(t) >= 3 and t not in _STOPWORDS)
+
+
+def names_a_school(firm_text: str, user) -> bool:
+    """Is this free-text firm a school and not an employer? True when it
+    names the student's own institution, or carries a generic school word."""
+    words = set(_WORD_RE.findall((firm_text or "").lower()))
+    if not words:
+        return False
+    return bool(words & _SCHOOL_WORDS) or bool(words & school_tokens(user))
+
+
+def school_firm_fields(contact, *, user=None, firm_domains: FirmDomains | None = None) -> dict:
+    """THE ALUM-AT-A-FIRM REPAIR, as a dict of field -> new value (empty when
+    the rule does not fire). Does not save; `accept` below and the
+    `fix_school_firms` command both apply it, and the command shows it first.
+
+    Measured 2026-09-01 on the founder's account: 19 contacts sit at free-text
+    firm "usc" with `firm_id` NULL, and 7 of them write from an address
+    `FirmDomains.match` resolves to a directory firm (bain.com x3, bcg.com,
+    deloitte.com x2, pwc.com). Those 7 are alumni AT a firm, filed under the
+    school — so they are off Firm Coverage, have no tier, no firm dates and no
+    Firm Fit, and 2 of them were also victims of the write-order ratchet.
+    Their employer was knowable from their own email domain the whole time.
+
+    THE ORDER OF THE TWO FACTS IS THE POINT. `firm` is the employer;
+    `school_affiliation` / `school` is the affinity. The single FK can hold
+    one of them, and the row was holding the wrong one. Never overwrites a
+    firm that already resolved (`firm_id` set -> nothing happens, whatever the
+    address says: a resolved FK is either the directory's own answer or a
+    person's, and an address is weaker evidence than both), and never fires
+    without a school-looking `firm_text`, so a contact at an off-directory
+    employer keeps the name the student typed.
+    """
+    if contact.firm_id is not None or not (contact.email or "").strip():
+        return {}
+    firm_text = (contact.firm_text or "").strip()
+    if not firm_text or not names_a_school(firm_text, user or contact.user):
+        return {}
+    firm_id = (firm_domains or FirmDomains()).match(contact.email)
+    if firm_id is None:
+        return {}
+    fields = {
+        "firm_id": firm_id,
+        # The employer takes the FK, so the school moves to the field that
+        # holds a school — and stops being a firm name the coverage strip
+        # counts. `school` is 64 chars; `firm_text` is 255.
+        "firm_text": "",
+        "school_affiliation": True,
+    }
+    if not (contact.school or "").strip():
+        fields["school"] = firm_text[:64]
+    return fields
+
+
+# --------------------------------------------------------------------------- #
 # The tap: accept / dismiss
 # --------------------------------------------------------------------------- #
 
-def accept(proposal: ContactProposal) -> Contact | None:
+def accept(
+    proposal: ContactProposal,
+    *,
+    role: str | None = None,
+    region: str | None = None,
+) -> Contact | None:
     """Create the contact this proposal describes — the same creation
     contract `capture_discover` holds: match-before-create (email, then
     normalized name, against every row including archived), never resurrect
@@ -1277,6 +1373,16 @@ def accept(proposal: ContactProposal) -> Contact | None:
     None when the match was archived — in which case the proposal is
     dismissed rather than left asking forever, and unarchiving stays a
     by-hand decision.
+
+    `role` and `region`, when given, are what the student typed or picked on
+    the proposal card itself (`crm.views.proposal_act`). They exist because
+    the Gmail door delivers a name and an address and nothing else, and
+    nothing downstream ever asked for the rest: role was blank on 136 of the
+    151 capture rows on the founder's account, and 90 rows carried neither a
+    role nor a region, 89 of them cold and queue-eligible. `region` is written
+    with `region_source="user"` — a person just said so, and that is the one
+    provenance nothing else may overwrite. Both are optional; omitted, this
+    behaves exactly as it did.
 
     Idempotent: a proposal past `pending` returns its recorded contact and
     writes nothing.
@@ -1291,6 +1397,15 @@ def accept(proposal: ContactProposal) -> Contact | None:
         _resolve(proposal, ContactProposal.STATUS_DISMISSED)
         return None
     if match is not None:
+        # The one thing an accept onto an EXISTING row may still fix: an alum
+        # filed at their school whose address names their employer. Nothing
+        # else about a live contact is touched — the student's own record wins
+        # over anything a proposal carries.
+        upgrade = school_firm_fields(match, user=user)
+        if upgrade:
+            for field, value in upgrade.items():
+                setattr(match, field, value)
+            match.save(update_fields=list(upgrade))
         proposal.contact = match
         _resolve(proposal, ContactProposal.STATUS_ACCEPTED, extra=["contact"])
         return match
@@ -1300,7 +1415,7 @@ def accept(proposal: ContactProposal) -> Contact | None:
         name=proposal.name,
         email=proposal.email,
         firm=proposal.firm,
-        role=proposal.role_hint,
+        role=(role or "").strip()[:255] or proposal.role_hint,
         source="capture",
         # Three-state honesty (see the field's own comment): True only when
         # the role hint says recruiting; otherwise left NULL — "nobody has
@@ -1321,6 +1436,22 @@ def accept(proposal: ContactProposal) -> Contact | None:
             + (f"\n{proposal.evidence}" if proposal.evidence else "")
         ),
     )
+    # A region the student picked on the card, before the first save() — so
+    # `resolve_region`'s tier 1 sees it and returns it unchanged rather than
+    # the firm rule filling the blank first and this overwriting it after.
+    # Blank stays blank: the deterministic rule is still allowed to answer
+    # (and, at a both-market firm, still correctly refuses to guess).
+    if region in Contact.REGION_VALUES:
+        contact.region = region
+        contact.region_source = Contact.REGION_SOURCE_USER
+    # THE ADDRESS STILL NAMES THE EMPLOYER. `consider_finding` resolved the
+    # firm when the proposal was minted; a proposal that has sat pending
+    # since before that firm's `domains` were filled in carries `firm=None`
+    # for no better reason than when it was written. Asked again here, at the
+    # moment the row becomes real, and only to fill a blank — never to
+    # second-guess a firm the proposal already carries.
+    if contact.firm_id is None and contact.email:
+        contact.firm_id = FirmDomains().match(contact.email)
     contact.save()
 
     # Real evidence -> a real touch, never invented: every proposal exists
@@ -1351,12 +1482,29 @@ def accept(proposal: ContactProposal) -> Contact | None:
         now = proposal.occurred_at
         if now is not None:
             now = min(now, timezone.now())
-        crm_services.log_touch(
+        result = crm_services.log_touch(
             user.id, contact.id, kind, "email",
             note=f"{marker}{proposal.evidence}".strip() or None,
             now=now,
             source="capture",
         )
+        # THE SUBJECT THIS PROPOSAL HAS BEEN CARRYING ALL ALONG. A mail
+        # merge's single defining fact is that N threads share one subject,
+        # and `crm.campaigns.detect` groups on `Touch.subject` — but only the
+        # live capture path ever stamped it, so all 136 accepted proposals on
+        # the founder's account produced touches with the column blank while
+        # `ContactProposal.thread_subject` sat right there holding it. Tonight
+        # alone that is 39 sends the detector cannot see as one send.
+        #
+        # The same two-step the live path uses, and for the same reason its
+        # own comment gives: `apply_touch`'s INSERT column list is part of
+        # `coverage_domain`'s contract, and widening the pure engine for a
+        # column only the web app cares about would put a view concern inside
+        # the ratchet. It returns the row id; Django stamps the subject on.
+        if proposal.thread_subject and result.touch_id:
+            Touch.objects.for_user(user).filter(id=result.touch_id).update(
+                subject=proposal.thread_subject[:255]
+            )
 
     proposal.contact = contact
     _resolve(proposal, ContactProposal.STATUS_ACCEPTED, extra=["contact"])

@@ -73,7 +73,6 @@ from .today import (  # noqa: F401
     rendered_proposals_qs,
     today_act,
     today_bench_act,
-    today_park_all,
     week,
 )
 from .utils import (  # noqa: F401
@@ -272,7 +271,16 @@ def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
 
     A dismissal comes back with the Undo strip in the same swap (see
     `_dismiss_undo_offer`). Dismissal is permanent for the SCAN by design, so
-    the one thing it must not also be is silent."""
+    the one thing it must not also be is silent.
+
+    THE CARD NOW CARRIES TWO OPTIONAL FIELDS, and accepting writes them. The
+    Gmail door delivers a name and an address; measured 2026-09-01, role was
+    blank on 136 of the founder's 151 capture rows and 90 rows carried
+    neither role nor region — 89 of those cold and about to be queued for a
+    follow-up the product knew nothing about. The ask has to live at the
+    moment of entry, because that is the one moment somebody is looking at
+    the evidence. Both blank is exactly today's behaviour, deliberately: an
+    unanswered field must never become a guess."""
     from capture import discovery
     from capture.models import ContactProposal
 
@@ -284,7 +292,14 @@ def proposal_act(request: HttpRequest, pk: int, verb: str) -> HttpResponse:
     )
     context = None
     if verb == "accept":
-        contact = discovery.accept(proposal)
+        contact = discovery.accept(
+            proposal,
+            role=(request.POST.get("role") or "").strip(),
+            # Validated in `discovery.accept` against Contact.REGION_VALUES —
+            # anything else is a blank, not an error, because a select that
+            # posts junk is a broken client, not a user decision to record.
+            region=(request.POST.get("region") or "").strip(),
+        )
         record_event(
             "contact_proposal_accepted", user=request.user, source="today",
             contact_id=contact.id if contact else None,
@@ -963,6 +978,16 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
         # Blank when unknown — the chip simply doesn't render, rather than the
         # card asserting a region nobody set.
         "region": (c.region or "").upper(),
+        # WHERE THE RELATIONSHIP ACTUALLY STANDS. The board sections partition
+        # on warmth and real-touch count only, so a parked contact and an
+        # active one produce identical cards: measured 2026-09-01 on the
+        # founder's own board, "Emailed, No Reply" held 92 active rows and 129
+        # parked ones side by side, "Chatted" 9 and 13, and "Advocate" showed
+        # two parked people as his entire advocate bench. The card dict had no
+        # way to say so — this is the value; the chip that renders it is the
+        # template's business.
+        "thread_state": c.thread_state,
+        "parked": c.thread_state == "parked",
         "days_since": days_since,
         "stale_pct": round(stale * 100),
         # The tint threshold decided here, where the arithmetic lives, not by
@@ -1503,6 +1528,11 @@ def contact_list(request: HttpRequest) -> HttpResponse:
         request,
         "crm/contact_list.html",
         {
+            # The one-shot Undo strip for a bulk park made on the last
+            # request (`contacts_bulk`, `PARK_UNDO_SESSION_KEY`). POPPED, not
+            # read: the offer is for the tap that just happened, and a
+            # refresh must not still be offering to reverse it.
+            "park_undo": request.session.pop(PARK_UNDO_SESSION_KEY, None),
             "scope": scope,
             "region_scopes": region_scopes,
             "all_total": all_total,
@@ -1764,6 +1794,145 @@ REGION_BULK_VERBS = {
 }
 
 
+# ---------------------------------------------------------------------------
+# THE TWO DOORS THAT PARK DOZENS AT ONCE, AND WHAT NOW GUARDS THEM.
+#
+# Measured on the founder's own account (2026-09-01): 44 contacts parked in
+# one tap on Today at 20:49, 98 in one tap on the Network board on Aug 10.
+# Neither door asked, and neither offered a way back that did not involve
+# finding a different page. His own comment on the Aug 10 burst, still in this
+# file at `_parked_cohorts`, calls it "clearing a screen, not pruning a
+# network" — which is the honest description of a bulk verb with no confirm.
+#
+# Two things close it, and they are deliberately different things:
+#
+#   - a confirm NAMING THE COUNT, on both doors, so the number is on screen
+#     before the tap rather than in the flash message afterwards;
+#   - an undo strip that reverses exactly the contacts that tap parked,
+#     through `services.set_contact_state`, one `manual_override` per contact,
+#     never a bulk UPDATE — the same rule the park itself follows, because an
+#     un-park that left no row would be a second gap in the same ledger.
+#
+# The ids ride in the response for Today (htmx: the strip comes back in the
+# same swap that emptied the lane) and in the session for the Network board
+# (a redirect, so there is nothing to ride in) — the same split, and the same
+# two mechanisms, `_dismiss_undo_offer` and `directory.views`'s bulk-save
+# batch already use.
+PARK_UNDO_SESSION_KEY = "crm_park_undo"
+
+
+def _park_undo_offer(rows: list[tuple[int, str]], *, where: str) -> dict:
+    """The one-shot Undo offer for a bulk park: the exact ids that tap
+    parked, a count, and one name while there is one name worth saying.
+
+    EXACT IDS, not "the newest cohort". Reversing a cohort read back off the
+    ledger would also reverse anything the student parked deliberately in the
+    same minute, and would happily reverse a DIFFERENT tap if two happened
+    close together. The undo is for the tap that just happened."""
+    return {
+        "ids": ",".join(str(cid) for cid, _ in rows),
+        "count": len(rows),
+        "who": rows[0][1] if len(rows) == 1 else "",
+        "where": where,
+    }
+
+
+@login_required
+@require_POST
+def today_park_all(request: HttpRequest) -> HttpResponse:
+    """Park every contact currently in the queue's park strip, in one click.
+
+    WHY THIS LIVES HERE RATHER THAN IN `crm.today` (where its twin still
+    stands): the tap needs to hand the cockpit an undo offer, and undo
+    offers are a views concern — `_dismiss_undo_offer` above is the same
+    shape, feeding the same strip in the same template. `crm.today` stays
+    what it is, the engine and the context builder; the ids still come from
+    its `_build_actions`, so what gets parked is still re-derived from the
+    engine and never posted by the client.
+
+    Written as a LOOP over `services.set_contact_state`, not a bulk
+    `.update()`, and that is not an oversight. The audited override is the
+    only thing allowed to move `thread_state`, and it writes one
+    `manual_override` touch per contact so the log has no gap; a bulk UPDATE
+    would change a dozen relationships with nothing on the record saying who
+    did it or when. Slower, and correct. `source="park_all"` names the door
+    on every one of those rows, which is the fix for 179 override rows that
+    all claimed to be "manual"."""
+    actions, _ = _build_actions(request.user)
+    park_ids = [a["contact"]["id"] for a in actions if a["action"] == "park"]
+    names = dict(
+        Contact.objects.for_user(request.user)
+        .filter(pk__in=park_ids)
+        .values_list("id", "name")
+    )
+    for cid in park_ids:
+        services.set_contact_state(
+            request.user.id, cid,
+            thread_state="parked", note="Parked from the Today queue (bulk)",
+            source="park_all",
+        )
+    context = _cockpit_context(request.user)
+    if park_ids:
+        record_event("contacts_parked_bulk", user=request.user, source="today")
+        context["park_undo"] = _park_undo_offer(
+            [(cid, names.get(cid, "")) for cid in park_ids], where="today",
+        )
+    return render(request, "crm/_cockpit.html", context)
+
+
+@login_required
+@require_POST
+def contacts_park_undo(request: HttpRequest) -> HttpResponse:
+    """Reverse the bulk park the strip is offering — those ids and no others.
+
+    Restores each contact to the resting state its OWN warmth implies
+    (`BENCH_RESTORE_STATE`, the same pairing the bench's restore tap and the
+    parked-cohorts page use), never one value applied to everyone: a park
+    that swept up an advocate must not hand them back as a cold no-reply.
+
+    Scoped the same three ways `proposals_undo` is: `.for_user` (another
+    tenant's id matches nothing, same as a missing one), `thread_state=
+    "parked"` (a contact who has since replied is already back, and undo must
+    not re-write state on somebody it did not park), and an integer parse
+    that drops anything else before it reaches the ORM.
+
+    `source="undo"` on every audit row, so the ledger reads park-then-undo as
+    two named acts rather than two anonymous "manual" ones."""
+    ids = []
+    for raw in (request.POST.get("ids") or "").split(","):
+        raw = raw.strip()
+        if raw.isdigit():
+            ids.append(int(raw))
+    where = (request.POST.get("where") or "").strip()
+    if not ids:
+        return HttpResponse(status=400)
+
+    rows = list(
+        Contact.objects.for_user(request.user)
+        .filter(pk__in=ids, archived=False, thread_state="parked")
+    )
+    for contact in rows:
+        services.set_contact_state(
+            request.user.id, contact.id,
+            thread_state=BENCH_RESTORE_STATE.get(contact.warmth, "no_reply"),
+            note="Un-parked with Undo, right after a bulk park",
+            source="undo",
+        )
+    if rows:
+        record_event(
+            "contacts_park_undone", user=request.user,
+            source=where or "network", count=len(rows),
+        )
+    if where == "today":
+        return render(request, "crm/_cockpit.html", _cockpit_context(request.user))
+    messages.success(
+        request,
+        f"{len(rows)} contact{'' if len(rows) == 1 else 's'} back in the "
+        "queue." if rows else "Those contacts are already back in the queue.",
+    )
+    return redirect(reverse("crm:contact_list"))
+
+
 @login_required
 @require_POST
 def contacts_bulk(request: HttpRequest) -> HttpResponse:
@@ -1830,7 +1999,16 @@ def contacts_bulk(request: HttpRequest) -> HttpResponse:
                 request.user.id, cid,
                 thread_state="parked",
                 note="Parked from the Network board (bulk)",
+                source="bulk",
             )
+        # The ids the strip on the next render will offer to reverse. In the
+        # session because this door redirects — there is no response body for
+        # them to ride in, which is the same reason `directory.views`'s
+        # bulk-save batch is stored the same way. Popped on read, so the offer
+        # survives exactly one page load and nothing goes stale.
+        request.session[PARK_UNDO_SESSION_KEY] = _park_undo_offer(
+            rows, where="network",
+        )
     else:  # archive
         # A plain ORM write, matching `_set_archived`: `archived` is a
         # UI/lifecycle flag, not part of the warmth/thread_state ratchet, so
@@ -1849,7 +2027,7 @@ def contacts_bulk(request: HttpRequest) -> HttpResponse:
            + (f" and {len(rows) - 3} more" if len(rows) > 3 else ""))
     undo = ("They're in Archived Contacts if you want them back."
             if verb == "archive" else
-            "Logging a touch puts anyone back in the queue."
+            "Undo above, or restore the whole group from Parked contacts."
             if verb == "park" else
             "Change it on any contact if you picked wrong."
             if verb in REGION_BULK_VERBS else "")
@@ -1880,10 +2058,39 @@ def contact_archive(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_POST
 def contact_unarchive(request: HttpRequest, pk: int) -> HttpResponse:
-    """Bring a contact back, with their whole touch history intact."""
+    """Bring a contact back, with their whole touch history intact.
+
+    IT SAYS SO WHEN THEY ARE STILL PARKED, and it does not un-park them.
+    Nine of the founder's 41 archived rows are also parked (2026-09-01), and
+    for those the old flash — "X is back on your board." — was true about the
+    board and false about everything the student would infer from it: the
+    contact is visible on Network, and absent from the daily queue, which is
+    exactly the state nobody could see.
+
+    UN-PARKING WAS THE OTHER OPTION AND IS NOT WHAT THIS BUTTON PROMISED.
+    `archived` and `thread_state` are two independent decisions — one says
+    "off the board", the other says "stop the follow-up clock" — and every
+    word this product has ever put on the archive path is about the first:
+    the view's own docstring ("with their whole touch history intact"),
+    `contact_archived.html`'s "Nothing is deleted: every touch stays on the
+    record and comes back with the person". None of them promise re-entry to
+    the queue. Un-parking here would have silently reversed nine deliberate
+    park decisions to make one flash message true, which is the same class of
+    unasked-for state change as the backdated-reply un-park this batch just
+    closed in the engine. So: name the state, and point at the one page whose
+    entire job is reversing it.
+    """
     contact = _set_archived(request, pk, archived=False)
     record_event("contact_unarchived", user=request.user)
-    messages.success(request, f"{contact.name} is back on your board.")
+    if contact.thread_state == "parked":
+        messages.success(
+            request,
+            f"{contact.name} is back on your board, still parked. They stay "
+            "out of the follow-up queue until you un-park them on Parked "
+            "contacts, or they reply.",
+        )
+    else:
+        messages.success(request, f"{contact.name} is back on your board.")
     return redirect("crm:contact_detail", pk=contact.pk)
 
 
@@ -2237,6 +2444,7 @@ def contact_parked_unpark(request: HttpRequest) -> HttpResponse:
             request.user.id, c.id,
             thread_state=BENCH_RESTORE_STATE.get(c.warmth, "no_reply"),
             note="Unparked from the Network board (bulk)",
+            source="unpark",
         )
     record_event(
         "contacts_unparked_bulk", user=request.user,
