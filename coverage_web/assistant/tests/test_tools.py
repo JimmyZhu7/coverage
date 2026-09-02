@@ -1726,10 +1726,11 @@ def test_a_pipeline_role_the_scraper_confirmed_closed_is_reported_as_closed(user
 
 
 def test_saving_a_closed_posting_says_so_rather_than_offering_its_deadline(user, firm):
-    """Ids reach `track_opportunity` from `get_situation` too, and a
-    `role_closed` event carries the id of a posting the scraper watched the
-    firm take down. The save still happens — it is the student's own
-    application record — but the result must not read as a live window."""
+    """Ids reach `track_opportunity` from `get_my_pipeline` too, which
+    returns every tracked row a student has — including the ones the scraper
+    watched the firm take down (the test above asserts that). The save still
+    happens — it is the student's own application record — but the result
+    must not read as a live window."""
     dead = Opportunity.objects.create(
         firm=firm, title="2028 Summer Analyst", bucket="internship", region="hk",
         status="closed", deadline=timezone.localdate() + timedelta(days=20),

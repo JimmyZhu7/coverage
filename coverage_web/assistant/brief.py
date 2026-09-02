@@ -381,8 +381,12 @@ def _summarize_situation(events: list[dict], today: _date | None = None) -> str:
             if e.get("deadline_source") == _REPORTED:
                 line += _REPORTED_NOTE
             lines.append(line)
-        elif kind == "role_closed":
-            lines.append(f"- {title} at {firm}: this posting just closed")
+        # A third branch here printed "this posting just closed" until
+        # 2026-09-02. It is gone because `assistant.situation` no longer
+        # emits `role_closed` at all — see that module's docstring for the
+        # four measurements — so the branch was unreachable, not merely
+        # unwanted. The brief leads with one thing; a shut posting was never
+        # going to be the thing to do today.
         elif kind == "new_role_at_known_firm":
             # HOW NEW, computed here for the same reason `_dated` computes a
             # deadline's distance here: the model never does date arithmetic.
