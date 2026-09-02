@@ -748,6 +748,35 @@ copy exactly once, and this is the once.
     {% endif %}
 
     {% comment %}
+    Gaps. Three things a quiet Today page measured and never said: a tiered
+    firm with nobody on it, advocates the queue has gone silent about, and a
+    role for this student closing soon that is not saved. See `crm.today
+    ._gaps` for the audit numbers behind each one.
+
+    IT MARKS, IT DOES NOT FILTER. Every row is a ledger line naming its own
+    source, and none of them changes what the queue shows or hides.
+
+    NO NEW CONTROL SHAPE. This is the `prop-undo ap-strip ap-strip-quiet`
+    primitive the autopilot strips above already use, unchanged.
+
+    `gaps` is [] on every day the page has work on it (the view gates the
+    queries on the same `would_be_quiet` test the quiet header uses), so this
+    block renders nothing at all on a busy day.
+    {% endcomment %}
+    {% if gaps %}
+      {% for gap in gaps %}
+        <div class="prop-undo ap-strip ap-strip-quiet" role="status">
+          <span class="prop-undo-said">
+            {{ gap.text }}
+            <span class="prop-undo-note">
+              {% if gap.role %}{{ gap.role.firm }}: <a href="{{ gap.role.url }}" target="_blank" rel="noopener">{{ gap.role.title }}</a>, closes {{ gap.role.when }}. {% endif %}Source: {{ gap.source }}.
+            </span>
+          </span>
+        </div>
+      {% endfor %}
+    {% endif %}
+
+    {% comment %}
     Day-one seeds. NOT RANKED, and it does not need to be: `_cockpit_context`
     already conditions this lane on the ABSENCE of real work rather than
     merely ordering it behind — no lane, no debrief, no chat prep, nothing

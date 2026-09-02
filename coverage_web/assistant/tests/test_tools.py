@@ -17,7 +17,7 @@ file quietly holding the escape hatch would make the check a formality.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest import mock
 from zoneinfo import ZoneInfo
 
@@ -190,6 +190,55 @@ def test_get_today_queue_labels_its_idle_count_as_business_days(user, contact, f
     row = result["queue"][0]
     assert "days_idle" not in row
     assert "business_days_idle" in row
+
+
+def test_get_today_queue_says_which_lane_each_row_is_in(user, firm):
+    """Every row says WHERE the Today page puts it, and a paced row names the
+    firm holding it back.
+
+    The payload used to carry neither, so the model could not tell a card in
+    the day's plan from one the cap or a firm's own daily budget is holding,
+    and could not answer "why is X not on today's plan" at all. Six contacts
+    at one bank is `FIRM_DAILY_CONTACT_CAP`'s own fixture shape: two get a
+    plan slot, the other four pace out under "Up next" and say whose budget
+    is spent.
+
+    `lane` is read off `crm.today.plan_split`, not derived here — the tool
+    and the page cannot disagree about a card the student can see.
+    """
+    from crm.today import plan_split  # noqa: F401 — named so the seam is greppable
+
+    UserFirm(user=user, firm=firm, tier=1).save()
+    for i in range(6):
+        Contact(user=user, firm=firm, name=f"Banker {i}", region="hk").save()
+
+    result, is_error = _call(user, "get_today_queue")
+
+    assert not is_error
+    rows = result["queue"]
+    assert len(rows) == 6
+    assert all(r["lane"] in {"today", "up_next", "still_open", "park"} for r in rows)
+    # Nobody here is stale-critical or parkable, so the split is exactly the
+    # two lanes the plan and the cap produce.
+    assert {r["lane"] for r in rows} == {"today", "up_next"}
+
+    paced = [r for r in rows if r["paced_by"]]
+    assert len(paced) == 4
+    assert all(r["paced_by"] == "North Bank (HK)" for r in paced)
+    assert all(r["lane"] == "up_next" for r in paced)
+    # A row the pace is not holding says so with a null, never a blank string.
+    assert all(r["paced_by"] is None for r in rows if r["lane"] == "today")
+
+
+def test_get_today_queue_tool_description_names_the_lane_and_pacing_fields():
+    """A field the model is never told about is a field it will not use. Both
+    names appear in the description the API actually receives."""
+    schema = next(s for s in tools.TOOL_SCHEMAS if s["name"] == "get_today_queue")
+
+    assert "lane" in schema["description"]
+    assert "paced_by" in schema["description"]
+    for value in ("today", "up_next", "still_open"):
+        assert value in schema["description"]
 
 
 def test_search_contacts_limit_is_capped_by_code(user, firm):
@@ -584,6 +633,43 @@ def test_get_calendar_returns_upcoming_events_only(user, contact):
     assert not is_error
     assert [e["title"] for e in result["events"]] == ["Chat with Jane"]
     assert result["events"][0]["with_contact"] == "Jane Banker"
+
+
+def test_get_calendar_leaves_out_a_cancelled_chat_unless_asked(user, contact):
+    """A chat that was called off is not on your afternoon.
+
+    `CalendarEvent.cancelled_at` is set when a METHOD:CANCEL invite retires a
+    captured chat, and the row deliberately survives (the model's own comment
+    argues why: deleting it makes a ghost the next mailbox sync re-creates).
+    Every surface that says what is HAPPENING drops it — `crm.today._schedule`
+    and so the day bar and the chat-prep card — and this tool did not. It
+    returned the row with `kind: "chat"` and a "Cancelled: " prefix inside the
+    title as the only tell, which is a formatting convention and not a field.
+    """
+    now = timezone.now()
+    live = CalendarEvent(
+        user=user, title="Chat with Jane", starts_at=now + timedelta(days=2),
+        kind="chat", contact=contact,
+    )
+    live.save()
+    dead = CalendarEvent(
+        user=user, title="Cancelled: Chat with Bob",
+        starts_at=now + timedelta(days=3), kind="chat", cancelled_at=now,
+    )
+    dead.save()
+
+    default, is_error = _call(user, "get_calendar", {})
+    assert not is_error
+    assert [e["title"] for e in default["events"]] == ["Chat with Jane"]
+    assert default["events"][0]["cancelled"] is False
+    assert default["includes_cancelled"] is False
+
+    asked, is_error = _call(user, "get_calendar", {"include_cancelled": True})
+    assert not is_error
+    assert asked["includes_cancelled"] is True
+    by_title = {e["title"]: e for e in asked["events"]}
+    assert by_title["Cancelled: Chat with Bob"]["cancelled"] is True
+    assert by_title["Chat with Jane"]["cancelled"] is False
 
 
 def test_get_my_pipeline_groups_by_status(user, firm, opportunity):
@@ -1106,6 +1192,92 @@ def test_add_contact_refuses_to_make_a_second_copy_of_someone(user, contact):
     assert result["already_exists"] is True
     assert result["contact_id"] == contact.id
     assert "already in the student's network" in result["instruction"]
+    assert Contact.objects.for_user(user).count() == 1
+
+
+def test_add_contact_resolves_the_firm_so_the_row_lands_on_the_board(user):
+    """Every row this tool wrote used to land OFF the coverage board.
+
+    `firm_text` was stored verbatim and `firm_id` left null, so the contact
+    never appeared on their firm's page, never counted toward that firm's
+    coverage, and — because `Contact.resolve_region` reads the FIRM's markets
+    — carried a blank region no matter how plainly the student had named the
+    bank. The match rule is `accounts.services.match_firm_text`, the CSV
+    importer's own, which forgives "&"/"and" and a trailing legal suffix.
+    The region is not set here at all: it falls out of `Contact.save()`
+    because the firm now answers.
+    """
+    Firm.objects.create(slug="gs", name="Goldman Sachs", regions=["us"])
+
+    result, is_error = _call(user, "add_contact", {
+        "name": "Marcus Lee", "firm_text": "Goldman Sachs", "role": "Associate",
+    })
+
+    assert not is_error
+    assert result["firm_on_board"] is True
+    assert result["firm"] == "Goldman Sachs"
+    assert result["region"] == "us"
+    contact = Contact.objects.for_user(user).get(name="Marcus Lee")
+    assert contact.firm.slug == "gs"
+    assert contact.firm_text == "Goldman Sachs"
+    assert (contact.region, contact.region_source) == ("us", "firm")
+
+
+def test_add_contact_leaves_an_unknown_employer_as_typed(user):
+    """A firm the directory does not carry is a real answer, not a failure.
+    The text is stored exactly as before and nothing is invented to make it
+    match (P1)."""
+    result, is_error = _call(user, "add_contact", {
+        "name": "Dana Wu", "firm_text": "A Very Small Advisory LLP",
+    })
+
+    assert not is_error
+    assert result["firm_on_board"] is False
+    contact = Contact.objects.for_user(user).get(name="Dana Wu")
+    assert contact.firm_id is None
+    assert contact.firm_text == "A Very Small Advisory LLP"
+    assert contact.region == ""
+
+
+def test_add_contact_reports_an_archived_match_instead_of_duplicating_it(user, firm):
+    """REWRITTEN 2026-09-02. This used to pin `name__iexact` over
+    `archived=False`, which meant a contact the student had archived came
+    back as a SECOND card with the whole history stranded on the first — a
+    false split with no clean undo. The matcher is now `capture.discovery
+    ._match_existing`, the single one `consider_finding`, `accept`, `restore`
+    and mailfacts already share: it reads archived rows too, recognises the
+    corporate `Last, First` spelling and a dropped middle initial, and
+    abstains rather than picking when two rows answer to one name.
+    """
+    gone = Contact(user=user, firm=firm, name="Wei Zhang", archived=True)
+    gone.save()
+
+    result, is_error = _call(user, "add_contact", {
+        "name": "Zhang, Wei", "firm_text": "North Bank",
+    })
+
+    assert not is_error
+    assert result["added"] is False
+    assert result["already_exists"] is True
+    assert result["archived"] is True
+    assert result["contact_id"] == gone.id
+    assert "archived" in result["instruction"]
+    assert Contact.objects.for_user(user).count() == 1
+
+
+def test_add_contact_matches_on_the_email_even_under_a_different_spelling(user, firm):
+    """The strong key is the address. Somebody already tracked under a
+    nickname is not a new person because the student said their full name."""
+    existing = Contact(user=user, firm=firm, name="Kit Fung",
+                       email="kit.fung@north.example")
+    existing.save()
+
+    result, _ = _call(user, "add_contact", {
+        "name": "Kit Wing Fung", "email": "kit.fung@north.example",
+    })
+
+    assert result["added"] is False
+    assert result["contact_id"] == existing.id
     assert Contact.objects.for_user(user).count() == 1
 
 
@@ -1908,3 +2080,116 @@ def test_the_get_contact_description_names_both_fields():
     spec = next(t for t in tools.TOOL_SCHEMAS if t["name"] == "get_contact")
     assert "my_opener" in spec["description"]
     assert "recent_subjects" in spec["description"]
+
+
+def _reply_thread(user, contact, pairs, *, gap_days=2):
+    """`pairs` send/reply cycles on one contact, each reply `gap_days` after
+    its send and each cycle a week apart."""
+    start = timezone.now() - timedelta(days=90)
+    existing = Touch.objects.for_user(user).filter(contact=contact).count()
+    for i in range(pairs):
+        sent = start + timedelta(days=7 * (existing + i))
+        Touch(user=user, contact=contact, kind="outreach", channel="email",
+              ts=sent).save()
+        Touch(user=user, contact=contact, kind="reply_received", channel="email",
+              ts=sent + timedelta(days=gap_days)).save()
+
+
+def test_get_contact_reports_a_reply_median_only_once_there_are_three_pairs(
+    user, contact
+):
+    """Two numbers have a midpoint, not a habit.
+
+    `median_reply_days` is the one figure here that is a claim about a PERSON
+    rather than a record of an event, and "she usually replies in two days"
+    said off a single exchange is exactly the confident-and-thin sentence P1
+    exists to stop. `reply_pairs` goes out at every sample size so the
+    absence is explicable rather than silent.
+
+    Measured on the founder's live account 2026-09-02: 16 of 265 contacts
+    have at least one reply pair (18 pairs, median 0.71 days) and none has
+    three, so this field is dark on his data today. That is the intended
+    failure direction.
+    """
+    _reply_thread(user, contact, 2)
+    result, is_error = _call(user, "get_contact", {"contact_id": contact.id})
+    assert not is_error
+    assert result["reply_pairs"] == 2
+    assert "median_reply_days" not in result
+
+    _reply_thread(user, contact, 1)
+    result, _ = _call(user, "get_contact", {"contact_id": contact.id})
+    assert result["reply_pairs"] == 3
+    assert result["median_reply_days"] == 2.0
+
+
+def test_get_contact_does_not_count_an_unanswered_send_as_a_reply(user, contact):
+    """A send with no reply after it is not a pair, and a reply with no send
+    before it is not a reply to anything the student did."""
+    now = timezone.now()
+    Touch(user=user, contact=contact, kind="outreach", channel="email",
+          ts=now - timedelta(days=9)).save()
+    Touch(user=user, contact=contact, kind="outreach", channel="email",
+          ts=now - timedelta(days=2)).save()
+
+    result, _ = _call(user, "get_contact", {"contact_id": contact.id})
+
+    assert result["reply_pairs"] == 0
+    assert "median_reply_days" not in result
+
+
+@pytest.mark.outreach_blackout
+def test_date_facts_reports_the_outreach_blackout_in_crm_todays_own_words(user):
+    """The advisor and the queue must not disagree about December.
+
+    Marked `outreach_blackout` so the real calendar rule is in play: the
+    suite's autouse default answers "ordinary weekday" for every test that is
+    not about this feature (see `coverage_web/conftest.py`), and this one is.
+
+    The holiday blackout shipped at the view level (`crm.today
+    .outreach_blackout`, Dec 20 to Jan 2 plus every weekend), so the Today
+    page holds every cold card on those days and says why, while this tool
+    would answer "Christmas Eve is 113 days away" with nothing to suggest the
+    product itself would not send then.
+
+    The second assertion is the load-bearing one: the string comes from
+    `crm.today.outreach_blackout`, not from a literal in `assistant/tools.py`
+    (P5). Patching that function changes this tool's answer.
+    """
+    from crm import today as crm_today
+
+    result, is_error = _call(user, "date_facts", {"query": "2026-12-24"})
+    assert not is_error
+    assert result["outreach_blackout"] == crm_today.outreach_blackout(
+        date(2026, 12, 24)
+    ) == "holiday"
+    assert result["outreach_resumes"] == "Jan 4"
+
+    with mock.patch.object(tools, "outreach_blackout", return_value="whenever"):
+        patched, _ = _call(user, "date_facts", {"query": "2026-12-24"})
+    assert patched["outreach_blackout"] == "whenever"
+
+
+@pytest.mark.outreach_blackout
+def test_date_facts_says_nothing_about_a_blackout_on_an_ordinary_weekday(user):
+    """None, not an empty string, and no resume day at all — an ordinary
+    Thursday answers exactly what it answered before this existed (P3)."""
+    result, _ = _call(user, "date_facts", {"query": "2026-09-03"})
+
+    assert result["outreach_blackout"] is None
+    assert "outreach_resumes" not in result
+
+
+@pytest.mark.outreach_blackout
+def test_date_facts_answers_the_blackout_window_itself(user):
+    """"When should I stop emailing over Christmas" is a real question, and
+    both edges are read off `crm.today`'s own constants."""
+    from crm.today import HOLIDAY_BLACKOUT_END, HOLIDAY_BLACKOUT_START
+
+    result, is_error = _call(user, "date_facts", {"query": "holiday_blackout"})
+
+    assert not is_error
+    starts, ends = date.fromisoformat(result["starts"]), date.fromisoformat(result["ends"])
+    assert (starts.month, starts.day) == HOLIDAY_BLACKOUT_START
+    assert (ends.month, ends.day) == HOLIDAY_BLACKOUT_END
+    assert result["outreach_resumes"]

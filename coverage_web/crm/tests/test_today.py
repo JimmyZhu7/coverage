@@ -3256,3 +3256,165 @@ def test_the_reschedule_control_asks_for_the_time_on_the_card(client):
     assert "Reschedule" in body
     assert 'type="datetime-local"' in body
     assert 'name="scheduled_at"' in body
+
+
+# ---------------------------------------------------------------------------
+# The Gaps strip (`crm.today._gaps`, WS-AI-03).
+#
+# THE MEASURED DEFECT. On the night of 2026-09-01 the founder's Today page
+# recommended chasing eight people he had parked hours earlier, while three
+# true and actionable facts sat one query away (`audit-ai-mechanisms.md §3`):
+# 25 of his 54 tiered firms have zero contacts, two of them tier 1; both of
+# his two advocates are parked, so the engine's `advocate_touch_min_weeks`
+# branch cannot fire on either; and whether a role clearing his track,
+# region, level and eligibility was closing soon and unsaved had never been
+# checked at all.
+#
+# It MARKS, it does not filter (P4): every row is a ledger line naming its own
+# source, and none of them changes what the queue shows.
+# ---------------------------------------------------------------------------
+def _quiet_user(email):
+    """An account with a real network and nothing due: six contacts just
+    written to, so the follow-up window is days out. This is the founder's
+    own shape and the one `would_be_quiet` is about.
+
+    Six rather than one, deliberately: below `SEED_NETWORK_FLOOR` the page
+    shows day-one starter seeds instead, and a page with seeds on it is not
+    quiet. See `_starter_seeds`."""
+    user = _user(email, weekly_touch_goal=14,
+                 cadence_params={"followup_after_business_days": 7})
+    for i in range(6):
+        c = _contact(user=user, name=f"Just Written To {i}")
+        _touch(user, c, "outreach", days_ago=0)
+    return user
+
+
+def test_the_gaps_strip_renders_at_most_three_rows():
+    from crm.today import GAPS_MAX
+
+    user = _quiet_user("gaps-three@example.com")
+    # Five zero-contact tiered firms and two parked advocates: more sources
+    # than the strip has slots.
+    for i in range(5):
+        firm = Firm.objects.create(slug=f"gap-firm-{i}", name=f"Gap Bank {i}",
+                                   regions=["us"])
+        UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    for i in range(2):
+        _contact(user=user, name=f"Advocate {i}", warmth="advocate",
+                 thread_state="parked")
+
+    ctx = _cockpit_context(user)
+
+    assert not ctx["lanes"], "precondition: a quiet page"
+    assert 0 < len(ctx["gaps"]) <= GAPS_MAX == 3
+    kinds = [row["kind"] for row in ctx["gaps"]]
+    assert "no_contacts" in kinds and "parked_advocates" in kinds
+    # Every row names where it was measured from. A ledger line with no
+    # source is the kind of confident, unattributable number P1 forbids.
+    assert all(row["source"] for row in ctx["gaps"])
+
+    # And the template actually draws them, with the source attached.
+    body = render_to_string("crm/_cockpit.html", ctx)
+    for row in ctx["gaps"]:
+        assert row["text"] in body
+        assert f"Source: {row['source']}." in body
+
+
+def test_the_gaps_strip_renders_nothing_when_all_three_sources_are_empty():
+    """P3: a student with no tiered firms, no advocates and no tracked roles
+    gets exactly today's behaviour."""
+    user = _quiet_user("gaps-none@example.com")
+
+    ctx = _cockpit_context(user)
+
+    assert not ctx["lanes"], "precondition: a quiet page"
+    assert ctx["gaps"] == []
+    assert "Source:" not in render_to_string("crm/_cockpit.html", ctx)
+
+
+def test_the_gaps_strip_names_a_parked_advocate_pair_the_way_the_audit_read_it():
+    """The founder's own row: two advocates, both parked. Parking writes
+    `thread_state` and never `warmth`, so an advocate stays an advocate while
+    the engine's keep-warm branch can no longer fire on them."""
+    user = _quiet_user("gaps-advocates@example.com")
+    for i in range(2):
+        _contact(user=user, name=f"Advocate {i}", warmth="advocate",
+                 thread_state="parked")
+
+    row = next(r for r in _cockpit_context(user)["gaps"]
+               if r["kind"] == "parked_advocates")
+
+    assert row["text"].startswith("2 advocates, both parked.")
+
+
+def test_the_gaps_strip_marks_a_reported_deadline_as_reported():
+    """96% of dated open campus rows are Coverage's own reading of a
+    posting's prose (`directory.views.deadline_provenance`). A bare date on
+    this strip would be the page vouching for our regex as the firm's
+    decision (P1)."""
+    from directory.models import Opportunity
+
+    user = _quiet_user("gaps-reported@example.com")
+    user.tracks, user.regions, user.class_year = ["ib"], ["us"], 2028
+    user.target_cycles = ["2028 Summer Internship"]
+    user.save()
+    firm = Firm.objects.create(slug="gap-reported", name="Reported Bank",
+                               regions=["us"])
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    Opportunity.objects.create(
+        firm=firm, title="2028 Investment Banking Summer Analyst",
+        bucket="internship", region="us", status="open",
+        deadline=timezone.localdate() + timedelta(days=3),
+        # Below `directory.views._CONFIRMED_AT`: read out of the posting's
+        # prose, not a field the board published.
+        confidence=0.6,
+        url="https://reported.example/jobs/1",
+    )
+
+    rows = [r for r in _cockpit_context(user)["gaps"] if r.get("role")]
+
+    assert rows, "precondition: a dated live role at a zero-contact tiered firm"
+    assert "(reported)" in rows[0]["role"]["when"]
+
+
+def test_gaps_strip_costs_nothing_on_a_busy_day(monkeypatch):
+    """The whole feature sits behind the quiet branch, the same cost
+    discipline `_starter_seeds` and `_next_wave` already follow.
+
+    `audit-perf-tests.md §1` measures `_cockpit_context` at 44 queries and 96
+    to 149ms; a student with work on the page must pay exactly zero of the
+    strip's queries. Asserted two ways, because either alone can pass by
+    accident: `_gaps` is never CALLED, and the query count with it stubbed out
+    is identical to the count with it live (within 0).
+    """
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from crm import today as today_module
+
+    user = _user("gaps-busy@example.com", weekly_touch_goal=14)
+    for i in range(6):
+        c = _contact(user=user, name=f"Due {i:02d}")
+        _touch(user, c, "outreach", days_ago=20)
+    # A zero-contact tiered firm and a parked advocate: both sources are
+    # LIVE, so the only reason the strip stays empty is the gate.
+    firm = Firm.objects.create(slug="busy-gap", name="Busy Gap Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    _contact(user=user, name="Parked Advocate", warmth="advocate",
+             thread_state="parked")
+
+    with CaptureQueriesContext(connection) as live:
+        ctx = _cockpit_context(user)
+    assert ctx["lanes"], "precondition: this queue has planned work in it"
+    assert ctx["gaps"] == []
+
+    calls = []
+    monkeypatch.setattr(
+        today_module, "_gaps",
+        lambda *a, **k: (calls.append(1), [])[1],
+    )
+    with CaptureQueriesContext(connection) as stubbed:
+        _cockpit_context(user)
+
+    assert calls == [], "_gaps must not even be called on a busy day"
+    assert len(live.captured_queries) == len(stubbed.captured_queries)

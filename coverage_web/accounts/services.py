@@ -298,6 +298,29 @@ def _firm_lookup() -> dict[str, Firm]:
     return lookup
 
 
+def match_firm_text(text: str, firms: dict[str, Firm] | None = None) -> Firm | None:
+    """The directory Firm one free-text employer string names, or None.
+
+    THE MATCH RULE, ONCE. `parse_contacts_csv` spelled it inline — the
+    forgiving `normalize_firm_name` key first, the strict `_norm` key as the
+    fallback — and `assistant.tools.add_contact` spelled nothing at all, so
+    every contact the advisor wrote landed off the coverage board with a
+    blank region no matter how plainly the student had named the bank. Two
+    callers, one rule, and a third door (the advisor) that used to have none.
+
+    `firms` is `_firm_lookup()`'s map, passed in by any caller looping over
+    many rows so the directory is read once rather than per row; built here
+    for the single-row callers, where one extra query beats making every
+    caller remember to build it.
+    """
+    text = (text or "").strip()
+    if not text:
+        return None
+    if firms is None:
+        firms = _firm_lookup()
+    return firms.get(normalize_firm_name(text)) or firms.get(_norm(text))
+
+
 def _guess_firm(key: str, firms: dict[str, Firm]) -> Firm | None:
     """A cheap, deterministic best-effort suggestion for a firm string that
     didn't match anything exactly — used only to prefill the "Link to..."
@@ -409,10 +432,7 @@ def parse_contacts_csv(user, text: str) -> ImportResult:
         if not name:
             name = email
 
-        matched_firm = (
-            firms.get(normalize_firm_name(firm_raw)) or firms.get(_norm(firm_raw))
-            if firm_raw else None
-        )
+        matched_firm = match_firm_text(firm_raw, firms)
 
         email_key = email.strip().lower()
         firm_token = _norm(matched_firm.name) if matched_firm else _norm(firm_raw)

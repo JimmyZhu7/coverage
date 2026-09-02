@@ -384,8 +384,44 @@ def _summarize_situation(events: list[dict], today: _date | None = None) -> str:
         elif kind == "role_closed":
             lines.append(f"- {title} at {firm}: this posting just closed")
         elif kind == "new_role_at_known_firm":
-            lines.append(f"- {firm} just opened a new role: {title}")
+            # HOW NEW, computed here for the same reason `_dated` computes a
+            # deadline's distance here: the model never does date arithmetic.
+            # "Just opened" was the only thing this line could say, and the
+            # founder's own three rows on 2026-09-01 were 4.4 to 5.4 days old
+            # when he read them (`audit-opportunities.md §C2`) — five days is
+            # still worth acting on and is not "just". A row with no
+            # `first_seen` prints no age at all rather than a guessed one.
+            age = _age_phrase(e.get("first_seen"), today)
+            line = f"- {firm} opened a new role{age}: {title}"
+            # And how many it stands for: `assistant.situation` shows one card
+            # per firm, so a firm that opened four reads as one without this.
+            folded = e.get("folded_count") or 0
+            if folded > 0:
+                line += f" (and {folded} more at the same firm)"
+            lines.append(line)
     return "\n".join(lines)
+
+
+def _age_phrase(first_seen, today: _date) -> str:
+    """" 5 days ago" for a `first_seen`, "" for anything that was never a
+    date. Leading space included so the caller concatenates without having
+    to decide whether there is anything to separate.
+
+    `first_seen` is a stored UTC datetime and `today` is the account's own
+    local date, so the value is moved onto the account's clock before the
+    subtraction — otherwise a role scraped at 17:00 PDT reads a day older
+    than it is to every US student."""
+    if isinstance(first_seen, _datetime) and timezone.is_aware(first_seen):
+        first_seen = timezone.localtime(first_seen)
+    day = _as_date(first_seen)
+    if day is None:
+        return ""
+    days = (today - day).days
+    if days <= 0:
+        return " today"
+    if days == 1:
+        return " yesterday"
+    return f" {days} days ago"
 
 
 def _live_contact_ids(actions: list[dict]) -> set[int]:
@@ -593,10 +629,31 @@ def is_pending(
     return is_configured() and get_cached(user, actions, silenced_ids=silenced_ids) is None
 
 
+def _summarize_gaps(gaps: list[dict] | None) -> str:
+    """The Gaps strip as prompt lines, source and all.
+
+    Each row already carries its own sentence and the source it was measured
+    from (`crm.today._gaps`), and both go into the prompt: a brief that leads
+    with "two of your tiered firms have nobody on them" has to be able to say
+    where that came from, and the model cannot cite a source it was not
+    given. Nothing is rewritten here — the words the page shows are the words
+    the model reads, so the sentence and the strip under it agree.
+    """
+    lines = []
+    for gap in (gaps or [])[:MAX_SITUATION_SUMMARIZED]:
+        text = _fact(gap.get("text"), 240)
+        if not text:
+            continue
+        source = _fact(gap.get("source"), 120)
+        lines.append(f"- {text}" + (f" (source: {source})" if source else ""))
+    return "\n".join(lines)
+
+
 def get_or_build(
     user,
     actions: list[dict],
     situation: list[dict] | None = None,
+    gaps: list[dict] | None = None,
     *,
     silenced_ids: set[int] | None = None,
     client=None,
@@ -640,7 +697,15 @@ def get_or_build(
 
     queue_summary = _summarize_actions(actions, today)
     situation_summary = _summarize_situation(situation or [], today)
-    if not queue_summary and not situation_summary:
+    # ONLY ON AN EMPTY-QUEUE DAY, which is also the only day the page itself
+    # draws the strip (`crm.today._cockpit_context` gates it on the same quiet
+    # branch). A brief that led with "25 of your tiered firms have nobody on
+    # them" on a morning with three people to email would be answering a
+    # question nobody asked, over work the student can do today. The test is
+    # made here rather than left to the caller so the sentence and the page
+    # cannot disagree about which day this is.
+    gaps_summary = _summarize_gaps(gaps) if not queue_summary else ""
+    if not queue_summary and not situation_summary and not gaps_summary:
         # Quiet day, not a dark one: the feature is live (the is_configured
         # check above already passed), there is just nothing to summarize.
         # Still cached, still once per day, still no model call — see
@@ -675,6 +740,13 @@ def get_or_build(
             "\n\nThings that changed recently on roles this student tracks "
             "or firms they know (a moved deadline or a closed posting can "
             "outrank anything in the queue above):\n" + situation_summary
+        )
+    if gaps_summary:
+        prompt += (
+            "\n\nGaps. Nothing is due today, so these are the holes the page "
+            "measured. Each line names where it came from; if you lead with "
+            "one, say the number and say nothing the line does not:\n"
+            + gaps_summary
         )
     # The rules are restated AFTER the data, not only before it. Everything
     # between the two markers was written by someone else — a recruiter, a

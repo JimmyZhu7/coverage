@@ -120,6 +120,31 @@ CYCLE_CHOICES: list[tuple[str, str]] = cycle_choices()
 # Kept for backwards compatibility with any view still passing suggestions.
 CYCLE_SUGGESTIONS: list[str] = [c for c, _ in CYCLE_CHOICES if c]
 
+
+def _stale_cycle_label(value: str) -> str:
+    """How a stored cycle the dropdown no longer lists is labelled.
+
+    TWO DIFFERENT FACTS, and until 2026-09-02 both wore one word. A cycle
+    that has rolled off the window ("2026 Summer Internship", once the
+    dropdown starts at 2027) is no longer OFFERED and still works: the
+    student's picks and level gate score against it exactly as before,
+    because `parse_target_cycle` reads the year straight out of the words.
+    A cycle that does not parse at all does nothing — that function returns
+    None rather than guessing, so the 15-point cycle bonus and the level gate
+    are simply off — and the demo account sat in that state for weeks under
+    the value `sa2028_ib` with nothing on screen saying so. Two states, one
+    label, and the silent one was the label's own worst case.
+
+    So the label says which. Migration 0017 repairs the stored values; this
+    is what the page says if one ever arrives again.
+    """
+    from directory.recommend import parse_target_cycle
+
+    if parse_target_cycle(value) is None:
+        return f"{value} (not recognised, so it does not affect your matches)"
+    return f"{value} (no longer offered)"
+
+
 # Avatar limits. 8 MB is comfortably above any phone photo while still bounding
 # what reaches the decoder; 512px is 8x the largest place the avatar renders
 # (64px on this page, 22px in the nav), which keeps it crisp on a 2x display
@@ -331,7 +356,7 @@ class ProfileForm(forms.Form):
         known_values = {value for value, _ in choices}
         stale = [v for v in current if v not in known_values]
         if stale:
-            choices = choices + [(v, f"{v} (no longer offered)") for v in stale]
+            choices = choices + [(v, _stale_cycle_label(v)) for v in stale]
         self.fields["target_cycles"].choices = choices
         # The same rule for languages, for the same reason: a stored value
         # the vocabulary no longer lists must render checked, not vanish from

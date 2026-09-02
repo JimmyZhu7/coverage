@@ -438,6 +438,18 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
     # one of them opened; a student who wants the full list already has it
     # on the Opportunities feed for that firm. Kept to the most recent
     # posting per firm (`rows` is already newest-first).
+    #
+    # AND THE EVENT SAYS HOW MANY IT STANDS FOR. `folded_count` is the number
+    # of OTHER fresh roles at that firm this one card is standing in for — 0
+    # when the firm posted exactly one. The one-per-firm rule above is right
+    # (three CICC reqs are one piece of news), but silently showing one of
+    # three is the invisible filter P4 forbids: "CICC just opened a role" and
+    # "CICC just opened three" are different facts about how hard that firm is
+    # moving, and the second is one `Counter` over a list already in memory.
+    # It costs no query.
+    from collections import Counter
+
+    per_firm = Counter(o.firm_id for o in rows)
     seen_firms: set[int] = set()
     events = []
     for o in rows:
@@ -451,7 +463,13 @@ def _new_role_events(user, since, limit: int) -> list[dict]:
             "firm": o.firm.name,
             "url": o.url,
             "location": _display_location(o.title, o.location),
+            # HOW NEW, not just "new". Measured on the founder's three
+            # situation rows, 2026-09-01: they surfaced 4.4 to 5.4 days after
+            # `first_seen` (`audit-opportunities.md §C2`), so "just opened"
+            # was doing work the date does not support. Carried as the raw
+            # value; every reader formats it in its own units.
             "first_seen": o.first_seen,
+            "folded_count": per_firm[o.firm_id] - 1,
         })
         if len(events) >= limit:
             break
