@@ -151,6 +151,11 @@ DBConnection = Any
 # `capture.inbound` can re-export the one spelling the ratchet knows.
 BULK_RECEIVED_KIND = "bulk_received"
 
+# Kind for "this person pushed for me" — see its TOUCH_TRANSITIONS entry
+# below. Named here for the same reason as BULK_RECEIVED_KIND: `crm.debrief`
+# is the only writer and must not spell the literal a second time.
+REFERRAL_KIND = "referral"
+
 TOUCH_TRANSITIONS: dict[str, tuple[str | None, str | None]] = {
     # touch kind -> (new warmth if "higher", new thread_state)
     "outreach": (None, None),
@@ -179,6 +184,31 @@ TOUCH_TRANSITIONS: dict[str, tuple[str | None, str | None]] = {
     # `capture.inbound` for the deterministic header test that decides
     # which inbound messages land here.
     BULK_RECEIVED_KIND: (None, None),
+    # THE ADVOCATE AS AN EVENT (2026-09-02). Before this, `advocate` was a
+    # rung on the warmth ladder reachable only by a hand `set_state`: the
+    # product recorded that somebody HAD BEEN CALLED an advocate and never
+    # recorded that somebody PUSHED. The founder's board is the argument —
+    # two advocates, both peers at the free-text firm "usc", both parked,
+    # zero at any of his 54 tiered firms, while three chat debriefs answered
+    # "would advocate: yes" and none was ever promoted.
+    #
+    # The metric this exists to make countable is the advocate count itself:
+    # "how many people actually pushed for me" holds at 2 to 20 whether 80 or
+    # 2,200 emails went out (`research-nontarget-access.md §3` and Verdict,
+    # Grade B), and the mechanism under it is Grade A — recruiting MDs ask
+    # analysts who should get an interview. A number you cannot count is not
+    # a metric, and a hand override leaves nothing to count from.
+    #
+    # It ratchets warmth to `advocate` and moves thread_state to `advocate`,
+    # which is this module's one terminal state. That is the same move
+    # `set_state` was making by hand; the difference is that it now arrives
+    # as a dated, ordered row on the ledger, so the event-order guard applies
+    # to it like everything else — a backdated referral cannot overturn a
+    # later park, and a promotion cannot silently outrank a correction made
+    # after it. `crm.debrief` writes it, and only ever when the student takes
+    # the offer: a debrief answering "would advocate: yes" is an OPINION and
+    # never writes this row by itself.
+    REFERRAL_KIND: ("advocate", "advocate"),
 }
 WARMTH_RANK: dict[str, int] = {"cold": 0, "replied": 1, "chatted": 2, "advocate": 3}
 CHANNELS: tuple[str, ...] = ("email", "linkedin", "coffee_chat", "call", "event", "other")

@@ -450,6 +450,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     letter-spacing: 0.04em; }
   @keyframes daybar-pop { from { transform: translate(-50%, -50%) scale(0); opacity: 0; }
     to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+  /* Send-window hint. A quiet line, not a band on the track: it names a fact
+     about somebody else's clock, and drawing it as a region would claim a
+     precision the source (one S&T practitioner rule) does not have. No
+     animation of any kind - nothing here changes in response to the reader
+     (P8, and audit-ui.md 15's "a page load is not a state change"). */
+  .daybar-hint { margin: 0 0 var(--s3); display: flex;
+    flex-wrap: wrap; gap: var(--s2); font-size: var(--fs-nano);
+    color: var(--ink-3); }
+  .daybar-hint .dbh b { color: var(--ink-2); font-weight: 600; }
 
   .rail-card { background: var(--surface); border: 1px solid var(--line);
     border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }

@@ -32,6 +32,61 @@ the app refuses them:
 Entry points: `Profile`, `Candidate`, `score_candidate`, `recommend`. None of
 them touch a request, a session, or the ORM, so the whole ranking is testable
 with plain objects.
+
+---------------------------------------------------------------------------
+WHAT THE WEIGHTS ARE ACTUALLY WORTH — first measurement, 2026-09-02
+---------------------------------------------------------------------------
+
+Until this section every one of the sixteen weights below was justified by
+argument alone, four of them by arithmetic about the other weights and one
+(`MAX_PER_FIRM`) by a single browser observation
+(`audit-personalization-opportunities.md §Q8`). P6 requires each to say what
+would change it. `manage.py calibrate_recommender --email <account>` is that
+question made runnable: it scores every role the student saved, applied to or
+dismissed, prints the per-axis contribution and the rank the role would have
+held on the whole open board, and ends with a per-axis verdict.
+
+THE SAMPLE. The founder's account, n=18 `UserOpportunity` rows: 4 applied,
+1 saved, 13 dismissed, scored against 2,737 open campus roles. That is the
+entire labelled dataset this product has. Read everything below against it.
+
+MEASURED, per axis (acted-on mean vs dismissed mean):
+
+  track_fit    +16.4 vs  +4.0   (n=5 vs 13)  the only axis that separates
+  tier_fit      +8.4 vs  +7.2   (n=5 vs 13)  no separation
+  region_fit    +1.6 vs  +3.7   (n=5 vs 13)  points the WRONG way
+  network_fit   +1.4 vs  +3.2   (n=5 vs 13)  points the WRONG way
+  class_fit    constant at +30 across all 18 rows; unmeasurable here
+
+WHAT THAT DOES AND DOES NOT LICENCE.
+
+- `W_TRACK_*` is the one family with any measured support: the roles he acted
+  on scored four times higher on track than the ones he threw away, and it is
+  the only axis whose sign matches its intent. Five positives is not a
+  calibration, but it is evidence, and it is more than any other axis has.
+- `W_CLASS_*` has NO measured justification from this sample and cannot get
+  one from it: every row scored +30, because his class year is stated and
+  every candidate he looked at was silent about theirs. The axis is
+  constant, so it can be neither confirmed nor refuted here. It stays at its
+  argued value.
+- `TIER_POINTS`, `W_REGION_*` and `W_NETWORK_*` have no measured
+  justification either, and two of them point the wrong way on this sample.
+  Do NOT read that as "lower them": the sample is 18 rows and the dismissals
+  are dominated by one behaviour (thirteen quant and non-track roles he
+  cleared off the board in a batch), which is exactly the shape that would
+  produce a spurious sign. It is a reason to keep measuring, not a reason to
+  retune.
+- The two live consequences named in the audit are unaffected by this
+  measurement and still stand as arguments: tier 1 plus warm (40) outweighs
+  the entire positive range of the class axis (0 to 30), and
+  `TIER_POINTS[1] >= MIN_SCORE`, so a row scoring on tier, region and network
+  alone clears the bar with `role_function` "none".
+
+WHAT WOULD CHANGE ANY OF THIS: more labelled rows. The command is read-only
+and re-runnable, so the honest cadence is to run it again at n=50 and n=200
+and see which of these lines survive. Until one does, a weight below whose
+comment does not cite a measurement is still unjustified, and its comment
+should say so rather than sound confident.
 """
 
 from __future__ import annotations

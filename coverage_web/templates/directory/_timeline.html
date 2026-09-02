@@ -59,7 +59,36 @@ is neither — it says so instead of picking a winner.
           {% elif row.source.label %}
             <span class="pill" title="{{ row.source.why }}">{{ row.source.label }}</span>
           {% endif %}
+          {% comment %}
+          WHEN THE GUESS WAS MADE. All 25 estimated rows on file were written
+          on one day and nothing on this page said so, so "rumored, from past
+          cycles" read as a standing judgement rather than a two-month-old
+          note. Set by `directory.estimates.annotate`, and only ever on an
+          estimate: a date somebody read off a firm's page is dated by its
+          source, not by when we found it.
+          {% endcomment %}
+          {% if row.found_on %}
+            <span class="pill" title="The day this estimate was written down. Nothing has re-checked it since.">guessed {{ row.found_on|date:"M j, Y" }}</span>
+          {% endif %}
         </span>
+        {% comment %}
+        The board's own answer, beside the claim and never instead of it
+        (P1). `superseded` means postings for this cohort have been watched
+        opening; `contradicted` means every posting the scraper saw sits on
+        the wrong side of a date somebody stated. Both print the two windows
+        and both name where each came from, because the point is that a
+        reader can see the disagreement, not that the product picked a winner.
+        {% endcomment %}
+        {% if row.superseded %}
+          <span class="tl-observed">
+            Observed opening {{ row.superseded.observed }} across {{ row.superseded.observed_count }} postings, watched by Coverage. The estimate above is from the seed file.
+          </span>
+        {% endif %}
+        {% if row.contradicted %}
+          <span class="tl-observed clash">
+            Coverage watched this board and disagrees. It {{ row.contradicted }}.
+          </span>
+        {% endif %}
       </li>
     {% endfor %}
   </ul>

@@ -58,6 +58,17 @@ the branch that runs is an empty state that says nothing matched.
       describing a filter that never ran.{% endcomment %}
       Every live campus role we track. Pick regions and tracks to narrow it.
     {% endif %}
+    {% comment %}
+    What the feed will block that this count still includes. The count above
+    applies the decidable half of the eligibility rule; the feed applies all
+    of it, and on the founder's own profile the difference is 141 of 357.
+    Rendered only when there is a real number (see `BLOCKED_SCAN_LIMIT`) and
+    only when it is not zero, because "0 of which your Settings rule out" is
+    a sentence about nothing.
+    {% endcomment %}
+    {% if preview.blocked %}
+      <span class="ob-pv-blocked">{{ preview.blocked }} of which your Settings rule out.</span>
+    {% endif %}
   </p>
 
 {% elif preview.kind == "work" %}

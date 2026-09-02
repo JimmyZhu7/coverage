@@ -148,15 +148,49 @@ TOUCH_KIND_LABELS: list[tuple[str, str]] = [
     ("thank_you", "Sent thank-you"),
     ("reping", "Re-pinged"),
     ("maintain", "Kept warm"),
+    # The advocate as an event (`pipeline.REFERRAL_KIND`). Written by
+    # `crm.debrief` when the student takes the promotion a debrief offered,
+    # and dated at the CHAT it was learned in rather than at the click, so
+    # the ledger reads in the order things actually happened. Loggable by
+    # hand too: a person pushing for you is a thing that happens outside a
+    # debrief, and P2 says the student's own record of it outranks the
+    # product's route to it.
+    ("referral", "They referred you"),
     ("manual_override", "Updated manually"),
 ]
+# THE PRODUCT'S CHANNEL VOCABULARY — the one definition (P5).
+#
+# `coverage_domain.pipeline.CHANNELS` is the PORTED tuple and is not this: the
+# engine documents that it does not validate `channel` at all ("validating it
+# against CHANNELS is a caller concern"), so the ported tuple is a record of
+# what the original CLI offered, and this list is what Coverage offers.
+# `crm.views.log_touch` validates against THIS one, which is what makes the
+# two below reachable and the three retired ones unreachable.
+#
+# RETIRED 2026-09-02: "call", "event", "other". Measured across all 544 of the
+# founder's touches: email 357, NULL 179 (every override — there is no channel
+# for a state correction), coffee_chat 6, linkedin 2, and ZERO rows on any of
+# the three. A six-value <select> where three values have never been chosen is
+# not a vocabulary, it is friction on every log-a-touch, and the fallback in
+# `_contact_live_context` still renders a stored value that is no longer
+# offered, so no history row can be orphaned by the removal.
+#
+# ADDED 2026-09-02: "wechat". Mainland students are about seven in ten
+# non-local undergraduates at Hong Kong's public universities and WeChat is
+# their default community and referral infrastructure, so the process runs on
+# email while the relationships run on WeChat — which Gmail sync cannot see at
+# all (`research-hongkong.md §6`, Grade B, flagged by that file as an
+# inference). The same file's §7.7 is the product consequence: manual entry of
+# a contact and an interaction has to be first-class rather than a fallback,
+# because for these students the majority of the relationship is invisible to
+# every automatic path Coverage has. A channel value is the cheapest possible
+# version of that, and without it a WeChat conversation is either unloggable
+# or logged as "Email", which is a false provenance (P1).
 CHANNEL_LABELS: list[tuple[str, str]] = [
     ("email", "Email"),
     ("linkedin", "LinkedIn"),
+    ("wechat", "WeChat"),
     ("coffee_chat", "Coffee chat"),
-    ("call", "Call"),
-    ("event", "Event"),
-    ("other", "Other"),
 ]
 
 # cadence.due_actions() "action" key -> a short human verb for the UI.
@@ -169,6 +203,10 @@ ACTION_LABELS: dict[str, str] = {
     # same ask (a real touch on a keep-in-touch clock); the two differ only in
     # who they're aimed at and how fast the clock runs.
     "keep_warm": "Keep warm",
+    # cadence branch 5a. Not "Follow up": the card is about a specific thing
+    # this person said they would do, and the verb has to name that rather
+    # than borrow the cold-thread verb sitting two rows down.
+    "promised_followup": "Chase the offer",
     "first_outreach": "First outreach",
     "follow_up": "Follow up",
     "park": "Park it",

@@ -2643,9 +2643,16 @@ def test_expected_sends_still_spend_the_firms_budget():
 
 
 def test_only_self_initiated_kinds_are_in_the_paceable_set():
+    """`promised_followup` joined the set on 2026-09-02 (cadence branch 5a,
+    WS-CRM-07). It belongs: it is a message the student sends into a banker's
+    inbox, and the whole point of the per-firm budget is that the inbox does
+    not care why the email was sent. The exclusions below are unchanged and
+    are what this test is really guarding — a kind that is NOT the student's
+    own send must never start spending a firm's budget."""
     from crm.today import FIRM_PACEABLE_ACTIONS
     assert FIRM_PACEABLE_ACTIONS == {"first_outreach", "follow_up", "keep_warm",
-                                     "maintain", "confirm_chat"}
+                                     "maintain", "confirm_chat",
+                                     "promised_followup"}
     for expected in ("thank_you", "advance", "reping", "park"):
         assert expected not in FIRM_PACEABLE_ACTIONS
 

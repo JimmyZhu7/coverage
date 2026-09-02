@@ -71,12 +71,35 @@ _PORTED_TRANSITIONS = {
     "reping": (None, None),
 }
 
-# Kinds Coverage added after the port. Listed explicitly, and asserted to
-# be inert, so this file keeps its original job: an entry appearing here
-# without a deliberate edit is still a failure, and an entry here that
-# quietly starts moving warmth or thread_state is also still a failure.
-_COVERAGE_NATIVE_TRANSITIONS = {
+# Kinds Coverage added after the port that are INERT — logged, never moving
+# the ladder. Listed explicitly so this file keeps its original job: an entry
+# appearing here without a deliberate edit is still a failure, and an entry
+# here that quietly starts moving warmth or thread_state is also still a
+# failure.
+_COVERAGE_NATIVE_INERT = {
     pipeline.BULK_RECEIVED_KIND: (None, None),
+}
+
+# Kinds Coverage added after the port that DO move the ladder.
+#
+# This split exists because of `referral` (2026-09-02, WS-CRM-12). Until it,
+# every native addition happened to be inert and the test asserted inertness
+# over the whole native set — which read like a rule and was actually a
+# coincidence. It is not a rule: `referral` records that a person pushed for
+# the student, which is the one event the product had no way to count, and an
+# event that cannot move anything is a label rather than a record.
+#
+# So the claim is rewritten rather than relaxed. Each native mover is pinned
+# to its EXACT transition here, so a kind that starts moving something
+# different still fails, and a kind added to the module without landing in
+# one of these two dicts still fails on the equality assertion below.
+_COVERAGE_NATIVE_MOVING = {
+    pipeline.REFERRAL_KIND: ("advocate", "advocate"),
+}
+
+_COVERAGE_NATIVE_TRANSITIONS = {
+    **_COVERAGE_NATIVE_INERT,
+    **_COVERAGE_NATIVE_MOVING,
 }
 
 
@@ -96,10 +119,14 @@ def test_vocabularies_match_the_original_verbatim():
     }
     for kind in _PORTED_TRANSITIONS:
         assert pipeline.TOUCH_TRANSITIONS[kind] == _PORTED_TRANSITIONS[kind]
-    # Every Coverage-native kind is inert by construction: it may be
-    # logged, it may never move the ladder.
-    for kind in _COVERAGE_NATIVE_TRANSITIONS:
+    # A native kind is either inert (logged, never moves the ladder) or a
+    # deliberate mover pinned to its exact transition. Nothing may be both
+    # and nothing may be neither.
+    for kind in _COVERAGE_NATIVE_INERT:
         assert pipeline.TOUCH_TRANSITIONS[kind] == (None, None)
+    for kind, transition in _COVERAGE_NATIVE_MOVING.items():
+        assert pipeline.TOUCH_TRANSITIONS[kind] == transition
+    assert not set(_COVERAGE_NATIVE_INERT) & set(_COVERAGE_NATIVE_MOVING)
     assert pipeline.WARMTH_RANK == {"cold": 0, "replied": 1, "chatted": 2, "advocate": 3}
     assert pipeline.CHANNELS == ("email", "linkedin", "coffee_chat", "call", "event", "other")
     assert pipeline.WARMTH == ("cold", "replied", "chatted", "advocate")
@@ -369,6 +396,13 @@ def test_state_moving_kinds_is_derived_from_the_transition_table():
     joins it automatically, and an inert kind stays out."""
     assert set(pipeline.STATE_MOVING_KINDS) == {
         "reply_received", "chat", "chat_scheduled",
+        # Added 2026-09-02 with `referral` (WS-CRM-12). Being in this set is
+        # the load-bearing half of that feature: a referral is written dated
+        # at the chat it was learned in, i.e. deliberately backdated, so it
+        # HAS to be something the event-order guard both defends against and
+        # defends with. A referral older than a park does not un-park anybody;
+        # a park older than the referral does not suppress it.
+        pipeline.REFERRAL_KIND,
     }
     assert pipeline.MANUAL_OVERRIDE_KIND not in pipeline.STATE_MOVING_KINDS
 
@@ -507,3 +541,84 @@ def test_set_state_records_the_door_that_made_the_override(conn, make_contact):
     by_contact = {r["contact_id"]: r["source"] for r in cur.fetchall()}
     assert by_contact[cid] == "park_all"
     assert by_contact[other] == "manual"
+
+
+# ---------------------------------------------------------------------------
+# The advocate as an event (WS-CRM-12, 2026-09-02).
+# ---------------------------------------------------------------------------
+
+def test_a_referral_ratchets_a_contact_to_advocate(conn, make_contact):
+    """`referral` is the one automatic door into the advocate rung.
+
+    Before it, advocacy was reachable only through `set_state` — a hand
+    override that writes a `manual_override` audit row saying "updated
+    manually". The metric the research says predicts an outcome is the
+    advocate COUNT, "how many people actually pushed for me", which holds at
+    2 to 20 whether 80 or 2,200 emails went out
+    (`research-nontarget-access.md §3`, Grade B). A count needs rows with a
+    kind on them, not prose in a note.
+    """
+    cid = make_contact(USER)
+    pipeline.apply_touch(conn, USER, cid, "chat", "coffee_chat", None, now=_JULY)
+    result = pipeline.apply_touch(
+        conn, USER, cid, pipeline.REFERRAL_KIND, "", "Offered to push my CV",
+        now=_JULY,
+    )
+    assert result == {"warmth": "advocate", "thread_state": "advocate"}
+    assert result.stale is False
+    warmth, state, kinds = _state(conn, cid)
+    assert (warmth, state) == ("advocate", "advocate")
+    assert kinds == ["chat", pipeline.REFERRAL_KIND]
+
+
+def test_a_backdated_referral_cannot_overturn_a_later_override(conn, make_contact):
+    """The existing event-order rule, applied to the new kind.
+
+    `crm.debrief.promote` dates the referral at the CHAT it was learned in,
+    which is deliberately backdated — the promise was made then, not when the
+    button was pressed. That is only safe because a decision made AFTER the
+    chat still wins: a student who parked this person in August does not get
+    them silently promoted by a July conversation typed up later. The row is
+    still inserted; only the state move is refused.
+    """
+    cid = make_contact(USER)
+    pipeline.set_state(
+        conn, USER, cid, thread_state="parked",
+        note="Parked from the Network board (bulk)", now=_AUGUST,
+    )
+    result = pipeline.apply_touch(
+        conn, USER, cid, pipeline.REFERRAL_KIND, "", None, now=_JULY,
+    )
+    assert result == {}
+    assert result.stale is True
+    warmth, state, kinds = _state(conn, cid)
+    assert (warmth, state) == ("cold", "parked")
+    assert kinds == [pipeline.MANUAL_OVERRIDE_KIND, pipeline.REFERRAL_KIND]
+
+
+def test_a_referral_after_a_park_does_promote(conn, make_contact):
+    """The other side of the same rule: the park is older, the referral is
+    the newest thing that happened, so it stands. Somebody pushing for you
+    after you gave up on them is exactly the event worth recording."""
+    cid = make_contact(USER)
+    pipeline.set_state(conn, USER, cid, thread_state="parked", now=_JULY)
+    result = pipeline.apply_touch(
+        conn, USER, cid, pipeline.REFERRAL_KIND, "", None, now=_AUGUST,
+    )
+    assert result == {"warmth": "advocate", "thread_state": "advocate"}
+    warmth, state, _ = _state(conn, cid)
+    assert (warmth, state) == ("advocate", "advocate")
+
+
+def test_advocate_stays_terminal_after_a_referral(conn, make_contact):
+    """The ported terminal-advocate guard is unchanged: nothing a later touch
+    does moves thread_state back out."""
+    cid = make_contact(USER)
+    pipeline.apply_touch(
+        conn, USER, cid, pipeline.REFERRAL_KIND, "", None, now=_JULY,
+    )
+    pipeline.apply_touch(
+        conn, USER, cid, "chat_scheduled", "email", None, now=_AUGUST,
+    )
+    warmth, state, _ = _state(conn, cid)
+    assert (warmth, state) == ("advocate", "advocate")

@@ -24,6 +24,7 @@ from __future__ import annotations
 from coverage_connectors.http import BOT_BLOCK_PREFIX
 from django.db.models import Count
 
+from . import estimates
 from .boards import BOARDS
 from .models import Firm, Opportunity, ScrapeRun
 
@@ -698,5 +699,24 @@ def health_report() -> list[str]:
             "· never produced a row but fetches cleanly (board is live and "
             "empty — plausible market fact, worth a manual look now and then): "
             f"{', '.join(silent['empty'])}"
+        )
+    # A DECLARED DATE THE SCRAPER'S OWN OBSERVATIONS CONTRADICT.
+    #
+    # Every other line in this report is about a board that stopped working.
+    # This one is about a board that worked perfectly and disagreed with a
+    # date somebody wrote down, which no surface in the product could see
+    # before: `FirmDate` and `FirmCycleObservation` had no join between them
+    # (`audit-calendar-firmdates.md` D10). ⚠ rather than a standing ·-line
+    # because a contradiction is a fact somebody has to go and check against
+    # the firm's own page; it does not clear on its own and it does not decay
+    # into background noise the way an empty board does.
+    #
+    # Nothing here edits a row. `directory.estimates` cannot write, and the
+    # resolution is a human reading the firm's page and correcting the date or
+    # the region on it.
+    for line in estimates.contradiction_report():
+        lines.append(
+            f"⚠ a stated date the board contradicts (check the firm's own "
+            f"page): {line}"
         )
     return lines

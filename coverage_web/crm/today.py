@@ -10,8 +10,9 @@ working unchanged.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, time as dt_time, timedelta
 from math import ceil
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count as models_Count, Max as models_Max, Q
@@ -19,6 +20,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateformat import time_format
 from django.utils.dateparse import parse_datetime
 from django.utils.timesince import timesince
 from django.views.decorators.http import require_POST
@@ -26,7 +28,11 @@ from django.views.decorators.http import require_POST
 from analytics.events import record_event
 from analytics.models import UserOpportunity
 from coverage_domain import cadence
-from coverage_domain.pipeline import BULK_RECEIVED_KIND, TOUCH_TRANSITIONS
+from coverage_domain.pipeline import (
+    BULK_RECEIVED_KIND,
+    REFERRAL_KIND,
+    TOUCH_TRANSITIONS,
+)
 from directory.classify import TARGET_BUCKETS
 from directory.deadlines import closing_soon_filter
 from directory.dupes import fold_duplicates
@@ -117,16 +123,87 @@ TUNABLE_CADENCE_PARAMS: dict[str, tuple[int, int]] = {
 # how these drift apart (P5).
 QUEUE_SILENT_THREAD_STATES = ("parked", "quiet")
 
+# Touch kinds that CLOSE an open promise (cadence branch 5a): a message the
+# student sent, after the chat, that could plausibly have chased the thing
+# this person said they would do.
+#
+# Hand-listed rather than derived, and this is the one place in this module
+# where that is right: the set is defined by an argument about what a message
+# could plausibly have said, not by what the ratchet happens to accept, so a
+# new kind joining `TOUCH_TRANSITIONS` must be judged rather than swept in.
+# `thank_you` is excluded on purpose — see `promises` in `_build_actions`.
+_PROMISE_CLOSING_KINDS = frozenset({"outreach", "follow_up", "maintain", "reping"})
+
+
+# The ONE region overlay the evidence permits, applied to a student whose
+# whole market is Hong Kong.
+#
+# THE SHAPE OF THE CLAIM, AND ITS LIMIT. Nothing in this product differs by
+# region today, and the only evidenced regional difference is INTENSITY, at
+# Grade B (`audit-personalization-networking.md` Q6). So this is two numbers
+# on one axis, not a matrix: there is deliberately no per-region cadence
+# beyond this overlay, because the sources that discuss track and seniority at
+# length condition cadence on neither (`research-networking-norms.md §8a` and
+# `§8f`), and splitting one unfounded interval into five unfounded intervals
+# is precision theatre.
+#
+# `max_cold_touches: 1` — ONE COLD NOTE, THEN PARK. Hong Kong screens school
+# and GPA first and network second; the only HK networking guidance the
+# research found at all is "be on the ground"; reported cold-email response
+# rates are low; and §7.6 is explicit that there is to be no volume nagging in
+# Hong Kong (`research-hongkong.md §6` and `§7.6`, Grade B on the practitioner
+# source). A second cold touch into a market that answers the first one rarely
+# is volume, and volume is the thing the evidence rules out. The contact still
+# parks on the ordinary `park_after_business_days` clock (10 business days,
+# i.e. two working weeks after the note), so the thread is not abandoned
+# faster, it is simply not nudged.
+#
+# `followup_after_business_days: 10` — TWO WORKING WEEKS, not one. Live only
+# for an HK student who deliberately raises `max_cold_touches` back to 2 in
+# Settings, because the overlay is a DEFAULT and their own answer wins (see
+# the merge order below). It is here rather than omitted precisely so that
+# opting back into a second touch does not also opt back into the global
+# six-day gap: the same low-response-rate reading that removes the second
+# touch says space it out if you take it.
+#
+# WHAT WOULD RETIRE THIS: a counted HK-versus-US reply-rate comparison on
+# Coverage's own sends. The current support is one practitioner source at
+# Grade B, which is enough to change a default and not enough to change a
+# rule — which is why nothing here is enforced and everything is overridable.
+REGION_CADENCE_OVERLAY: dict[str, dict[str, int]] = {
+    "hk": {"max_cold_touches": 1, "followup_after_business_days": 10},
+}
+
 
 def _cadence_params(user) -> dict[str, int]:
-    """The user's validated cadence overrides — safe to hand to
-    `cadence.due_actions(params=...)`. Silently drops anything that isn't a
-    whitelisted key holding an in-range integer (`bool` is excluded on purpose:
-    it's an int subclass in Python, and `True` is not a sane window length)."""
+    """The user's cadence overrides on top of any region overlay — safe to
+    hand to `cadence.due_actions(params=...)`.
+
+    Silently drops anything that isn't a whitelisted key holding an in-range
+    integer (`bool` is excluded on purpose: it's an int subclass in Python,
+    and `True` is not a sane window length).
+
+    MERGE ORDER IS THE PRODUCT RULE, not a detail. The overlay goes down
+    first and the student's own Settings answers go on top, so an HK student
+    who has said what they want gets what they said (P2: the student's data
+    outranks the product's rule). A student who has said nothing gets the
+    overlay.
+
+    THE OVERLAY IS SINGLE-MARKET ONLY. `regions == ["hk"]` exactly, not "hk in
+    regions": a student recruiting in both markets has US threads on this same
+    queue and there is no evidence for slowing those down. The founder is
+    hk+us, so his queue is unchanged byte for byte — measured, not assumed.
+    """
+    regions = [
+        (r or "").strip().lower() for r in (getattr(user, "regions", None) or [])
+    ]
+    out: dict[str, int] = {}
+    if len(regions) == 1:
+        out.update(REGION_CADENCE_OVERLAY.get(regions[0], {}))
+
     raw = getattr(user, "cadence_params", None)
     if not isinstance(raw, dict):
-        return {}
-    out: dict[str, int] = {}
+        return out
     for key, (low, high) in TUNABLE_CADENCE_PARAMS.items():
         value = raw.get(key)
         if isinstance(value, bool) or not isinstance(value, int):
@@ -243,11 +320,17 @@ def _build_actions(user, *, pace: bool = True):
     }
     firm_names = {}
     firm_tracks = {}
-    for fid, name, tracks in Firm.objects.filter(id__in=firm_ids).values_list(
-        "id", "name", "tracks"
+    # How this firm hires. Carried on the same query that was already fetching
+    # name and tracks, so it costs nothing, and read by exactly one place:
+    # `crm.relevance.apply_only`, which uses it to mark a cold networking ask
+    # at a firm whose process is a test rather than a conversation.
+    firm_styles = {}
+    for fid, name, tracks, style in Firm.objects.filter(id__in=firm_ids).values_list(
+        "id", "name", "tracks", "recruiting_style"
     ):
         firm_names[fid] = name
         firm_tracks[fid] = tracks or []
+        firm_styles[fid] = style or ""
     # People who are not part of the user's recruiting AT ALL — the founder's
     # 2026-08-25 rule, decided per PERSON off the row's own text by
     # `crm.recruitment` (see that module for why neither firm tier nor school
@@ -337,6 +420,61 @@ def _build_actions(user, *, pace: bool = True):
         # the same touch. See `crm.utils._touch_dicts`.
         scheduled_chats[cid] = local_date(starts_at)
 
+    # THE OTHER FACT THE ENGINE CANNOT HOLD: an OPEN PROMISE (branch 5a).
+    #
+    # `coverage_domain` cannot reach `ChatDebrief`, so "this person said they
+    # would introduce me to somebody, and I have not chased it yet" is threaded
+    # in through the contact dict exactly like `chat_scheduled_at` above.
+    #
+    # WHAT COUNTS AS A PROMISE. The debrief's intro question, and only that.
+    # It is the one field on the row where the CONTACT committed to an action
+    # ("did they offer an intro?"); `tracked_date` is a fact they mentioned and
+    # `advocate_answer` is the student's read of them, neither of which anybody
+    # promised to do anything about. P1: state what the data entails.
+    #
+    # WHAT MAKES IT OPEN, and why the thank-you does not close it. The promise
+    # closes when the student sends something that could plausibly have chased
+    # it — an outreach, a follow-up, a keep-warm note, a re-ping — logged after
+    # the chat the promise was made in. `thank_you` is deliberately NOT in that
+    # set: the cadence demands a thank-you within 24 hours of the same chat, so
+    # counting it would close every promise the day after it was made and the
+    # branch could never fire for a student who did what the queue told them
+    # to. `chat` and every inbound kind are excluded for the obvious reason —
+    # they are not the student chasing anything.
+    #
+    # DATED AT THE CHAT, not at the debrief's `created`. The debrief can be
+    # written days later (`pending()` asks for up to a week), and the promise
+    # is a week old from the moment it was made, not from the moment it was
+    # typed up.
+    #
+    # ONE QUERY, GATED ON THE CANDIDATE SET, the same cost discipline
+    # `scheduled_chats` holds to: only a `chatted` contact reaches branch 5a,
+    # and a student with no debriefs pays nothing. The founder has 12 debriefs
+    # and 0 with an intro on them, so this costs one query and produces no
+    # cards on his account today.
+    promises: dict[int, tuple[str, object]] = {}
+    chatted_ids = [c.id for c in contacts if c.warmth == "chatted"]
+    if chatted_ids:
+        chased: dict[int, object] = {}
+        for t in touches:
+            if t.kind not in _PROMISE_CLOSING_KINDS:
+                continue
+            prev = chased.get(t.contact_id)
+            if prev is None or t.ts > prev:
+                chased[t.contact_id] = t.ts
+        for cid, intro_name, chat_ts in (
+            ChatDebrief.objects.for_user(user)
+            .filter(dismissed=False, contact_id__in=chatted_ids)
+            .exclude(intro_name="")
+            .order_by("touch__ts")
+            .values_list("contact_id", "intro_name", "touch__ts")
+        ):
+            last_chase = chased.get(cid)
+            if last_chase is not None and last_chase > chat_ts:
+                promises.pop(cid, None)
+                continue
+            promises[cid] = (f"an intro to {intro_name}", local_date(chat_ts))
+
     # cadence returns action["contact"] as the exact dict we pass in, so we
     # hand it dicts already carrying the display fields the template needs.
     # `angle` is deliberately NOT in here: it is the user's private note about
@@ -386,6 +524,17 @@ def _build_actions(user, *, pace: bool = True):
             # forbidden from naming a scheduling day without it. See
             # `scheduled_chats` above.
             "chat_scheduled_at": scheduled_chats.get(c.id),
+            # What this person said they would do, present only while the
+            # promise is still open, and the day they said it. Read by exactly
+            # one place, `cadence.due_actions`' branch 5a. See `promises`
+            # above for what counts and what closes it.
+            "promised_action": promises.get(c.id, ("", None))[0],
+            "promised_action_at": promises.get(c.id, ("", None))[1],
+            # `Firm.recruiting_style` ("campus" / "assessment"), read only by
+            # `crm.relevance.apply_only`. "" for a contact with no directory
+            # firm, which degrades to the campus behaviour — the same default
+            # `crm.coverage` and `crm.sourcing` already take.
+            "recruiting_style": firm_styles.get(c.firm_id, ""),
         }
         for c in contacts
     ]
@@ -564,7 +713,13 @@ def _build_actions(user, *, pace: bool = True):
         str(x).strip() for x in (getattr(user, "affiliations", None) or ()) if str(x).strip()
     )
     actions = _gate_and_rank(actions, tiers, openings, sent_today, today,
-                             affiliations=affiliations, pace=pace)
+                             affiliations=affiliations, pace=pace,
+                             # Derived from the board Coverage watches, never
+                             # from a month (`crm.relevance.season_mode`).
+                             # None on any account whose tiered firms carry no
+                             # observation clearing the sample floor, and None
+                             # is exactly today's ordering.
+                             season=rel.season_mode(user, today))
     return actions, contacts
 
 
@@ -954,10 +1109,16 @@ FIRM_DAILY_CONTACT_CAP = 2
 # analysts-talk-to-each-other evidence is about, and spending a firm's daily
 # budget on it would punish the student for the most valuable thing they can
 # do.
+#
+# `referral` is excluded for the `bulk_received` reason rather than the `chat`
+# reason: it is not the student's send at all. It records that the CONTACT
+# pushed for them, usually learned in a debrief days after the fact, so
+# charging a firm's daily inbox budget for it would make somebody else's
+# generosity cost the student a cold note.
 FIRM_PACE_TOUCH_KINDS = (
     frozenset(TOUCH_TRANSITIONS)
     - rel.INBOUND_TOUCH_KINDS
-    - {BULK_RECEIVED_KIND, "chat"}
+    - {BULK_RECEIVED_KIND, "chat", REFERRAL_KIND}
 )
 
 
@@ -1024,6 +1185,10 @@ def _pace_firm_key(contact: dict):
 # Two owed replies at Citi this morning mean a third cold note there waits.
 FIRM_PACEABLE_ACTIONS = frozenset({
     "first_outreach", "follow_up", "keep_warm", "maintain", "confirm_chat",
+    # Branch 5a. It is a real email into a real inbox, so it spends and is
+    # spent against exactly like the other sends: the banker's inbox does not
+    # care that this one has a better reason behind it.
+    "promised_followup",
 })
 # Every action that puts an email in a banker's inbox - the paceable kinds
 # plus the expected ones. Anything else (`park`, and any future non-send
@@ -1133,7 +1298,7 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
 
 def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
                    sent_today=None, today=None, affiliations=(),
-                   pace: bool = True) -> list[dict]:
+                   pace: bool = True, season=None) -> list[dict]:
     """Decide who the queue may speak about, what it may ask them for, and in
     what order. Everything here is a VIEW decision — see `crm/relevance.py`'s
     module docstring for why none of it belongs in `coverage_domain.cadence`.
@@ -1263,7 +1428,36 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
         elif a["action"] in ("keep_warm", "maintain"):
             a["reason"] = rel.keep_warm_reason(a)
 
+        # APPLY-ONLY AT AN ASSESSMENT FIRM. Marked, never dropped (P4): the
+        # card stays, the person stays, and the ask changes to the one the
+        # firm's process actually has room for. Deliberately AFTER the
+        # branches above rather than inside them, because every one of those
+        # is about who the contact is and this is about what the firm's
+        # process is; a contact can be both, and the firm's process is the
+        # narrower and later fact.
+        #
+        # Verified before building (the item asked for that first): the
+        # cadence engine has no notion of `recruiting_style` and
+        # `contact_relevance` never read one, so the queue did propose a cold
+        # first note at an assessment firm. It does not now.
+        #
+        # `relevance` is NOT overwritten with `REL_APPLY_ONLY`. That column
+        # answers "why is this person allowed in the queue at all" and feeds
+        # `relevance_weight`; repurposing it would quietly re-weight the card
+        # as well as re-label it, which is two changes wearing one name. The
+        # verdict rides on its own key.
+        if rel.apply_only(a):
+            a["apply_only"] = True
+            a["verdict"] = rel.REL_APPLY_ONLY
+            a["label"] = rel.APPLY_ONLY_LABEL
+            a["reason"] = rel.APPLY_ONLY_REASON
+
         a["ev"] = rel.expected_value(a, affiliations=affiliations)
+        # The season the student's own board is in, applied here rather than
+        # inside `expected_value` because it is a fact about the whole board
+        # and that function is a pure function of one action dict. 1.0 and
+        # therefore invisible whenever the board cannot say (P3).
+        a["ev"] = round(a["ev"] * rel.season_factor(a, season), 4)
         out.append(a)
 
     if pace:
@@ -1298,6 +1492,12 @@ _ACTION_TOUCH: dict[str, str] = {
     # (None, None), so a keep-warm note advances no state and needs no
     # pipeline change. The ratchet stays untouched by this feature.
     "keep_warm": "maintain",
+    # branch 5a chases a promise, which is a follow-up in the literal sense —
+    # a second message on a live thread — so it logs the existing
+    # `follow_up` kind. TOUCH_TRANSITIONS["follow_up"] is (None, None), so
+    # chasing an intro advances no state, which is right: the promise being
+    # chased is not the promise being kept.
+    "promised_followup": "follow_up",
     "advance": "outreach",
     # "confirm_chat" is deliberately ABSENT. It used to map to "chat", which
     # meant one click on "Sent" asserted that a conversation had HAPPENED —
@@ -1345,8 +1545,16 @@ _INBOUND_TOUCH_KINDS = frozenset({"reply_received", "chat_scheduled"})
 # live, the founder's ring read 6 done in a week where one of the six was
 # an inbound blast. It is somebody else's software's action, excluded by
 # name exactly as this comment block demands.
+#
+# `REFERRAL_KIND` is the same case one step further out. A referral is not
+# merely inbound, it is the contact ACTING for the student: counting it as
+# work the student did this week would let the ring credit them for somebody
+# else's favour, which is the exact over-claim the bulk-received exclusion
+# was written to stop.
 PACE_TOUCH_KINDS = (
-    frozenset(TOUCH_TRANSITIONS) - _INBOUND_TOUCH_KINDS - {BULK_RECEIVED_KIND}
+    frozenset(TOUCH_TRANSITIONS)
+    - _INBOUND_TOUCH_KINDS
+    - {BULK_RECEIVED_KIND, REFERRAL_KIND}
 )
 
 # Today's plan sizing. Both are reasoned, not measured — revisit against the
@@ -1508,6 +1716,11 @@ _TODAY_CLASS: dict[str, int] = {
     "reping": CLASS_CRITICAL, "confirm_chat": CLASS_CRITICAL,
     "thank_you": CLASS_ENGAGED, "advance": CLASS_ENGAGED,
     "keep_warm": CLASS_ENGAGED, "maintain": CLASS_ENGAGED,
+    # Branch 5a is ENGAGED, not COLD, and the distinction is the whole point
+    # of this map: a person who promised you an intro gave you something, and
+    # `_TODAY_CLASS_DEFAULT` would otherwise file them behind every stranger's
+    # follow-up by omission rather than by decision.
+    "promised_followup": CLASS_ENGAGED,
     "first_outreach": CLASS_COLD, "follow_up": CLASS_COLD,
     "park": CLASS_PARK,
 }
@@ -2123,7 +2336,94 @@ def _schedule(user, today) -> list[dict]:
 _DAYBAR_START, _DAYBAR_END = 8 * 60, 20 * 60      # 8am -> 8pm
 
 
-def _daybar(schedule, now) -> dict:
+# WHEN A DESK IS WORTH WRITING TO, per market (WS-CRM-19).
+#
+# A VIEW DECISION, HELD IN THE VIEW (E4). These are clock and calendar
+# constants: they belong here, beside `_DAYBAR_START`, and never in
+# `coverage_domain`, which is pure and has no business knowing what time a
+# stock exchange shuts.
+#
+# THE EVIDENCE, AND ITS EXACT SCOPE. It is sales-and-trading specific and
+# Grade A: avoid the thirty minutes either side of the market close, lunchtime
+# is good, and expect ten to fifteen minute chats with interruptions
+# (`research-networking-norms.md §3c`). It is a SEND-TIME rule and not a
+# cadence rule, which is why nothing here can reach the queue's order — the
+# hint is copy on the day bar and the actions are built and sorted before it
+# is computed at all.
+#
+# WHY IT IS GATED ON THE `st` TRACK. The source is about a trading floor's
+# day: the close is a real event on that desk and a banker's afternoon has no
+# equivalent. Showing it to an IB-only student would be dressing a
+# desk-specific fact as a general one, which is the class of claim P1 exists
+# to stop.
+#
+# WHY IT KEYS ON `Contact.region` AND NOTHING ELSE. Same rule as the cadence
+# engine's region scoping: a stated region or nothing. 94 of the founder's 265
+# live rows have no region and every one of them renders no hint at all rather
+# than a guessed one (P3, and the "mark, never drop" rule applies to the CARD,
+# not to a hint the data cannot support).
+#
+# `12:00` to `13:30` in the MARKET's own clock, converted to the student's.
+# That conversion is the whole feature: the founder's stored timezone is
+# America/Los_Angeles while 94 of his contacts are Hong Kong, so "lunchtime"
+# is a fact about a clock he is not on.
+_SEND_WINDOW_TRACK = "st"
+_MARKET_SEND_WINDOWS: dict[str, tuple[str, str, int, int, int]] = {
+    # region -> (label, IANA zone, good-window start, good-window end, close),
+    # the last three in minutes past that zone's midnight.
+    "us": ("US", "America/New_York", 12 * 60, 13 * 60 + 30, 16 * 60),
+    "hk": ("HK", "Asia/Hong_Kong", 12 * 60, 13 * 60 + 30, 16 * 60),
+}
+# The half hour either side of the close, verbatim from the source.
+_CLOSE_BUFFER_MINUTES = 30
+
+
+def _local_clock(zone: str, day: date, minutes: int) -> str:
+    """`minutes` past midnight in `zone`, printed on the reader's own clock.
+
+    Anchored on `day` rather than on a fixed date so daylight saving is the
+    zone database's problem and not this function's: the New York window
+    moves against Los Angeles by an hour twice a year and against Hong Kong
+    by an hour twice a year on different dates.
+    """
+    at = datetime.combine(day, dt_time(minutes // 60, minutes % 60))
+    aware = at.replace(tzinfo=ZoneInfo(zone))
+    local = timezone.localtime(aware)
+    return time_format(local, "fA").replace("AM", "a").replace("PM", "p")
+
+
+def _send_windows(user, contacts, day) -> list[dict]:
+    """Per-market send-window hints for an `st` student, or nothing.
+
+    Returns one row per market the student actually has contacts in, so a
+    student with only US contacts is never told about the Hong Kong close.
+    """
+    tracks = {(t or "").strip().lower() for t in (getattr(user, "tracks", None) or [])}
+    if _SEND_WINDOW_TRACK not in tracks:
+        return []
+    counts = Counter(
+        (c.region or "").strip().lower() for c in contacts
+        if not c.archived and (c.region or "").strip().lower() in _MARKET_SEND_WINDOWS
+    )
+    out = []
+    for region, n in sorted(counts.items()):
+        label, zone, good_from, good_to, close = _MARKET_SEND_WINDOWS[region]
+        out.append({
+            "market": label,
+            "count": n,
+            "good": (
+                f"{_local_clock(zone, day, good_from)} to "
+                f"{_local_clock(zone, day, good_to)}"
+            ),
+            "avoid": (
+                f"{_local_clock(zone, day, close - _CLOSE_BUFFER_MINUTES)} to "
+                f"{_local_clock(zone, day, close + _CLOSE_BUFFER_MINUTES)}"
+            ),
+        })
+    return out
+
+
+def _daybar(schedule, now, *, hints=()) -> dict:
     """Today's timed events as positions on one 8am-8pm track.
 
     A list tells you WHAT is on today; it does not tell you the shape of the
@@ -2152,11 +2452,18 @@ def _daybar(schedule, now) -> dict:
 
     now_minutes = now.hour * 60 + now.minute
     in_window = _DAYBAR_START <= now_minutes <= _DAYBAR_END
+    hints = list(hints)
     return {
         "dots": dots,
         "now_pct": round((now_minutes - _DAYBAR_START) / span * 100, 2) if in_window else None,
         # The track is only worth its pixels once something is actually on it.
         "show": bool(dots),
+        # Send-window hints (see `_send_windows`). Carried alongside the track
+        # rather than on it: they are a fact about a market's clock, not an
+        # event on this student's day, and drawing them as a band would claim
+        # a precision the source does not have.
+        "hints": hints,
+        "show_hints": bool(hints),
     }
 
 
@@ -3509,7 +3816,16 @@ def _cockpit_context(user) -> dict:
         # chats nobody has put a time on yet; `chat_prep` is the subset
         # happening today, with the last debrief pulled up alongside.
         "schedule": schedule[:6],
-        "daybar": _daybar(schedule, timezone.localtime(timezone.now())),
+        "daybar": _daybar(
+            schedule,
+            timezone.localtime(timezone.now()),
+            # Computed from `contacts`, already in hand. Deliberately passed
+            # in rather than fetched inside `_daybar`: the hint is about the
+            # student's board, the track is about the student's day, and
+            # keeping them separate is what makes it obvious that no hint can
+            # reach `ordered` above.
+            hints=_send_windows(user, contacts, today),
+        ),
         "chat_prep": chat_prep,
         # Day-one seeds: concrete first moves derived from state on every
         # render, never stored. Empty for any account whose queue has work
