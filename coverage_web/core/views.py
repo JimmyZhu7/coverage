@@ -118,6 +118,22 @@ def pricing(request):
             "advisor_pro_cap": _advisor_daily_cap("pro"),
             "advisor_free_grant": _advisor_monthly_grant("free"),
             "advisor_pro_grant": _advisor_monthly_grant("pro"),
+            # The two settings the page now quotes, read here for the same
+            # reason as every count above: a number typed into a template
+            # goes stale the day someone changes the setting, and this is a
+            # page whose whole job is to be believed.
+            #
+            # `free_rescan_days` is the ONE limit Free actually hits
+            # (capture/gmail_live.py::free_rescan_unlocks_at, enforced in
+            # capture/views.py::gmail_rescan) and the table drew it as a
+            # match between the plans until 2026-09-01.
+            #
+            # `pro_trial_days` is the trial that ships in accounts/trials.py
+            # off the Gmail connect path and was, until now, stated on no
+            # page a prospective student ever sees.
+            "free_rescan_days": getattr(
+                settings, "GMAIL_FREE_RESCAN_INTERVAL_DAYS", 7),
+            "pro_trial_days": getattr(settings, "PRO_TRIAL_DAYS", 14),
         },
     )
 

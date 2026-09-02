@@ -12,18 +12,54 @@ palette and the voice: --paper/--ink/--accent's light-mode hex values,
 copied as literals because email clients don't resolve CSS custom
 properties either, and the same terse, no-em-dash copy style as the rest of
 the product.
+
+THE ONE EXCEPTION TO "EVERYTHING INLINED" IS THE DARK BLOCK BELOW. An inline
+style cannot carry a media query, so a scheme-aware palette has to live in a
+<style> element or not exist at all — and until now it did not, so a student
+whose whole phone is dark opened a white card at 7am. Apple Mail and iOS Mail
+honour both the embedded <style> and `prefers-color-scheme`; Gmail's web and
+app surfaces will drop the block and keep rendering the light palette, which
+is the same thing they do today and is fine. The classes exist ONLY as hooks
+for that block: every element still carries its own complete inline style, so
+a client that strips the <style> entirely loses nothing.
+
+The dark values are coverage.css's own dark palette, the same four tokens the
+site flips (paper, surface/line, ink, accent), copied as literals for the same
+reason the light ones are.
 {% endcomment %}
-<div style="background-color:#f2f4ee;padding:24px 12px;">
+<style>
+  @media (prefers-color-scheme: dark) {
+    .d-page  { background-color: #141712 !important; }
+    .d-card  { background-color: #1c201a !important; border-color: #2c3028 !important; }
+    .d-rule  { border-color: #2c3028 !important; }
+    .d-ink   { color: #eaece5 !important; }
+    .d-ink-2 { color: #b2b5a8 !important; }
+    .d-ink-3 { color: #9c9f92 !important; }
+    .d-accent{ color: #7aa7d4 !important; }
+    .d-ok    { color: #74c095 !important; }
+    .d-now   { color: #e2867c !important; }
+    /* The accent flips to a LIGHT blue in dark, so the ink that sits on it
+       flips too. Same pairing rule coverage.css states for --on-accent. */
+    .d-btn   { background-color: #7aa7d4 !important; color: #10161d !important; }
+    .d-pill  { background-color: #232a35 !important; border-color: #38465a !important;
+               color: #a9c7e6 !important; }
+  }
+</style>
+<div class="d-page" style="background-color:#f2f4ee;padding:24px 12px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
 <tr><td align="center">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
+<table class="d-card" role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"
        style="width:600px;max-width:100%;background-color:#fcfdf9;border:1px solid #d7dccd;border-radius:14px;overflow:hidden;">
 
   <tr>
-    <td style="padding:28px 32px 20px 32px;border-bottom:1px solid #d7dccd;">
-      <span style="font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;color:#191b16;">Coverage</span>
-      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#666a5e;margin-top:4px;">
-        Your week of {{ digest.today|date:"N j" }}
+    <td class="d-rule" style="padding:28px 32px 20px 32px;border-bottom:1px solid #d7dccd;">
+      <span class="d-ink" style="font-family:Georgia,'Times New Roman',serif;font-size:22px;font-weight:700;color:#191b16;">Coverage</span>
+      <div class="d-ink-3" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#666a5e;margin-top:4px;">
+        {% comment %}`M j`, not `N j`. `N` is Django's AP-style month
+        ("Sept. 2", with the period), and every other surface in the product
+        writes "Sep 2" — the feed's role rows, the calendar, My
+        Applications. One date format.{% endcomment %}
+        Your week of {{ digest.today|date:"M j" }}
       </div>
       {% comment %}
       THE LINE THE DIGEST LEADS WITH. Advocates in place and firms with nobody
@@ -35,7 +71,7 @@ the product.
       entirely for a student who has tiered nothing.
       {% endcomment %}
       {% if digest.coverage %}
-      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;color:#191b16;margin-top:12px;line-height:1.5;">
+      <div class="d-ink" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;color:#191b16;margin-top:12px;line-height:1.5;">
         {{ digest.coverage.line }}
       </div>
       {% endif %}
@@ -45,7 +81,7 @@ the product.
   {% if digest.closing %}
   <tr>
     <td style="padding:24px 32px 4px 32px;">
-      <span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#4e5248;">
+      <span class="d-ink-2" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#4e5248;">
         Closing this week
       </span>
     </td>
@@ -69,23 +105,23 @@ the product.
   {% endcomment %}
   {% for item in digest.closing %}
   <tr>
-    <td style="padding:12px 32px;{% if not forloop.last %}border-bottom:1px solid #d7dccd;{% endif %}">
+    <td {% if not forloop.last %}class="d-rule" {% endif %}style="padding:12px 32px;{% if not forloop.last %}border-bottom:1px solid #d7dccd;{% endif %}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;color:#191b16;">
-            <a href="{{ item.url }}" style="color:#1f4e79;text-decoration:none;font-weight:600;">{{ item.firm_name }} &middot; {{ item.title }}</a>
-            <div style="font-size:13px;color:#666a5e;margin-top:2px;">
+          <td class="d-ink" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;color:#191b16;">
+            <a class="d-accent" href="{{ item.url }}" style="color:#1f4e79;text-decoration:none;font-weight:600;">{{ item.firm_name }} &middot; {{ item.title }}</a>
+            <div class="d-ink-3" style="font-size:13px;color:#666a5e;margin-top:2px;">
               {{ item.stage_label }}{% if item.location %} &middot; {{ item.location }}{% endif %}
             </div>
           </td>
-          <td align="right" style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;color:{% if item.urgency.key == 'now' %}#9d2b23{% else %}#2f6a45{% endif %};white-space:nowrap;padding-left:12px;">
+          <td align="right" class="{% if item.urgency.key == 'now' %}d-now{% else %}d-ok{% endif %}" style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:13px;color:{% if item.urgency.key == 'now' %}#9d2b23{% else %}#2f6a45{% endif %};white-space:nowrap;padding-left:12px;">
             {{ item.deadline.countdown }}
             {% comment %}
             Its own line, in the muted ink rather than the countdown's urgency
             red/green: the marker qualifies the date, it is not a second alarm.
             Same cell so it cannot be read as belonging to the next row.
             {% endcomment %}
-            {% if item.reported %}<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;margin-top:3px;">({{ item.reported.label }})</div>{% endif %}
+            {% if item.reported %}<div class="d-ink-3" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;margin-top:3px;">({{ item.reported.label }})</div>{% endif %}
           </td>
         </tr>
       </table>
@@ -103,7 +139,7 @@ the product.
   {% endcomment %}
   {% for item in digest.closing %}{% if item.reported %}{% ifchanged %}
   <tr>
-    <td style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;line-height:1.5;">
+    <td class="d-ink-3" style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;line-height:1.5;">
       ({{ item.reported.label }}): {{ item.reported.why }}.
     </td>
   </tr>
@@ -113,26 +149,31 @@ the product.
   {% if digest.actions %}
   <tr>
     <td style="padding:24px 32px 4px 32px;">
-      <span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#4e5248;">
+      <span class="d-ink-2" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#4e5248;">
         Who to ping
       </span>
     </td>
   </tr>
   {% for a in digest.actions %}
   <tr>
-    <td style="padding:12px 32px;{% if not forloop.last or digest.actions_overflow %}border-bottom:1px solid #d7dccd;{% endif %}">
+    <td {% if not forloop.last or digest.actions_overflow %}class="d-rule" {% endif %}style="padding:12px 32px;{% if not forloop.last or digest.actions_overflow %}border-bottom:1px solid #d7dccd;{% endif %}">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
-          <td style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;color:#191b16;">
+          <td class="d-ink" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;color:#191b16;">
             <span style="font-weight:600;">{{ a.contact.name }}</span>
-            <span style="color:#666a5e;"> &middot; {{ a.firm_name }}</span>
-            <div style="font-size:13px;color:#4e5248;margin-top:2px;">{{ a.reason }}</div>
+            <span class="d-ink-3" style="color:#666a5e;"> &middot; {{ a.firm_name }}</span>
+            <div class="d-ink-2" style="font-size:13px;color:#4e5248;margin-top:2px;">{{ a.reason }}</div>
           </td>
           <td align="right" style="white-space:nowrap;padding-left:12px;">
             {% if a.mailto and a.contact.email %}
-            <a href="{{ a.mailto }}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;color:#1f4e79;text-decoration:none;border:1px solid #cfdbe7;background-color:#e9eef4;border-radius:999px;padding:5px 12px;">{{ a.label }}</a>
+            {% comment %}10px, not 999px. These were the only capsules the
+            email had, and the app squared every control it draws to
+            `--r-ctl` ("buttons, inputs", coverage.css §1). A mail that still
+            drew pills was showing a shape the product no longer has, on the
+            one surface a student meets before opening it.{% endcomment %}
+            <a class="d-pill" href="{{ a.mailto }}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;font-weight:600;color:#1f4e79;text-decoration:none;border:1px solid #cfdbe7;background-color:#e9eef4;border-radius:10px;padding:5px 12px;">{{ a.label }}</a>
             {% else %}
-            <span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;">{{ a.label }}</span>
+            <span class="d-ink-3" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;">{{ a.label }}</span>
             {% endif %}
           </td>
         </tr>
@@ -142,9 +183,9 @@ the product.
   {% endfor %}
   {% if digest.actions_overflow %}
   <tr>
-    <td style="padding:10px 32px 16px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#666a5e;">
+    <td class="d-ink-3" style="padding:10px 32px 16px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#666a5e;">
       and {{ digest.actions_overflow }} more waiting in
-      <a href="{{ site_url }}{% url 'crm:week' %}" style="color:#1f4e79;">Today</a>.
+      <a class="d-accent" href="{{ site_url }}{% url 'crm:week' %}" style="color:#1f4e79;">Today</a>.
     </td>
   </tr>
   {% endif %}
@@ -153,7 +194,7 @@ the product.
   {% if digest.picks %}
   <tr>
     <td style="padding:24px 32px 4px 32px;">
-      <span style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#4e5248;">
+      <span class="d-ink-2" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:#4e5248;">
         New for you
       </span>
     </td>
@@ -167,16 +208,38 @@ the product.
   {% endcomment %}
   {% if digest.picks_note %}
   <tr>
-    <td style="padding:4px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#4e5248;line-height:1.5;">
+    <td class="d-ink-2" style="padding:4px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:13px;color:#4e5248;line-height:1.5;">
       {{ digest.picks_note }}.
     </td>
   </tr>
   {% endif %}
   {% for pick in digest.picks %}
   <tr>
-    <td style="padding:12px 32px;{% if not forloop.last %}border-bottom:1px solid #d7dccd;{% endif %}">
-      <a href="{{ pick.url }}" style="color:#1f4e79;text-decoration:none;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;">{{ pick.firm_name }} &middot; {{ pick.title }}</a>
-      <div style="font-size:13px;color:#666a5e;margin-top:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+    <td {% if not forloop.last %}class="d-rule" {% endif %}style="padding:12px 32px;{% if not forloop.last %}border-bottom:1px solid #d7dccd;{% endif %}">
+      <a class="d-accent" href="{{ pick.url }}" style="color:#1f4e79;text-decoration:none;font-weight:600;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;">{{ pick.firm_name }} &middot; {{ pick.title }}</a>
+      {% comment %}
+      THE LOCATION, WHICH IS THE ONLY THING TELLING TWO OF THESE ROWS APART.
+      Measured on the founder's own digest: two "Goldman Sachs · Investment
+      Banking Quantitative Strats, Summer Analyst" rows, byte-identical,
+      reading as a duplicate bug. They are not duplicates. They are New York
+      and Dallas.
+
+      Folding them is NOT the fix and would be a real loss. `_new_for_you`
+      already runs the feed's own `directory.dupes.fold_duplicates`, and that
+      function refuses this cluster on purpose: it folds only when "the firm,
+      the role and the place all say the same thing", and two cities are two
+      applications. The plain-text half of this pair has printed the location
+      all along (weekly_digest.txt); the HTML half was the one dropping it.
+      {% endcomment %}
+      {% if pick.location %}
+      <div class="d-ink-3" style="font-size:13px;color:#666a5e;margin-top:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
+        {{ pick.location }}
+      </div>
+      {% endif %}
+      {% comment %}Punctuation-normalised in `crm.digest.why_line`, never
+      rewritten: see its docstring for why the digest cannot take the
+      scorer's tooltip wording as it stands.{% endcomment %}
+      <div class="d-ink-3" style="font-size:13px;color:#666a5e;margin-top:2px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;">
         {{ pick.why }}
       </div>
       {% comment %}
@@ -186,7 +249,7 @@ the product.
       it would be the scraper's lag, not news.
       {% endcomment %}
       {% if pick.deadline_marker.posted and not pick.deadline_marker.past %}
-      <div style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;color:#2f6a45;margin-top:3px;">
+      <div class="d-ok" style="font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:12px;color:#2f6a45;margin-top:3px;">
         {{ pick.deadline_marker.countdown }}{% if pick.reported %} ({{ pick.reported.label }}){% endif %}
       </div>
       {% endif %}
@@ -200,7 +263,7 @@ the product.
   {% endcomment %}
   {% if digest.picks_reported and not digest.closing_reported %}
   <tr>
-    <td style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;line-height:1.5;">
+    <td class="d-ink-3" style="padding:10px 32px 0 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;line-height:1.5;">
       ({{ digest.picks_reported.label }}): {{ digest.picks_reported.why }}.
     </td>
   </tr>
@@ -208,10 +271,24 @@ the product.
   {% endif %}
 
   <tr>
-    <td style="padding:24px 32px 28px 32px;border-top:1px solid #d7dccd;">
-      <a href="{{ site_url }}{% url 'crm:week' %}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#fcfdf9;text-decoration:none;background-color:#1f4e79;border-radius:8px;padding:11px 20px;">Open Coverage</a>
-      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;margin-top:16px;line-height:1.5;">
+    <td class="d-rule" style="padding:24px 32px 28px 32px;border-top:1px solid #d7dccd;">
+      {% comment %}10px, matching the pills above and the app's own --r-ctl.
+      It was 8px, which was a third radius in a product that has one.
+      {% endcomment %}
+      <a class="d-btn" href="{{ site_url }}{% url 'crm:week' %}" style="display:inline-block;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#fcfdf9;text-decoration:none;background-color:#1f4e79;border-radius:10px;padding:11px 20px;">Open Coverage</a>
+      <div class="d-ink-3" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:12px;color:#666a5e;margin-top:16px;line-height:1.5;">
+        {% comment %}
+        THE WAY OUT. This paragraph explained why the mail arrived and then
+        offered nothing to do about it: the only off switch was a toggle on a
+        page you have to be signed in to reach, from a mail you are reading on
+        a phone. settings-page.md's LATER section said the digest ships with
+        "an unsubscribe link in the email that writes the same flag", and it
+        did not. It does now, and it writes literally that flag: see
+        accounts/unsubscribe.py, which is the one module outside
+        NotificationsForm allowed to touch `weekly_digest_opt_out`.
+        {% endcomment %}
         You're getting this because you're onboarded on Coverage. It runs weekly, built from your own tracked roles and contacts, and stays quiet the week neither has anything due.
+        <a class="d-accent" href="{{ site_url }}{% url 'accounts:digest_unsubscribe' digest.unsubscribe_token %}" style="color:#1f4e79;">Stop these emails</a>.
       </div>
     </td>
   </tr>

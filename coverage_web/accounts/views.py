@@ -32,8 +32,11 @@ from crm import campaigns as crm_campaigns, merge as crm_merge, recruitment as c
 from crm.models import Campaign, Contact, ContactMerge, UserFirm
 from directory.models import Firm
 
-from .models import PushSubscription
-from . import onboarding_preview, push, services, trials as pro_trials
+from .models import PushSubscription, User
+from . import (
+    onboarding_preview, push, services, trials as pro_trials,
+    unsubscribe as digest_unsub,
+)
 from .forms import (
     CYCLE_SUGGESTIONS,
     REGION_CHOICES,
@@ -1156,6 +1159,51 @@ def push_unsubscribe(request):
     PushSubscription.objects.for_user(request.user).filter(endpoint=endpoint).delete()
     record_event("push_unsubscribed", user=request.user)
     return HttpResponse(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Weekly-digest unsubscribe  (/welcome/unsubscribe/<token>/)  — no login
+# required, because the reader is holding an email, not a session.
+#
+# See accounts/unsubscribe.py for why the token exists, why it is long-lived,
+# why the write is a POST, and why this column has exactly one other writer.
+#
+# `hide_site_nav` in both renders: this URL sits under the /welcome/ prefix,
+# which is what the site nav uses to light SETTINGS, so without it a reader
+# arriving from an inbox met the whole product's navigation with the wrong
+# tab highlighted on a page that is not Settings. Same argument base.html
+# already makes for the onboarding wizard.
+# ---------------------------------------------------------------------------
+@require_http_methods(["GET", "POST"])
+def digest_unsubscribe(request, token):
+    try:
+        user_id = digest_unsub.read_token(token)
+    except digest_unsub.BadToken:
+        # One response for forged, malformed and expired alike — the token
+        # module's own note explains why distinguishing them would be an
+        # oracle. 400, not 404: the link is not a missing page, it is a
+        # signature this server refuses.
+        return HttpResponseBadRequest(
+            "That unsubscribe link is not valid. "
+            "You can turn the digest off in Settings."
+        )
+    user = User.objects.filter(pk=user_id).first()
+    if user is None:
+        # The account was deleted after the mail went out. Nothing to turn
+        # off, and saying so is friendlier than a signature error.
+        return HttpResponseBadRequest(
+            "That account no longer exists, so nothing is being sent to it."
+        )
+
+    if request.method == "POST":
+        changed = digest_unsub.apply_flag(user)
+        if changed:
+            record_event("digest_unsubscribed", user=user)
+        return render(request, "accounts/unsubscribe.html",
+                      {"done": True, "email": user.email, "hide_site_nav": True})
+    return render(request, "accounts/unsubscribe.html",
+                  {"done": False, "email": user.email, "token": token,
+                   "hide_site_nav": True})
 
 
 # ---------------------------------------------------------------------------

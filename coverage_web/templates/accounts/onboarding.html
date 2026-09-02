@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load csp %}
 
 {% block title %}Welcome to Coverage{% endblock %}
 {% block head %}{% include "accounts/_welcome_head.html" %}{% endblock %}
@@ -72,20 +73,38 @@ _welcome_head.html §2); nothing here hardcodes the step count.
       sentence a new user reads was describing a product that no longer
       ships. It then spent a third sentence promising the fields were
       editable later, which the Skip links and the empty-form-is-valid
-      behaviour say more convincingly than a sentence can.{% endcomment %}
+      behaviour say more convincingly than a sentence can.
+
+      "All optional" (2026-09-01) is a narrower claim than that dropped
+      sentence and earns its two words. Every field on ProfileForm is
+      `required=False` and always has been; what the step lacked was any way
+      to know it. The Skip link below is the other half of the fix and does
+      most of the work, but a student decides whether to start filling this
+      in before they have scrolled far enough to find it.{% endcomment %}
       <p class="ob-lede">Shapes your feed and your Today queue. Class year is what
-        the eligibility checks run on.</p>
+        the eligibility checks run on. All optional.</p>
     </header>
     <form method="post" id="ob-form" action="{% url 'accounts:onboarding' %}?step=profile" enctype="multipart/form-data">
       {% csrf_token %}
       <input type="hidden" name="step" value="profile">
       <div class="ob-step ob-step--profile">
         <div class="ob-card">
-          {% include "accounts/_profile_form.html" %}
+          {% comment %}`compact` trims Languages, Affiliations and Timezone to
+          a "set later in Settings" line and three hidden carry-through
+          inputs. The partial's own comment carries the whole argument and the
+          reason the hidden inputs are load-bearing.{% endcomment %}
+          {% include "accounts/_profile_form.html" with compact=1 %}
         </div>
       </div>
       <div class="ob-actions">
         <button type="submit" class="btn btn-primary">Continue</button>
+        {% comment %}The same Skip steps 2 and 3 have carried all along, and
+        the same funnel instrumentation: without `from=skip` + `skipped` a
+        declined step and an answered one land as the same event, so the
+        wizard could not say which of its questions people walk past. Step 1
+        was the only step that could not be declined, and it is the longest.
+        {% endcomment %}
+        <a class="ob-skip" href="{% url 'accounts:onboarding' %}?step={{ next_step }}&amp;from=skip&amp;skipped={{ step }}">Skip for now</a>
       </div>
     </form>
 
@@ -216,7 +235,8 @@ _welcome_head.html §2); nothing here hardcodes the step count.
         is added to your network until you tap Add, and you can disconnect at
         any time. If your contacts live in a spreadsheet instead, import the
         CSV. Firms are matched to the directory where we can and duplicates
-        are skipped.</p>
+        are skipped. If you just have one person in mind, add them by hand: a
+        name and a firm is enough.</p>
       <div class="ob-import-cta">
         {% comment %}Gated on the same `available` fact the Settings page
         reads (`accounts.views._gmail_live_context`): on a deploy with no
@@ -228,6 +248,17 @@ _welcome_head.html §2); nothing here hardcodes the step count.
           <a class="btn btn-primary" href="{% url 'capture:gmail_connect' %}">Connect Gmail</a>
         {% endif %}
         <a class="btn" href="{% url 'accounts:import' %}?from=welcome">Import a CSV</a>
+        {% comment %}
+        THE THIRD DOOR, AND THE ONLY ONE THAT WORKS ON A STUDENT WHO HAS
+        NEVER EMAILED ANYBODY. Gmail needs a sent-mail history; a CSV needs a
+        spreadsheet. A student with one name in their head and neither of
+        those had no route from this step to a queue card at all, and the
+        fastest real path in the product (Network's Add Contact, one name and
+        a firm) was not offered on the one screen that is about contacts.
+        Not a primary button: Gmail still leads, because on an account that
+        HAS the history it fills the board in one click.
+        {% endcomment %}
+        <a class="btn" href="{% url 'crm:contact_new' %}?from=welcome">Add One by Hand</a>
         <a class="btn" href="{% url 'accounts:import_template' %}">Download Template</a>
       </div>
       {% comment %}Said in plain text rather than left to the flow diagram
@@ -291,4 +322,91 @@ _welcome_head.html §2); nothing here hardcodes the step count.
 
   </div>{# /.ob-grid #}
 </div>
+
+{% comment %}
+THE ONE NUMBER ON THIS SITE THAT IS ALLOWED TO MOVE.
+
+Coverage removed its count-up animations on purpose (see base.html's note on
+`.dash-num`): a number that counts up on load is decoration, and on a
+throttled tab it froze mid-count and presented 235 as the real value of 908.
+This is the opposite case. The preview figure changes BECAUSE the student
+just ticked a chip, and the tween is the only thing that shows the cause and
+the effect are connected. Today it snaps from 2723 to 152 with no sign that
+the click did it.
+
+Three guards, all of them lessons from that removal:
+
+  * it only ever runs between two values the server has already sent, never
+    from zero on load, so there is no invented intermediate state;
+  * `prefers-reduced-motion` and a hidden tab skip the tween entirely and
+    take the final value immediately;
+  * a `setTimeout` backstop writes the server's exact text at 260ms whatever
+    happens to the frame loop, so a throttled tab cannot leave a wrong
+    number on screen. That failure is the whole reason count-up was deleted,
+    and it is closed here by construction rather than by hoping.
+
+`.ob-pv-num` is already `font-variant-numeric: tabular-nums`
+(_welcome_head.html), so the digits do not reflow while they run.
+{% endcomment %}
+{% script %}
+(function () {
+  var box = document.getElementById("ob-preview");
+  if (!box) return;
+  var DURATION = 200;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+  var before = null;
+
+  function figures() {
+    return Array.prototype.slice.call(box.querySelectorAll(".ob-pv-num"));
+  }
+  function readAll(els) {
+    return els.map(function (el) {
+      return parseInt(el.textContent.replace(/[^0-9-]/g, ""), 10);
+    });
+  }
+
+  box.addEventListener("htmx:beforeSwap", function () {
+    before = readAll(figures());
+  });
+
+  box.addEventListener("htmx:afterSwap", function () {
+    var els = figures();
+    var from = before;
+    before = null;
+    if (!from || from.length !== els.length) return;
+    // The server's own text, kept verbatim: it is what lands at the end and
+    // what a skipped tween shows immediately. The tween only ever borrows
+    // the element in between.
+    var settled = els.map(function (el) { return el.textContent; });
+    function land() {
+      els.forEach(function (el, i) {
+        el.textContent = settled[i];
+        delete el.dataset.obTween;
+      });
+    }
+    if (reduce.matches || document.hidden) return;
+    var to = readAll(els);
+    var moving = false;
+    els.forEach(function (el, i) {
+      if (isNaN(from[i]) || isNaN(to[i]) || from[i] === to[i]) return;
+      el.dataset.obTween = "1";
+      moving = true;
+    });
+    if (!moving) return;
+    var t0 = null;
+    function frame(ts) {
+      if (t0 === null) t0 = ts;
+      var p = Math.min(1, (ts - t0) / DURATION);
+      els.forEach(function (el, i) {
+        if (el.dataset.obTween !== "1") return;
+        el.textContent = String(Math.round(from[i] + (to[i] - from[i]) * p));
+      });
+      if (p < 1) requestAnimationFrame(frame);
+      else land();
+    }
+    requestAnimationFrame(frame);
+    setTimeout(land, DURATION + 60);
+  });
+})();
+{% endscript %}
 {% endblock %}
