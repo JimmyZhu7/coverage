@@ -67,6 +67,35 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cd-firmname { margin: 0 0 var(--s1); font-size: var(--fs-s); font-weight: var(--w-med); }
   .cd-none { margin: 0; color: var(--ink-3); font-size: var(--fs-s); }
 
+  /* The facts strip: one line, above the first card, of things the row
+     already implied. Chips rather than a sentence because they are four
+     independent facts, not a claim — and `--r-badge`, not `--r-ctl`,
+     because none of them is pressable. The one that IS (the blank-region
+     link) is a link, and reads like one. */
+  .cd-facts { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0;
+    font-size: var(--fs-xs); }
+  .cd-fact { display: inline-flex; align-items: center; padding: 3px var(--s3);
+    border: 1px solid var(--line); border-radius: var(--r-badge);
+    background: var(--surface); color: var(--ink-2); }
+  .cd-fact-ask { color: var(--accent-ink); border-color: var(--accent-line);
+    text-decoration: none; }
+  .cd-fact-ask:hover { text-decoration: underline; }
+
+  /* Chats: the debrief list under History. A subheading rather than a fifth
+     card — what a chat taught you belongs beside the chat itself. */
+  .cd-subh { margin: var(--s4) 0 var(--s2); font-size: var(--fs-s);
+    display: flex; align-items: center; gap: var(--s2); }
+  .cd-chats { list-style: none; margin: 0; padding: 0; }
+  .cd-chat { display: flex; align-items: baseline; gap: var(--s3);
+    padding: var(--s2) 0; border-top: 1px solid var(--line);
+    font-size: var(--fs-s); flex-wrap: wrap; }
+  .cd-chat-when { font-family: var(--font-mono); font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums; flex: none; }
+  .cd-chat-note { flex: 1 1 200px; min-width: 0; color: var(--ink-2); }
+  .cd-chat-done { flex: none; font-size: var(--fs-xs); color: var(--ok);
+    font-weight: var(--w-med); }
+  .cd-chat .btn { flex: none; padding: 4px var(--s3); font-size: var(--fs-xs); }
+
   /* History timeline: a spine of dots, inbound green like the activity feed,
      rising in with a capped stagger. */
   .cd-log { list-style: none; margin: 0; padding: 0; }
@@ -1238,6 +1267,20 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     font: inherit; font-size: var(--fs-micro); letter-spacing: inherit;
     text-transform: inherit; color: var(--accent-ink); cursor: pointer; }
   .lane-all:hover { text-decoration: underline; }
+  /* The per-firm region chips under the Unplaced group header. `.btn` does
+     the shape (one control family, `--r-ctl`, the rule spelled out on `.btn`
+     in coverage.css); this only sets the row and takes the type down to the
+     header's own micro size, because a full-size button per group would
+     out-shout the names it sits above. */
+  .net-group-chips { display: flex; flex-wrap: wrap; gap: var(--s2);
+    margin: 0 0 var(--s3); }
+  /* THE PAIRING, not decoration. This row sets its own `display`, which ties
+     on specificity with the browser's `[hidden] { display: none }` and, later
+     in the cascade, wins — so without this line the chips would render
+     visible with JS off and post whatever happened to be ticked elsewhere on
+     the page. Exactly the bug `.bulk-bar[hidden]` below was fixing. */
+  .net-group-chips[hidden] { display: none; }
+  .net-group-chip { padding: 5px var(--s3); font-size: var(--fs-micro); }
   /* The bulk bar: sticky to the bottom of the actions panel, present only
      when something is selected. `margin-top: auto` is deliberately absent —
      the lanes already divide the panel's height between them, and pushing
@@ -2157,4 +2200,17 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @keyframes moved-pulse { from { transform: scale(1); opacity: 0.5; }
     to { transform: scale(2.6); opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .act-moved i::after { animation: none; } }
+
+  /* The one-field ask under the Leverage axis (crm.views.contact_role).
+     Full width of the axis grid, under the meta line it replaces the dead
+     half of, and quiet: this is a question the page is asking, not an
+     action it is urging. `--r-ctl` on both halves, one control family. */
+  .axis-ask { grid-column: 1 / -1; display: flex; gap: var(--s2);
+    margin-top: var(--s2); }
+  .axis-ask input { flex: 1 1 auto; min-width: 0; padding: 5px var(--s3);
+    font-size: var(--fs-xs); border: 1px solid var(--line);
+    border-radius: var(--r-ctl); background: var(--surface); color: var(--ink); }
+  .axis-ask input:focus-visible { outline: 2px solid var(--accent);
+    outline-offset: 1px; }
+  .axis-ask .btn { flex: none; padding: 5px var(--s3); font-size: var(--fs-xs); }
 </style>

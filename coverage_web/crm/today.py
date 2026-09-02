@@ -156,12 +156,34 @@ def _cadence_params(user) -> dict[str, int]:
 _SNOOZE_EXEMPT_ACTIONS = frozenset({"reping"})
 
 
-def _build_actions(user):
+def _build_actions(user, *, pace: bool = True):
     """The cadence queue, shared by Today and Network: fetch the user's
     contacts/touches/tiers/firm-dates, run `cadence.due_actions`, and dress
     each action for display (label, prose reason, warmth, compose link,
     last-touch evidence, deadline chip).
-    Returns (actions, contacts)."""
+    Returns (actions, contacts).
+
+    `pace=False` runs the queue WITHOUT the per-firm DAILY budget
+    (`_pace_by_firm`). The one caller is the weekly digest
+    (`crm.digest._who_to_ping`), and the reason is that the daily cap's
+    disclosure is a sentence about today: "Citi already has 2 today, so this
+    one is better tomorrow", appended to `reason`, rendered verbatim by every
+    surface that prints a reason. In a Monday email read on Thursday it is
+    not merely useless, it is wrong — the day it names has passed
+    (`audit-personalization-networking.md` D5, and `sent_today` there is
+    counted against digest morning besides).
+
+    The rule underneath is a SPACING rule, not a daily allowance: "give it a
+    couple of days or a week before sending others in the team an email"
+    (`research-outreach-mechanics.md` §5, Grade B), 4 to 5 people max per
+    group and 1 to 2 groups per bank (`research-networking-norms.md` §7c,
+    Grade A on the ceiling). A weekly email therefore applies a WEEKLY
+    budget, which the digest does itself when it trims — it does not get to
+    apply a daily one and it does not get to apply none.
+
+    Nothing else may pass `pace=False`. Today's page, the Network board and
+    the assistant all speak about a single day and all keep the daily cap.
+    """
     # localtime, NOT the bare `timezone.now()` this used to be. Same INSTANT
     # either way — `localtime` only changes which zone the value is expressed
     # in — but `cadence.due_actions` does `today = as_of.date()` on it
@@ -542,7 +564,7 @@ def _build_actions(user):
         str(x).strip() for x in (getattr(user, "affiliations", None) or ()) if str(x).strip()
     )
     actions = _gate_and_rank(actions, tiers, openings, sent_today, today,
-                             affiliations=affiliations)
+                             affiliations=affiliations, pace=pace)
     return actions, contacts
 
 
@@ -1101,7 +1123,8 @@ def _pace_by_firm(actions: list[dict], sent_today, today) -> None:
 
 
 def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
-                   sent_today=None, today=None, affiliations=()) -> list[dict]:
+                   sent_today=None, today=None, affiliations=(),
+                   pace: bool = True) -> list[dict]:
     """Decide who the queue may speak about, what it may ask them for, and in
     what order. Everything here is a VIEW decision — see `crm/relevance.py`'s
     module docstring for why none of it belongs in `coverage_domain.cadence`.
@@ -1234,7 +1257,16 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
         a["ev"] = rel.expected_value(a, affiliations=affiliations)
         out.append(a)
 
-    _pace_by_firm(out, sent_today, today)
+    if pace:
+        _pace_by_firm(out, sent_today, today)
+    else:
+        # The keys still exist and still read False, so every caller that
+        # asks a card whether it is paced gets an answer rather than a
+        # KeyError — the flag is absent, not the concept. See
+        # `_build_actions`' `pace` argument for who turns it off and why.
+        for a in out:
+            a["firm_paced"] = False
+            a["pace_note"] = ""
     return out
 
 

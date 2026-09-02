@@ -411,29 +411,59 @@ def _who_to_ping(user) -> tuple[list[dict], int]:
     function needed no edit, which is the property worth keeping.
 
     Returns (shown, overflow) — `overflow` is a count, never a silently
-    truncated list, matching Today's own capped-lane convention."""
+    truncated list, matching Today's own capped-lane convention.
+
+    NO DAILY PACE, A WEEKLY ONE INSTEAD. `pace=False` is passed for the
+    reason spelled out on `_build_actions`: the daily cap discloses itself in
+    a sentence about TODAY — "Citi already has 2 today, so this one is better
+    tomorrow" — appended to the `reason` this email renders verbatim, and
+    `sent_today` behind it is counted against digest morning. `3c9227f`
+    sorted those cards last; it did not stop them being printed, and on the
+    founder's queue they stayed out of the email only because 8 unpaced cards
+    happened to exist (`audit-personalization-networking.md` D5).
+
+    The rule the cap encodes is a SPACING rule, so this email applies the
+    same ceiling over its own period: `FIRM_DAILY_CONTACT_CAP * 5`, five
+    working days of the daily budget, which is 10 — inside the 4-to-5 people
+    per group and 1-to-2 groups per bank the sources actually support
+    (`research-networking-norms.md` §7c, Grade A on the ceiling). It bites
+    only on a queue with more than ten cards at one firm; below that the list
+    is what it was before this change, in the same order.
+
+    SAID PLAINLY: at today's `MAX_ACTIONS` of 8 the ceiling of 10 cannot
+    bind, because eight rows cannot contain eleven of anything. It is written
+    anyway because the two numbers are independent — the first is "how long
+    may an email be", the second is "how many people at one bank may it name"
+    — and raising the first without the second is exactly how a digest turns
+    into twelve Citi cards. The test pins it with `MAX_ACTIONS` raised.
+    """
     from crm.today import (
-        CLASS_PARK, _build_actions, _today_class, _today_sort_key,
+        CLASS_PARK, FIRM_DAILY_CONTACT_CAP, _build_actions, _pace_firm_key,
+        _today_class, _today_sort_key,
     )
 
-    raw_actions, _contacts = _build_actions(user)
+    raw_actions, _contacts = _build_actions(user, pace=False)
     pingable = [a for a in raw_actions if _today_class(a) != CLASS_PARK]
-    # Firm-paced actions sort LAST, then by Today's own key within each group.
-    # `_gate_and_rank` marks an action `firm_paced` when its firm already has
-    # its day's sends (see `FIRM_DAILY_CONTACT_CAP`), and the reason string it
-    # rewrites reads "... already has 2 today, so this one is better
-    # tomorrow". Sorting purely by `_today_sort_key` filled this email with
-    # exactly those: measured on the founder's live queue, 6 of the 8 cards
-    # the digest picked were paced while genuinely-sendable ones sat in the
-    # 36-card overflow. An email whose whole top half says "not today" is not
-    # a worse ordering of the same information, it is the wrong information.
-    #
-    # They still sort in rather than out, for the same reason Today keeps
-    # showing their cards: paced is "later", never "never", and on a day when
-    # a student has already worked one bank hard the honest digest is a short
-    # one that says so, not a padded one that hides why.
-    pingable.sort(key=lambda a: (bool(a.get("firm_paced")), _today_sort_key(a)))
-    shown = pingable[:MAX_ACTIONS]
+    pingable.sort(key=_today_sort_key)
+
+    # The weekly per-firm budget, spent in Today's own order so the digest and
+    # the page agree about WHICH ten. `_pace_firm_key` rather than a firm id
+    # of this module's own making: it is the same key the daily cap spends,
+    # market-aware, and a contact with no nameable employer returns None and
+    # is never budgeted at all (P5, and P3 — a student with ten or fewer cards
+    # per firm sees no difference).
+    weekly_cap = FIRM_DAILY_CONTACT_CAP * 5
+    spent: dict = {}
+    shown = []
+    for a in pingable:
+        if len(shown) >= MAX_ACTIONS:
+            break
+        key = _pace_firm_key(a["contact"])
+        if key is not None:
+            if spent.get(key, 0) >= weekly_cap:
+                continue
+            spent[key] = spent.get(key, 0) + 1
+        shown.append(a)
     overflow = max(0, len(pingable) - len(shown))
     return shown, overflow
 

@@ -490,6 +490,123 @@ def _inverted_reading(raw: str, email: str) -> tuple[str, str] | None:
     return " ".join(candidate.split()), tail
 
 
+# The titles a signature block is allowed to name. Deliberately SHORT and
+# deliberately not a taxonomy: these are the rungs `research-networking-norms.
+# md` §2b and §2d actually reason about (referrals flow downward, and the
+# seniority a student can reach is a function of connection strength), plus
+# the recruiting seat, which the queue treats as its own kind of contact
+# (`crm.relevance.is_recruiting_role`). Anything else is left blank, because
+# a role the product invented is worse than no role at all (P1).
+#
+# Word-bounded on both sides, so "Vice President" is read and "Vice
+# Presidents Club" is not, and "Analyst" is read out of "Investment Banking
+# Analyst" while "Analytics" is refused.
+_SIGNATURE_TITLE_RE = re.compile(
+    r"\b("
+    r"Managing\s+Director|Executive\s+Director|Vice\s+President|VP"
+    r"|Associate|Analyst|Director|Principal|Partner"
+    r"|Recruiter|Recruiting|Recruitment"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# `linkedin.com/in/<slug>`, and nothing looser. A profile URL is a fact the
+# sender published in their own signature; anything that is not this exact
+# shape is somebody else's page or a company link, and guessing is what the
+# blank is for. LinkedIn is blank on all 265 of the founder's live contacts
+# (`audit-crm-lifecycle.md` §2), which is what makes the free one worth
+# taking.
+_SIGNATURE_LINKEDIN_RE = re.compile(
+    r"(?:https?://)?(?:[a-z]{2,3}\.)?linkedin\.com/in/([A-Za-z0-9\-_%]{2,100})",
+    re.IGNORECASE,
+)
+
+# How far past the name line a title is still that person's title. Three
+# lines: the shapes real signatures take are "Name / Title / Firm", "Name /
+# Title" and "Name / Firm / Title", and past the third line the text is
+# address, disclaimer and pronouns.
+_SIGNATURE_LOOKAHEAD = 3
+
+
+def signature_facts(body: str, name: str) -> tuple[str, str]:
+    """`(role, linkedin_url)` read off a message's own signature block.
+
+    DETERMINISTIC, AND SILENT WHEN UNSURE (P1). The rule is one sentence: a
+    line equal to the sender's display name, then the next one to three
+    lines, and a title only if one of `_SIGNATURE_TITLE_RE`'s words appears
+    in them. No line equal to the name means no role, whatever else the mail
+    says — the anchor is what makes this evidence rather than a keyword hunt
+    over a whole email, where "spoke to our Managing Director" would type
+    the sender as an MD.
+
+    WHY THIS EXISTS. Role is blank on 136 of the founder's 151 capture rows
+    and `role_hint` is set on 1 of 137 accepted proposals — 0.7% — because
+    the only source the door has ever had is a title the sender happened to
+    type inside their From display name (`split_display_name`). The reply
+    body carries it far more often, and reading it costs nothing.
+
+    Same posture as `split_display_name`: what the sender typed, trimmed,
+    never inferred, never composed out of pieces. The returned role is the
+    matched title in the sender's OWN casing and nothing around it, so
+    "Investment Banking Analyst | Global Markets" yields "Analyst".
+
+    THE BODY IS READ, NEVER SHOWN. `_evidence_line`'s rule is unchanged: a
+    proposal card still displays a subject at most. A title and a profile
+    URL are facts about the person, not quotations of their mail.
+
+    Returns ("", "") for anything unrecognised, which is every case this
+    function is not sure about.
+    """
+    text = (body or "")
+    wanted = " ".join((name or "").split()).casefold()
+    if not text.strip():
+        return "", ""
+
+    link = ""
+    m = _SIGNATURE_LINKEDIN_RE.search(text)
+    if m:
+        link = f"https://www.linkedin.com/in/{m.group(1)}"[:255]
+
+    if not wanted:
+        return "", link
+
+    lines = [ln.strip() for ln in text.splitlines()]
+    for i, line in enumerate(lines):
+        # The anchor: a line that is the display name and nothing else.
+        # `strip("-–—|,;:")` so "Jane Doe |" and "-- Jane Doe" still anchor;
+        # a line with other WORDS on it does not, because then the name is
+        # part of a sentence rather than the top of a signature.
+        if " ".join(line.strip("-–—|,;: ").split()).casefold() != wanted:
+            continue
+        window = " \n ".join(lines[i + 1: i + 1 + _SIGNATURE_LOOKAHEAD])
+        hit = _SIGNATURE_TITLE_RE.search(window)
+        if hit:
+            return " ".join(hit.group(1).split())[:255], link
+    return "", link
+
+
+def _signature_role(finding: dict, name: str) -> str:
+    """`signature_facts`' role for one finding, off whatever body text the
+    finding carries.
+
+    THE KNOWN LIMIT, STATED RATHER THAN HIDDEN. Today a finding carries
+    `snippet` — Gmail's own ~200-character preview — and not the message
+    body, because nothing downstream of the classifier has ever needed one
+    (`capture.mailfacts._finding_text` reads the same pair). A signature sits
+    at the END of a reply, so the snippet almost never reaches it and this
+    almost always returns "". That is a blank, which is exactly today's
+    behaviour, and the parser is pinned by its own tests either way.
+
+    The moment `capture.gmail_live._classify_message` puts the decoded body
+    on the finding under `body`, every reply starts answering. That seam is
+    owned by the Gmail workstream; this function is written so that landing
+    it needs no edit here.
+    """
+    return signature_facts(
+        finding.get("body") or finding.get("snippet") or "", name
+    )[0]
+
+
 def split_display_name(raw: str, *, email: str = "") -> tuple[str, str]:
     """(person_name, role_hint) off a From: display name. Only ever splits on
     punctuation the sender typed; a plain "Jane Doe" comes back whole with no
@@ -1187,6 +1304,7 @@ def consider_finding(
                 if not existing.role_hint:
                     raw_name = (finding.get("name") or "").strip()
                     _, role_hint = split_display_name(raw_name, email=email)
+                    role_hint = role_hint or _signature_role(finding, raw_name)
                     if role_hint:
                         existing.role_hint = role_hint
                         existing.recruiting_hint = is_recruiting_role(role_hint)
@@ -1200,6 +1318,14 @@ def consider_finding(
 
     raw_name = (finding.get("name") or "").strip() or localpart
     name, role_hint = split_display_name(raw_name, email=email)
+    # The display name is the WEAKER source and still gets first refusal:
+    # the sender typed it on purpose, in the header, about themselves. The
+    # signature is the fallback because it is read out of a body, which is a
+    # noisier place — see `signature_facts` for the anchor that makes it
+    # evidence rather than a keyword hunt. `name` is passed, not `raw_name`:
+    # the anchor is the person's name, and `raw_name` may still carry the
+    # role that `split_display_name` just refused to read.
+    role_hint = role_hint or _signature_role(finding, name)
 
     # RECRUITMENT RELEVANCE, the same person-level rule the Network board
     # and the daily queue apply (`crm.recruitment` — the founder's

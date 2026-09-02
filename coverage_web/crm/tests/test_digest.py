@@ -322,19 +322,25 @@ def test_an_open_role_beside_a_closed_one_still_reaches_the_digest():
 
 
 # ---------------------------------------------------------------------------
-# The daily email must not lead with the cards the queue has just deferred.
+# A weekly email does not apply a daily cap.
 #
-# `_gate_and_rank` marks an action `firm_paced` once its firm has had its
-# day's sends, and rewrites the reason to "... already has 2 today, so this
-# one is better tomorrow". `_who_to_ping` sorted purely by `_today_sort_key`,
-# which is blind to that flag — measured on the founder's live queue, 6 of the
-# 8 cards the digest chose were paced while sendable ones sat in a 36-card
-# overflow. An email whose top half says "not today" is not a worse ordering
-# of the same information; it is the wrong information.
+# REWRITTEN 2026-09-02, and the reason is worth stating because the old test
+# was not wrong so much as aimed one step short. It pinned "firm-paced cards
+# sort last" (`3c9227f`), which was the right fix for the ordering and left
+# the real defect standing: a paced card still PRINTS, and what it prints is
+# "Crowded Bank already has 2 today, so this one is better tomorrow" — a
+# sentence about a single day, in an email read across a week, with
+# `sent_today` behind it counted against digest morning
+# (`audit-personalization-networking.md` D5). On the founder's queue it
+# stayed out of the email only because 8 unpaced cards happened to exist.
+#
+# So the digest now runs the queue with `pace=False` and applies its own
+# weekly ceiling instead. The old assertion is subsumed: nothing is paced, so
+# no paced card can lead.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_the_digest_prefers_contacts_that_are_actually_sendable_today():
+def test_the_weekly_digest_never_paces_a_card_by_the_day():
     from crm.digest import _who_to_ping
 
     user = get_user_model().objects.create_user(
@@ -345,12 +351,12 @@ def test_the_digest_prefers_contacts_that_are_actually_sendable_today():
     UserFirm.all_objects.create(user=user, firm=quiet, tier=1, status="target")
 
     long_ago = timezone.now() - timedelta(days=40)
-    # Four at one firm: the cap lets two through and paces the rest.
+    # Four at one firm — enough that the DAILY cap of 2 would have paced two
+    # of them on Today's page. It must not pace them here.
     for i in range(4):
         c = Contact.all_objects.create(user=user, name=f"Crowded {i}",
                                        firm=crowded, email=f"c{i}@crowded.test")
         Touch.all_objects.create(user=user, contact=c, kind="email", ts=long_ago)
-    # One at a firm with room. It is NEWER, so a flag-blind sort ranks it last.
     c = Contact.all_objects.create(user=user, name="Quiet One", firm=quiet,
                                    email="q@quiet.test")
     Touch.all_objects.create(user=user, contact=c, kind="email",
@@ -358,15 +364,102 @@ def test_the_digest_prefers_contacts_that_are_actually_sendable_today():
 
     shown, _overflow = _who_to_ping(user)
     assert shown, "fixture should produce a queue"
-    paced = [a for a in shown if a.get("firm_paced")]
-    unpaced = [a for a in shown if not a.get("firm_paced")]
-    # Every sendable card outranks every deferred one.
-    assert shown[:len(unpaced)] == unpaced, (
-        "a firm-paced action was ordered above one the student can still send "
-        "today; the digest would lead with 'better tomorrow'"
+    assert not [a for a in shown if a.get("firm_paced")]
+    for a in shown:
+        assert "better tomorrow" not in (a.get("reason") or "")
+
+    # And Today itself is untouched: the same account, the same queue, the
+    # daily cap still applied.
+    from crm.today import _build_actions
+
+    today_actions, _ = _build_actions(user)
+    assert [a for a in today_actions if a.get("firm_paced")], (
+        "the daily cap must still fire on Today's own queue; only the weekly "
+        "email opts out"
     )
-    if paced:
-        assert shown.index(paced[0]) >= len(unpaced)
+
+
+@pytest.mark.django_db
+def test_no_rendered_reason_in_the_digest_talks_about_today():
+    """The acceptance criterion, read literally: a weekly email may not say
+    "today" or "better tomorrow" in the sentence under a name."""
+    from crm.digest import _who_to_ping
+
+    user = get_user_model().objects.create_user(
+        email="words@x.test", password="pw12345!")
+    firm = Firm.objects.create(slug="wordy-bank", name="Wordy Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1, status="target")
+    long_ago = timezone.now() - timedelta(days=40)
+    for i in range(6):
+        c = Contact.all_objects.create(user=user, name=f"W {i}", firm=firm,
+                                       email=f"w{i}@wordy.test")
+        Touch.all_objects.create(user=user, contact=c, kind="email", ts=long_ago)
+
+    shown, _ = _who_to_ping(user)
+    assert shown
+    for a in shown:
+        reason = (a.get("reason") or "").lower()
+        assert "today" not in reason
+        assert "better tomorrow" not in reason
+
+
+@pytest.mark.django_db
+def test_the_weekly_list_caps_one_firm_at_the_weekly_budget(monkeypatch):
+    """Twelve cards at one firm, and the email may name at most ten of them.
+
+    `MAX_ACTIONS` is raised for the duration: at its shipped value of 8 the
+    ceiling of 10 cannot bind, and the two numbers are independent — "how
+    long may this email be" and "how many people at one bank may it name".
+    This test is what stops the second one going missing the day the first
+    one moves.
+    """
+    from crm import digest as digest_mod
+    from crm.today import FIRM_DAILY_CONTACT_CAP
+
+    monkeypatch.setattr(digest_mod, "MAX_ACTIONS", 20)
+
+    user = get_user_model().objects.create_user(
+        email="twelve@x.test", password="pw12345!")
+    firm = Firm.objects.create(slug="one-bank", name="One Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1, status="target")
+    long_ago = timezone.now() - timedelta(days=40)
+    for i in range(12):
+        c = Contact.all_objects.create(user=user, name=f"One {i}", firm=firm,
+                                       email=f"o{i}@one.test")
+        Touch.all_objects.create(user=user, contact=c, kind="email", ts=long_ago)
+
+    shown, overflow = digest_mod._who_to_ping(user)
+    at_firm = [a for a in shown if a.get("firm_name") == "One Bank"]
+    assert len(at_firm) <= FIRM_DAILY_CONTACT_CAP * 5 == 10
+    assert len(at_firm) == 10
+    # Trimmed, never silently dropped: the rest are counted.
+    assert overflow == 2
+
+
+@pytest.mark.django_db
+def test_the_weekly_budget_changes_nothing_below_its_ceiling():
+    """P3. Nine cards at one firm is the common case and the list is exactly
+    what `_today_sort_key` orders, unabridged."""
+    from crm.digest import _who_to_ping
+    from crm.today import _build_actions, _today_class, _today_sort_key, CLASS_PARK
+
+    user = get_user_model().objects.create_user(
+        email="below@x.test", password="pw12345!")
+    firm = Firm.objects.create(slug="small-bank", name="Small Bank")
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1, status="target")
+    long_ago = timezone.now() - timedelta(days=40)
+    for i in range(5):
+        c = Contact.all_objects.create(user=user, name=f"S {i}", firm=firm,
+                                       email=f"s{i}@small.test")
+        Touch.all_objects.create(user=user, contact=c, kind="email", ts=long_ago)
+
+    raw, _ = _build_actions(user, pace=False)
+    expected = sorted([a for a in raw if _today_class(a) != CLASS_PARK],
+                      key=_today_sort_key)[:MAX_ACTIONS]
+    shown, _overflow = _who_to_ping(user)
+    assert [a["contact"]["id"] for a in shown] == [
+        a["contact"]["id"] for a in expected
+    ]
 
 
 # ---------------------------------------------------------------------------

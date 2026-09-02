@@ -263,8 +263,13 @@ def merge(user, primary: Contact, duplicate: Contact, evidence: str = "") -> Con
 
         was_archived = duplicate.archived
         if not was_archived:
+            # `archived_at` travels with the flag everywhere it is written
+            # (`crm.views._set_archived` is the other place), so the archived
+            # ledger can date a merged-away duplicate the same way it dates
+            # one a person archived by hand. Undo below clears it again.
             duplicate.archived = True
-            duplicate.save(update_fields=["archived"])
+            duplicate.archived_at = timezone.now()
+            duplicate.save(update_fields=["archived", "archived_at"])
 
         return ContactMerge.all_objects.create(
             user=user,
@@ -329,7 +334,8 @@ def undo(record: ContactMerge) -> bool:
 
         if duplicate.archived and not record.duplicate_was_archived:
             duplicate.archived = False
-            duplicate.save(update_fields=["archived"])
+            duplicate.archived_at = None
+            duplicate.save(update_fields=["archived", "archived_at"])
 
         record.status = ContactMerge.STATUS_UNDONE
         record.resolved_at = timezone.now()
