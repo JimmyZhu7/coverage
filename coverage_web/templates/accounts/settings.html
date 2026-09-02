@@ -111,8 +111,7 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
   .settings-main { min-width: 0; display: flex; flex-direction: column; gap: var(--s5); }
   .settings-msgs { max-width: 1160px; margin: 0 auto var(--s4); }
 
-  .set-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); box-shadow: var(--shadow-1); scroll-margin-top: 92px; }
+  .set-card { scroll-margin-top: 92px; }
   .set-head { padding: var(--s5) var(--s5) 0; }
   .set-head h2 { margin: 0 0 var(--s1); font-size: var(--fs-l); }
   .set-head p { margin: 0; color: var(--ink-2); font-size: var(--fs-s); max-width: 60ch; }
@@ -501,8 +500,7 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
      most once per keystroke: cheap, and off under reduced-motion.
      ====================================================================== */
   .cad-viz { display: grid; gap: var(--s5); margin-bottom: var(--s5);
-    padding: var(--s5) var(--s5) var(--s4);
-    border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--paper); }
+    padding: var(--s5) var(--s5) var(--s4); }
   /* Shared section label (coverage.css §6b), minus the rule — it captions a
      diagram. Only the mono face is local; the gap down to the track belongs
      to .cad-rail's margin-top and is deliberately NOT set here. Owning it in
@@ -724,8 +722,7 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
      of chips wraps at most one or two per row and buys nothing. */
   .tf-board { display: flex; flex-direction: column; gap: var(--s3);
     margin: var(--s3) 0 var(--s5); }
-  .tf-col { background: var(--surface); border: 1px solid var(--line);
-    border-left: var(--edge-w) solid var(--line-strong); border-radius: var(--r-panel);
+  .tf-col { border-left-color: var(--line-strong);
     padding: var(--s3) var(--s4);
     transition: border-color var(--t-fast), background-color var(--t-fast); }
   /* Escalating emphasis, not a severity colour (the Coverage Gaps strip's
@@ -942,7 +939,7 @@ that don't already declare explicit htmx behaviour.
 
     <div class="settings-main">
       {# ---- Profile ---- #}
-      <section class="set-card kin-reveal" id="profile" style="--i:0"
+      <section class="set-card kin-reveal panel" id="profile" style="--i:0"
                aria-labelledby="profile-h">
         <div class="set-head">
           <h2 id="profile-h">Profile</h2>
@@ -975,7 +972,7 @@ that don't already declare explicit htmx behaviour.
       which is why the rail and the page disagreed about their order. A new
       student answers it once, on the way in.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="work-auth" style="--i:1"
+      <section class="set-card kin-reveal panel" id="work-auth" style="--i:1"
                aria-labelledby="work-auth-h">
         <div class="set-head">
           <h2 id="work-auth-h">Work Authorization</h2>
@@ -1014,7 +1011,7 @@ that don't already declare explicit htmx behaviour.
       phone), the digest is an account preference posted like every other
       section. Deadline alerts join them when push is configured.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="preferences" style="--i:2"
+      <section class="set-card kin-reveal panel" id="preferences" style="--i:2"
                aria-labelledby="preferences-h">
         <div class="set-head">
           <h2 id="preferences-h">Preferences</h2>
@@ -1102,7 +1099,7 @@ that don't already declare explicit htmx behaviour.
       {% endif %}
 
       {# ---- Target Firms ---- #}
-      <section class="set-card kin-reveal" id="firms" style="--i:3"
+      <section class="set-card kin-reveal panel" id="firms" style="--i:3"
                aria-labelledby="firms-h">
         <div class="set-head">
           <h2 id="firms-h">Target Firms</h2>
@@ -1130,7 +1127,7 @@ that don't already declare explicit htmx behaviour.
           <p class="field-hint">Pick a tier, or drag. Higher tiers get more attention from Coverage.</p>
           <div class="tf-board" id="tf-board" data-tf-board>
             {% for col in firm_tiers %}
-              <div class="tf-col" data-tier="{{ col.tier }}">
+              <div class="tf-col panel panel--flat panel--edge" data-tier="{{ col.tier }}">
                 <h3 class="tf-col-title">Tier {{ col.tier }}
                   <span class="tf-col-count" data-tf-count>{{ col.firms|length }}</span></h3>
                 <div class="tf-chips" data-tf-chips>
@@ -1440,7 +1437,7 @@ that don't already declare explicit htmx behaviour.
       bad cadence number can't blank your weekly goal). Same pattern the
       Preferences card above uses for its two save paths.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="cadence" style="--i:4"
+      <section class="set-card kin-reveal panel" id="cadence" style="--i:4"
                aria-labelledby="cadence-h">
         <div class="set-head">
           <h2 id="cadence-h">Pace &amp; Cadence</h2>
@@ -1503,7 +1500,7 @@ that don't already declare explicit htmx behaviour.
           readers and skimmers alike. The number inputs stay the controls:
           keyboard, validation, and the POST contract are all theirs.
           {% endcomment %}
-          <div class="cad-viz" id="cad-viz">
+          <div class="cad-viz panel panel--inset panel--flat" id="cad-viz">
             <div class="cad-rail-wrap">
               <p class="cad-rail-title">A cold contact's life</p>
               <div class="cad-rail" aria-hidden="true">
@@ -1660,7 +1657,7 @@ that don't already declare explicit htmx behaviour.
       that has never fired for this student.
       {% endcomment %}
       {% if campaigns or dismissed_proposals or merge_suggestions or recent_merges %}
-      <section class="set-card kin-reveal" id="decisions" style="--i:5"
+      <section class="set-card kin-reveal panel" id="decisions" style="--i:5"
                aria-labelledby="decisions-h">
         <div class="set-head">
           <h2 id="decisions-h">Decisions</h2>
@@ -1940,7 +1937,7 @@ that don't already declare explicit htmx behaviour.
       Always rendered, unlike Gmail Live below: every account has a plan and
       a balance whether or not Gmail Live is even configured on this deploy.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="credits" style="--i:6"
+      <section class="set-card kin-reveal panel" id="credits" style="--i:6"
                aria-labelledby="credits-h">
         <div class="set-head">
           <h2 id="credits-h">Credits</h2>
@@ -2058,7 +2055,7 @@ that don't already declare explicit htmx behaviour.
       (gmail_live.is_configured()); an unconfigured deploy shows nothing
       here rather than a dead-end connect button.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="gmail-live" style="--i:7"
+      <section class="set-card kin-reveal panel" id="gmail-live" style="--i:7"
                aria-labelledby="gmail-live-h">
         <div class="set-head">
           <h2 id="gmail-live-h">Gmail Live</h2>
@@ -2235,7 +2232,7 @@ that don't already declare explicit htmx behaviour.
       {% endcomment %}
 
       {# ---- Sign-In & Security ---- #}
-      <section class="set-card kin-reveal" id="security" style="--i:8"
+      <section class="set-card kin-reveal panel" id="security" style="--i:8"
                aria-labelledby="security-h">
         <div class="set-head">
           <h2 id="security-h">Sign-In &amp; Security</h2>
@@ -2361,7 +2358,7 @@ that don't already declare explicit htmx behaviour.
       For a signed-in student these are the ONLY in-app links to Privacy and
       Terms, so they can be restyled and they cannot be dropped.
       {% endcomment %}
-      <section class="set-card kin-reveal" id="data" style="--i:9"
+      <section class="set-card kin-reveal panel" id="data" style="--i:9"
                aria-labelledby="data-h">
         <div class="set-head">
           <h2 id="data-h">Your Data</h2>
@@ -2453,7 +2450,7 @@ that don't already declare explicit htmx behaviour.
       one bucket would bury it where nobody would look for it.
       {% endcomment %}
       {# ---- Danger Zone ---- #}
-      <section class="set-card is-danger kin-reveal" id="danger" style="--i:10"
+      <section class="set-card is-danger kin-reveal panel" id="danger" style="--i:10"
                aria-labelledby="danger-h">
         <div class="set-head">
           <h2 id="danger-h">Danger Zone</h2>

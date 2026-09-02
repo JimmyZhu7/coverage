@@ -14,7 +14,7 @@ Takes `net` ({firm_name, firm_slug, people, total, more}) and an optional
 gets the tighter two-name form. `net` is None — and this partial is never
 included — when there is no firm to join on.
 {% endcomment %}
-<div class="rp{% if compact %} rp-compact{% endif %}">
+<div class="rp panel panel--inset panel--flat{% if compact %} rp-compact{% endif %}">
   {% if net.people %}
     {% comment %}The sentence the PM review asked for, in the second person
     and with a number in it. "You know 1 person here" is the whole join said

@@ -14,7 +14,7 @@
     resets go. Changing it means adding the new one, verifying it, then making it
     primary.</p>
 
-  <div class="panel">
+  <div class="panel panel--page">
     {% if emailaddresses %}
       {% comment %}
       Two separate <form>s on purpose. allauth's EmailView dispatches on which
@@ -57,7 +57,7 @@
   </div>
 
   {% if can_add_email %}
-    <div class="panel">
+    <div class="panel panel--page">
       <h2>Add an Address</h2>
       <form class="acct-form" method="post" action="{% url 'account_email' %}">
         {% csrf_token %}

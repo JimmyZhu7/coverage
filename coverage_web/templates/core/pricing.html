@@ -87,9 +87,7 @@
      arbitrary width. */
   .price-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5);
     max-width: var(--page-w); margin: 0 auto; align-items: stretch; }
-  .price-card { border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface); box-shadow: var(--shadow-1);
-    padding: var(--s6); display: flex; flex-direction: column;
+  .price-card { padding: var(--s6); display: flex; flex-direction: column;
     position: relative; overflow: hidden; }
   .price-card.featured { border-color: var(--accent-line);
     box-shadow: 0 0 0 1px var(--accent-line), var(--shadow-2); }
@@ -325,9 +323,7 @@
     letter-spacing: -0.01em; margin: 0 0 var(--s2); color: var(--ink); }
 
   .price-faq { max-width: 640px; margin: var(--s6) auto 0; }
-  .price-faq details { border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface); padding: var(--s3) var(--s4);
-    margin-bottom: var(--s2); }
+  .price-faq details { padding: var(--s3) var(--s4); margin-bottom: var(--s2); }
   .price-faq summary { cursor: pointer; font-weight: var(--w-med);
     font-size: var(--fs-s); color: var(--ink); }
   .price-faq p { color: var(--ink-2); font-size: var(--fs-s);
@@ -401,7 +397,7 @@
 
 {% block content %}
 <div class="page">
-  <header class="kin-hero">
+  <header class="kin-hero panel">
     <span class="kin-hero-icon">{% include "_icon.html" with name="home" %}</span>
     <p class="kin-hero-eyebrow">Pricing</p>
     <h1 class="kin-hero-title">The board is free. The sync is Pro.</h1>
@@ -448,7 +444,7 @@
 
     <div class="aud-panel panel-ind">
       <div class="price-grid">
-        <article class="price-card featured kin-reveal" style="--i:0">
+        <article class="price-card featured kin-reveal panel" style="--i:0">
           <div class="plan-head">
             <h2 class="plan-name">Free</h2>
             <span class="plan-badge">Available now</span>
@@ -508,7 +504,7 @@
           </div>
         </article>
 
-        <article class="price-card preview kin-reveal" style="--i:1">
+        <article class="price-card preview kin-reveal panel" style="--i:1">
           <div class="plan-head">
             <h2 class="plan-name">Pro</h2>
             <span class="plan-badge soon">In the works</span>
@@ -707,7 +703,7 @@
 
     <div class="aud-panel panel-team">
       <div class="price-grid">
-        <article class="price-card kin-reveal" style="--i:0">
+        <article class="price-card kin-reveal panel" style="--i:0">
           <div class="plan-head">
             <h2 class="plan-name">Team</h2>
             <span class="plan-badge soon">In the works</span>
@@ -747,7 +743,7 @@
           </div>
         </article>
 
-        <article class="price-card kin-reveal" style="--i:1">
+        <article class="price-card kin-reveal panel" style="--i:1">
           <div class="plan-head">
             <h2 class="plan-name">Enterprise</h2>
             <span class="plan-badge soon">In the works</span>
@@ -776,19 +772,19 @@
   </section>
 
   <section class="price-faq">
-    <details>
+    <details class="panel panel--flat">
       <summary>Do I need an account to see opportunities?</summary>
       <p>No. The feed is public. An account adds the CRM: the Today queue and the Network board.</p>
     </details>
-    <details>
+    <details class="panel panel--flat">
       <summary>Will the free plan shrink when paid tiers launch?</summary>
       <p>No. This list is the floor. Free may grow; it will not shrink. Pro is for sync, speed, and heavier AI use, the things that cost real money to run.</p>
     </details>
-    <details>
+    <details class="panel panel--flat">
       <summary>What would a Team plan look like for my club?</summary>
       <p>Shared tiers, shared coverage, one flat plan an officer manages, not per-seat billing to negotiate. If you run a finance society, we want your input before it ships.</p>
     </details>
-    <details>
+    <details class="panel panel--flat">
       <summary>What happens to my data if I stop using Coverage?</summary>
       <p>Export it as CSV whenever you like. Delete your account yourself and everything goes with it, immediately.</p>
     </details>

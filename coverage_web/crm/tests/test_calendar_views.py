@@ -450,7 +450,7 @@ def test_the_view_you_are_in_marks_today_for_the_control_to_find(
     # selector strings the click handler carries in its own source.
     assert ' is-today"' in markup, view
     if view == "day":
-        assert 'class="cal-dayv is-today"' in markup
+        assert 'class="cal-dayv panel is-today"' in markup
 
 
 def test_today_in_range_follows_the_week_not_the_month(client, logged_in):

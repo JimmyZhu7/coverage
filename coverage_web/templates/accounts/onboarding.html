@@ -88,7 +88,7 @@ _welcome_head.html §2); nothing here hardcodes the step count.
       {% csrf_token %}
       <input type="hidden" name="step" value="profile">
       <div class="ob-step ob-step--profile">
-        <div class="ob-card">
+        <div class="ob-card panel">
           {% comment %}`compact` trims Languages, Affiliations and Timezone to
           a "set later in Settings" line and three hidden carry-through
           inputs. The partial's own comment carries the whole argument and the
@@ -283,7 +283,7 @@ _welcome_head.html §2); nothing here hardcodes the step count.
   </div>{# /.ob-main #}
 
   <aside class="ob-side">
-    <div class="ob-pv" aria-label="Live preview of what your answers feed">
+    <div class="ob-pv panel panel--inset panel--flat" aria-label="Live preview of what your answers feed">
       <p class="ob-pv-head">
         <span class="ob-pv-eyebrow">{% if step == "firms" %}Your picked firms{% elif step == "work_auth" %}Sponsorship, answered{% elif step == "import" %}Your Network board{% else %}Your Opportunities feed{% endif %}</span>
         <span class="ob-pv-dot" aria-hidden="true"></span>

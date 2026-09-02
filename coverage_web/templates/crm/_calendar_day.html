@@ -26,7 +26,10 @@ No narrow-screen agenda for this view. It is already a single column of rows
 and reads on a phone as-is; the month and week grids are the ones that have
 to hand off to `.cal-agenda` below 820px.
 {% endcomment %}
-<section class="cal-dayv{% if day_cell.is_today %} is-today{% endif %}">
+{% comment %}`panel` sits BEFORE the conditional: test_calendar_views.py asserts
+the class attribute ENDS in ` is-today"`, so that the marker cannot be matched
+by the selector strings the click handler carries in its own source.
+{% endcomment %}<section class="cal-dayv panel{% if day_cell.is_today %} is-today{% endif %}">
   <header class="cal-dayv-head">
     <span class="cal-num">{{ anchor.day }}</span>
     <p class="cal-dayv-date">{{ anchor|date:"l j F Y" }}{% if day_cell.is_today %} · today{% endif %}</p>

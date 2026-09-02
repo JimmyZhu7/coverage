@@ -391,7 +391,10 @@ def test_the_picker_offers_every_tier_the_board_renders(client, tracked_firms):
     tier would appear in both places or neither."""
     body = client.get(reverse(SETTINGS)).content.decode()
     board = body[body.index('class="tf-board"') : body.index('for="tf-search"')]
-    columns = set(re.findall(r'<div class="tf-col" data-tier="(\d+)"', board))
+    # `class="tf-col[^"]*"`: the column also wears the shared panel primitive
+    # and its modifiers since 2026-09-02 (D-13), so the attribute is no longer
+    # the single token it was. The tier is what this test is about.
+    columns = set(re.findall(r'<div class="tf-col[^"]*" data-tier="(\d+)"', board))
     for chip in _chips(board):
         picker = chip[chip.index('class="tf-tier"') : chip.index("</select>")]
         assert set(re.findall(r'<option value="(\d+)"', picker)) == columns

@@ -22,7 +22,7 @@ updated to pass the split still work: `matching_firms` falls back to empty and
 `other_firms` to the plain `firms` list, so the heading never renders and the
 grid looks exactly as it always has.
 {% endcomment %}
-<div class="ob-firms" id="firm-list">
+<div class="ob-firms panel panel--inset panel--flat" id="firm-list">
   {% if matching_firms %}
     <p class="ob-firms-heading">Matches your profile</p>
   {% endif %}

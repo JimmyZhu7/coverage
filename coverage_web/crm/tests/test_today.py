@@ -1156,9 +1156,11 @@ def test_the_rail_orders_pace_before_deadlines_before_unplaced(client):
     assert ctx["unplaced_arrivals"], "precondition: an unplaced arrival exists"
 
     body = _login_and_get(client, user)
-    pace = body.index('class="rail-card pace-card"')
+    # No closing quote: the rail card also wears the shared panel primitive
+    # since 2026-09-02 (D-13). The card's own name still identifies it.
+    pace = body.index('class="rail-card pace-card')
     deadlines = body.index('<h3 class="rail-title">Deadlines')
-    unplaced = body.index('class="rail-card unplaced-card"')
+    unplaced = body.index('class="rail-card unplaced-card')
     assert pace < deadlines < unplaced, (
         f"expected pace ({pace}) < deadlines ({deadlines}) < "
         f"unplaced ({unplaced}) in rendered order"

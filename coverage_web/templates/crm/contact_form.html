@@ -5,9 +5,7 @@
 {% block head %}
 <style>
   .cf-wrap { max-width: 640px; margin: 0 auto; }
-  .cf-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
-    padding: var(--s6) var(--s6) var(--s5); }
+  .cf-card { padding: var(--s6) var(--s6) var(--s5); }
   .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s4); }
   .cf-full { grid-column: 1 / -1; }
   .cf-card label { font-size: var(--fs-s); }
@@ -58,7 +56,7 @@
     </div>
   </header>
 
-  <div class="cf-card">
+  <div class="cf-card panel">
     <form method="post">
       {% csrf_token %}
       {% if form.non_field_errors %}<p class="cf-err">{{ form.non_field_errors|striptags }}</p>{% endif %}

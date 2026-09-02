@@ -145,8 +145,7 @@
   .cal-key b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     color: var(--ink); }
 
-  .cal-grid { border: 1px solid var(--line); border-radius: var(--r-panel);
-    overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1);
+  .cal-grid { overflow: hidden;
     {% comment %}
     220ms `settle`, the keyframe coverage.css §15 already defines for htmx's
     own swaps. Every navigation on this page — a month arrow, Today, the
@@ -390,8 +389,7 @@
      Same panel as `.cal-grid` — one border, one radius, one shadow — so the
      three views read as three arrangements of one surface rather than three
      pages. */
-  .cal-dayv { border: 1px solid var(--line); border-radius: var(--r-panel);
-    overflow: hidden; background: var(--surface); box-shadow: var(--shadow-1); }
+  .cal-dayv { overflow: hidden; }
   .cal-dayv-head { display: flex; align-items: center; gap: var(--s3);
     flex-wrap: wrap; padding: var(--s3) var(--s4); background: var(--paper);
     border-bottom: 1px solid var(--line-strong); }
@@ -468,9 +466,8 @@
   .cal-add > summary::before { content: "+"; font-size: var(--fs-l); line-height: 1;
     transition: transform var(--t-med); }
   .cal-add[open] > summary::before { transform: rotate(45deg); }
-  .cal-form { margin-top: var(--s3); padding: var(--s4); border: 1px solid var(--line);
-    border-radius: var(--r-panel); background: var(--surface);
-    box-shadow: var(--shadow-1); animation: rise-in 260ms cubic-bezier(0.22,1,0.36,1) both; }
+  .cal-form { margin-top: var(--s3); padding: var(--s4);
+    animation: rise-in 260ms cubic-bezier(0.22,1,0.36,1) both; }
   .cal-form-grid { display: grid; gap: var(--s3);
     grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
   .cal-form label { display: flex; flex-direction: column; gap: 5px; margin: 0;
@@ -599,7 +596,7 @@
     how the open state still gets a full line for its form.{% endcomment %}
     <details class="cal-add" id="add"{% if form_open %} open{% endif %}>
       <summary class="btn">Add to the calendar</summary>
-      <form class="cal-form" method="post" action="{% url 'crm:calendar_add' %}">
+      <form class="cal-form panel" method="post" action="{% url 'crm:calendar_add' %}">
         {% csrf_token %}
         {% comment %}The view and anchor travel with the submission so a
         successful add returns to the week or day you added from, and a failed
@@ -647,7 +644,7 @@
     {% include "crm/_calendar_day.html" %}
   {% else %}
     {# ---- Month or week grid (>=820px) ---- #}
-    <div class="cal-grid">
+    <div class="cal-grid panel">
       <div class="cal-dow" aria-hidden="true">
         {% for d in weekday_names %}<span>{{ d }}</span>{% endfor %}
       </div>

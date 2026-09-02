@@ -431,8 +431,8 @@ def test_cycle_months_counts_a_genuinely_confirmed_close():
 # inlines its own stylesheet, which names `.tl-row.is-past` in a rule, so a
 # substring search for "is-past" is satisfied by the CSS on every page.
 # ---------------------------------------------------------------------------
-PAST_ROW = 'class="tl-row confirmed is-past"'
-LIVE_ROW = 'class="tl-row confirmed"'
+PAST_ROW = 'class="tl-row confirmed is-past panel panel--flat"'
+LIVE_ROW = 'class="tl-row confirmed panel panel--flat"'
 
 
 def test_a_past_date_is_marked_and_muted(client):

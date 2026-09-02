@@ -139,7 +139,7 @@ pure CSS, so the panel opens with the script broken or still loading.
     {% endcomment %}
     <div class="peek" data-peek{% if dismiss_undo.source == "peek" %} data-peek-state="open"{% endif %}>
       <button type="button" class="peek-toggle" aria-expanded="{% if dismiss_undo.source == "peek" %}true{% else %}false{% endif %}" aria-controls="bulk-save-peek">Which ones?</button>
-      <div class="peek-panel" id="bulk-save-peek">
+      <div class="peek-panel panel panel--raised panel--inset" id="bulk-save-peek">
         <p class="peek-head">Closing soonest first</p>
         <ul class="peek-list">
           {% for r in bulk_save_peek.rows %}

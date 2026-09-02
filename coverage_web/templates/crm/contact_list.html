@@ -116,7 +116,7 @@
     say the same thing 54 times; this says it once.{% endcomment %}
     <p class="strip-note">{{ advocate_summary.line }}</p>
     {% endif %}
-    <div class="gap-row">
+    <div class="gap-row panel">
       {% for g in gaps %}
         <div class="gap-card kin-reveal gap-t{{ g.tier }}" style="--i:{{ forloop.counter0 }}"
              title="Tier {{ g.tier }} (×{{ g.tier_weight }}) × {{ g.label|lower }} ({{ g.gap_points }}){% if g.deadline_bonus %} + deadline in {{ g.days_out }}d ({{ g.deadline_bonus }}){% endif %} = exposure {{ g.exposure }}{% if g.open %} · {{ g.open }} open role{{ g.open|pluralize }} right now, which breaks ties on equal exposure{% endif %}">
@@ -206,7 +206,7 @@
           {% if g.sourcing %}
             <details class="src" data-firm="{{ g.slug }}">
               <summary class="src-toggle">Who to find</summary>
-              <div class="src-panel">
+              <div class="src-panel panel panel--raised">
                 <p class="src-note">{{ sourcing_note }}</p>
                 <ul class="src-list">
                   {% if g.sourcing_note %}
@@ -281,7 +281,7 @@
     <form id="place-form" method="post" action="{% url 'crm:contacts_bulk' %}">
       {% csrf_token %}
       <input type="hidden" name="scope" value="{{ scope }}">
-      <div class="net-panel">
+      <div class="net-panel panel">
         {% for group in unplaced_groups %}
           <div class="net-group" data-place-group>
             <div class="net-group-head">
@@ -374,7 +374,7 @@
     those two don't already cover before you reach a single tier section.
     {% endcomment %}
     <h2 class="strip-title strip-title-lg">Covered Firms</h2>
-      <div class="net-panel">
+      <div class="net-panel panel">
       {% comment %}
       THE LEGEND that used to open this panel is gone. Four warmth dots and
       an "SP" swatch, explained once, above a grid where most of 54 cards
@@ -445,7 +445,7 @@
               leaves. See `setTier` below for the `startViewTransition` that
               opts the DOM move into it.
               {% endcomment %}
-              <div class="firm-card kin-reveal" draggable="true" data-firm="{{ fc.firm.id }}"
+              <div class="firm-card kin-reveal panel panel--inset" draggable="true" data-firm="{{ fc.firm.id }}"
                    style="--i:{{ forloop.counter0 }}; view-transition-name: firm-card-{{ fc.firm.id }}"
                    title="Tier drives your action priorities. Drag this card to another lane to change its tier (or use Settings > Target Firms on mobile).">
                 {% comment %}
@@ -715,7 +715,7 @@
     number, not a new metric or a threshold.
     {% endcomment %}
     {% if contact_total %}
-    <div class="warmth-list">
+    <div class="warmth-list panel">
       {% for section in sections %}
         {% if section.cards %}
           {% comment %}Every section is a warmth bucket — School scope used

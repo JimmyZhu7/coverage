@@ -25,7 +25,7 @@
   {% endif %}
 
   {% if result and not result.errors %}
-    <div class="panel">
+    <div class="panel panel--page">
       <h2 style="margin-top:0">Import Summary</h2>
       <table class="summary">
         <tr><td>Rows in file</td><td>{{ result.total_rows }}</td></tr>
@@ -39,7 +39,7 @@
   {% endif %}
 
   {% if result.unmatched_firms %}
-    <div class="panel">
+    <div class="panel panel--page">
       {% if result.unmatched_firms|length == 1 %}
         <h2 style="margin-top:0">1 firm didn't match the directory — link it?</h2>
       {% else %}

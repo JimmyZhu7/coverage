@@ -116,8 +116,11 @@ def _today(client, user) -> str:
 def _card(body: str) -> str:
     """Just the rail card, so an assertion about it cannot accidentally be
     satisfied by the rest of a 200KB page."""
+    # `[^"]*`: the rail card also wears the shared panel primitive since
+    # 2026-09-02 (D-13). Still anchored on `unplaced-card`, so it still
+    # cannot match any other rail card on the page.
     match = re.search(
-        r'<div class="rail-card unplaced-card">(.*?)</div>', body, re.S
+        r'<div class="rail-card unplaced-card[^"]*">(.*?)</div>', body, re.S
     )
     return match.group(1) if match else ""
 

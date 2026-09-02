@@ -179,11 +179,7 @@ this file is not redundant with it — see the note there.
   /* ===================================================================
      4. Card + actions
      =================================================================== */
-  .ob-card {
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s5);
-    box-shadow: var(--shadow-1);
-  }
+  .ob-card { padding: var(--s5); }
   .ob-actions { margin-top: var(--s5); display: flex; gap: var(--s3);
     align-items: center; flex-wrap: wrap; }
   .ob-skip { color: var(--ink-2); font-size: var(--fs-s); }
@@ -288,9 +284,7 @@ this file is not redundant with it — see the note there.
   .ob-firms {
     display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
     gap: var(--s2); align-content: start;
-    max-height: 46vh; min-height: 120px; overflow-y: auto;
-    padding: var(--s2); border: 1px solid var(--line);
-    border-radius: var(--r-panel); background: var(--paper);
+    max-height: 46vh; min-height: 120px; overflow-y: auto; padding: var(--s2);
     scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
   }
   .ob-firms::-webkit-scrollbar { width: 8px; }
@@ -434,10 +428,7 @@ this file is not redundant with it — see the note there.
      `--surface`, one hairline, no shadow. It is a reflection of the form's
      state, not a second thing competing to be filled in.
      =================================================================== */
-  .ob-pv {
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--paper); padding: var(--s4);
-  }
+  .ob-pv { padding: var(--s4); }
   .ob-pv-head { display: flex; align-items: center; gap: var(--s2);
     margin: 0 0 var(--s3); }
   .ob-pv-eyebrow {

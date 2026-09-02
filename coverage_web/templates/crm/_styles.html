@@ -19,8 +19,9 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cd-rail { position: sticky; top: 88px; display: flex; flex-direction: column;
     gap: var(--s4); }
   @media (max-width: 1023px) { .cd-rail { position: static; } }
-  .cd-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }
+  /* `.panel` (coverage.css §5) carries the surface, hairline, corner and
+     lift. What is left here is this card's own inset. */
+  .cd-card { padding: var(--s5); }
   .cd-h { display: flex; align-items: center; gap: var(--s2);
     font-size: var(--fs-l); margin: 0 0 var(--s3); letter-spacing: -0.01em; }
   .cd-count { font-family: var(--font-mono); font-size: var(--fs-s);
@@ -209,9 +210,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .quickadd > summary { list-style: none; cursor: pointer; }
   .quickadd > summary::-webkit-details-marker { display: none; }
   .quickadd-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
-    min-width: 232px; display: flex; flex-direction: column;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); box-shadow: var(--shadow-2); padding: 6px;
+    min-width: 232px; display: flex; flex-direction: column; padding: 6px;
     animation: csel-open 140ms cubic-bezier(0.2, 0.6, 0.2, 1) both; }
   .quickadd-menu a { display: flex; flex-direction: column; gap: 1px;
     padding: 9px 11px; border-radius: 8px; color: var(--ink);
@@ -292,10 +291,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .lane-seed { margin-bottom: var(--s6); }
   .seed-list { list-style: none; margin: 0; padding: 0;
     display: flex; flex-direction: column; gap: var(--s2); }
+  /* `panel panel--flat`. The left border is 2px DASHED, not the 3px edge
+     rule: a seed is a suggestion, not a claim, so it does not get `--edge`. */
   .seed-row { display: flex; align-items: center; gap: var(--s3);
-    background: var(--surface); border: 1px solid var(--line);
     border-left: 2px dashed var(--accent-line);
-    border-radius: var(--r-panel); padding: var(--s3) var(--s4);
+    padding: var(--s3) var(--s4);
     transition: border-color var(--t-fast); }
   .seed-row:hover { border-color: var(--accent-line);
     border-left-color: var(--accent); }
@@ -332,9 +332,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   /* Up next: the held-back remainder. Collapsed by default, exact count in
      the summary, complete list inside — the cap paces, it never filters. */
-  .upnext { margin-bottom: var(--s6); background: var(--surface);
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    padding: var(--s3) var(--s4); box-shadow: var(--shadow-1); }
+  .upnext { margin-bottom: var(--s6); padding: var(--s3) var(--s4); }
   .upnext > summary { cursor: pointer; list-style: none; display: flex;
     align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
   .upnext > summary::-webkit-details-marker { display: none; }
@@ -460,8 +458,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     color: var(--ink-3); }
   .daybar-hint .dbh b { color: var(--ink-2); font-weight: 600; }
 
-  .rail-card { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s5); box-shadow: var(--shadow-1); }
+  .rail-card { padding: var(--s5); }
   /* .rail-title: the shared section label (coverage.css §6b), plus the flex
      row below that lets a "see all" link share its line. */
   .rail-empty { color: var(--ink-3); font-size: var(--fs-s); margin: 0; }
@@ -579,9 +576,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      of every wrapped row, and the old fix for that was a horizontal
      scroller nobody scrolled. */
   .ribbon { margin: var(--s4) 0 var(--s5); }
+  /* `panel`, minus the surface: the ground is the hairline colour and the
+     1px gaps between the stats are what shows it, so the panel's own
+     background is the one property this row overrides. */
   .ribbon-row { display: flex; flex-wrap: wrap; gap: 1px;
-    background: var(--line); border: 1px solid var(--line);
-    border-radius: var(--r-panel); overflow: hidden; box-shadow: var(--shadow-1); }
+    background: var(--line); overflow: hidden; }
   .ribbon-stat { flex: 1 1 11rem; min-width: 0; background: var(--surface);
     padding: 11px var(--s4) 12px; display: flex; flex-direction: column; gap: 3px;
     text-decoration: none; color: inherit; position: relative;
@@ -673,8 +672,9 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      The container is what the row actually lives in. */
   .act-grid { display: flex; flex-direction: column; gap: var(--s2);
     container-type: inline-size; container-name: queue; }
-  .act-card { background: var(--surface); border: 1px solid var(--line);
-    border-left: var(--edge-w) solid var(--accent); border-radius: var(--r-panel);
+  /* `panel panel--edge`; the edge's WIDTH is the modifier's, its colour is
+     this row's (and each lane's, below). */
+  .act-card { border-left-color: var(--accent);
     padding: var(--s3) var(--s4);
     /* The actions track is `auto`, so it claims its max-content width before
        the middle gets a share — with the four-control confirm-a-chat row
@@ -682,7 +682,6 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        buttons wrap to a second line instead, which is the cheaper loss. */
     display: grid; grid-template-columns: minmax(180px, 15rem) minmax(15rem, 1fr) auto;
     gap: var(--s2) var(--s5); align-items: center;
-    box-shadow: var(--shadow-1);
     transition: border-color var(--t-med), box-shadow var(--t-med), transform var(--t-med); }
   .act-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   /* A ROW, not a column: the warmth chip belongs to the person, not to the
@@ -955,10 +954,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   that key off `.gap-card .src` keep working.
   ======================================================================
   {% endcomment %}
-  .gap-row { display: flex; flex-direction: column;
-    background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
-    overflow: visible; }
+  .gap-row { display: flex; flex-direction: column; overflow: visible; }
   .gap-card { display: grid; align-items: center;
     grid-template-columns: minmax(0, 1fr) auto minmax(9rem, auto) auto auto;
     gap: var(--s2) var(--s4);
@@ -1102,10 +1098,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   which is where the toggle now lives. The four nth-child flip rules the grid
   needed are gone with the grid.
   {% endcomment %}
+  /* `panel panel--raised`, with the stronger hairline a floating panel needs
+     to read against the row it covers. */
   .src-panel { position: absolute; z-index: 20; top: calc(100% - var(--s2));
     right: 0; left: auto; width: min(340px, 90vw); max-width: 78vw;
-    background: var(--surface); border: 1px solid var(--line-strong);
-    border-radius: var(--r-panel); box-shadow: var(--shadow-2);
+    border-color: var(--line-strong);
     padding: var(--s3); display: flex; flex-direction: column; gap: var(--s2);
     /* Literal duration and easing, the way every other `animation:` in
        this app writes it. `--t-med` is a TRANSITION token: it expands to
@@ -1371,9 +1368,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      single surface panel. The panels have the SAME fixed height and always
      show the scrollbar lane at their right edge — the scrollbar is a
      permanent element of the widget, not an occasional apparition. */
-  .net-panel { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s4) var(--s5);
-    box-shadow: var(--shadow-1);
+  .net-panel { padding: var(--s4) var(--s5);
     flex: 1; height: min(70vh, 640px); overflow-y: scroll; }
   {% comment %}
   The Covered Firms panel gives up its own scroller. Measured at 1280x800 on
@@ -1503,10 +1498,10 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .tier-grid.is-capped::-webkit-scrollbar-thumb { background: var(--line-strong);
     border-radius: 999px; border: 2px solid var(--paper); background-clip: padding-box; }
   .tier-grid.is-capped::-webkit-scrollbar-thumb:hover { background: var(--accent); }
-  .firm-card { background: var(--paper); border: 1px solid var(--line);
-    border-radius: var(--r-panel); padding: var(--s3) var(--s4); cursor: grab;
+  /* `panel panel--inset`: paper, because it sits on `.net-panel`'s surface. */
+  .firm-card { padding: var(--s3) var(--s4); cursor: grab;
     height: 100%; overflow: hidden;
-    display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-1);
+    display: flex; flex-direction: column; gap: 6px;
     transition: box-shadow var(--t-med), transform var(--t-med), opacity var(--t-fast); }
   .firm-card:hover { box-shadow: var(--shadow-2); transform: translateY(-1px); }
   .firm-card.dragging { opacity: 0.5; cursor: grabbing; }
@@ -1680,9 +1675,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      pins; only the template (below) skips a `<details>` with zero cards.
      A student with zero contacts at all keeps a plain "No contacts yet."
      line instead of an empty bordered box. */
-  .warmth-list { background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-panel); box-shadow: var(--shadow-1);
-    margin-bottom: var(--s6); overflow: hidden; }
+  .warmth-list { margin-bottom: var(--s6); overflow: hidden; }
   .warmth-row { border-top: 1px solid var(--line); }
   .warmth-row:first-of-type { border-top: 0; }
   /* The whole line is the disclosure control, not just the glyph at its
@@ -2126,8 +2119,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .situation-card { flex: 1 1 260px; min-width: 220px;
     display: flex; align-items: center; gap: var(--s3);
     padding: var(--s3) var(--s4);
-    border: 1px solid var(--line); border-radius: var(--r-panel);
-    background: var(--surface); color: inherit; text-decoration: none;
+    color: inherit; text-decoration: none;
     transition: border-color var(--t-fast), background var(--t-fast); }
   /* `text-decoration: none` has to be repeated HERE, not just on the base
      rule above: coverage.css's global `a:hover { text-decoration:

@@ -502,7 +502,7 @@ select on.
         // search box needing its own copy of the menu's absolute-position
         // math. `menu` itself goes back to being a plain in-flow list.
         var panel = document.createElement("div");
-        panel.className = "csel-panel";
+        panel.className = "csel-panel panel panel--raised";
         panel.hidden = true;
         wrap.appendChild(panel);
 
@@ -796,7 +796,7 @@ select on.
   Escape leaves. A native <dialog>, so focus trapping and Escape are the
   browser's job, not ours.
   {% endcomment %}
-  <dialog class="palette" id="cmdk" aria-label="Search Coverage">
+  <dialog class="palette panel" id="cmdk" aria-label="Search Coverage">
     <input type="search" id="cmdk-q" placeholder="Search people, firms, roles…"
            autocomplete="off" spellcheck="false">
     <ul id="cmdk-results" role="listbox"></ul>

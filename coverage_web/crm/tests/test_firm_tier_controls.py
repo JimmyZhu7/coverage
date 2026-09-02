@@ -45,7 +45,7 @@ def test_the_drag_still_works(client, student):
     UserFirm.all_objects.create(user=student, firm=firm, tier=1)
     client.force_login(student)
     body = client.get(reverse("crm:contact_list")).content.decode()
-    assert '<div class="firm-card kin-reveal" draggable="true"' in body
+    assert '<div class="firm-card kin-reveal panel panel--inset" draggable="true"' in body
     for handler in ("dragstart", "dragover", "drop"):
         assert f'"{handler}"' in body
 

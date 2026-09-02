@@ -33,7 +33,7 @@
     <div class="pagehead-actions">
       <details class="quickadd">
         <summary class="btn btn-primary">＋ Quick add</summary>
-        <div class="quickadd-menu">
+        <div class="quickadd-menu panel panel--raised">
           <a href="{% url 'crm:contact_new' %}?quick=1">
             <span>A person</span><span class="quickadd-hint">Name and firm, ten seconds</span>
           </a>
@@ -78,7 +78,7 @@
   now" figure). The entrance here moves the CELL, never the digits.
   {% endcomment %}
   <section class="ribbon" aria-label="Your firms and deadlines">
-    <div class="ribbon-row">
+    <div class="ribbon-row panel">
       {% comment %}
       ZERO IS NOT A NUMBER WORTH PRINTING HERE. "0 Open at your firms" is the
       first figure a student who skipped firm selection meets, and it reads as
@@ -283,7 +283,7 @@
     <h2 class="sec-label">Moved this week</h2>
     <div class="situation-strip">
       {% for e in situation_events %}
-        <a class="situation-card kin-reveal" style="--i: {{ forloop.counter0 }}"
+        <a class="situation-card kin-reveal panel panel--flat" style="--i: {{ forloop.counter0 }}"
            href="{{ e.url }}" target="_blank" rel="nofollow noopener">
           <span class="situation-card-text">
             {% if e.kind == "deadline_moved" %}

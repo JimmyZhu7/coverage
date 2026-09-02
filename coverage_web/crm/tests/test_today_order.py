@@ -71,7 +71,7 @@ DEBRIEF = 'class="lane lane-debrief"'
 PROPOSALS = 'class="lane lane-proposals"'
 CRITICAL = 'class="lane lane-critical"'
 COLD = 'class="lane lane-cold"'
-HELD = 'class="upnext"'
+HELD = 'class="upnext panel"'
 STALE = 'class="lane lane-stale"'
 
 
