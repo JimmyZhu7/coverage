@@ -8,9 +8,15 @@ the exact count and the policy holding it. Right (`.cockpit-rail`, ordered
 2026-08-31 per the founder's own words: "outreach this week goes on top,
 then deadlines, then unplaced"): a getting-started checklist while setup is
 unfinished, the week's pace, the chats already on the calendar, this cycle's
-deadlines, this week's unplaced arrivals while there are any, and a
-recent-activity feed. Re-rendered whole on every quick action so all of it
-stays in sync.
+deadlines, and a recent-activity feed. Re-rendered whole on every quick
+action so all of it stays in sync.
+
+The unplaced arrivals are no longer the fourth card in that order. On
+2026-09-02 the founder asked for them inside the pace card ("Combine this
+with unsorted contacts, make into one widget"), so the third rung of his own
+2026-08-31 ordering is gone rather than reordered: what he ranked last of
+three now rides with what he ranked first, and Deadlines is the only card
+between them that moved at all — from second of three to second of two.
 
 THE COPY RULE FOR EVERY CARD IN THAT RAIL (2026-09-02, the founder reading
 his own screenshots: "the cards are wordy and the spacing is wrong"). The
@@ -1192,15 +1198,31 @@ copy exactly once, and this is the once.
 
     Nothing measured was lost, because the ring measured nothing of its own:
     it was `pace.done / pace.goal` drawn imprecisely and capped, and both of
-    those numbers are printed beside it to the unit. The sparkline is
-    strictly the better picture — it carries this week AND the eight before
-    it, marks which of them hit goal, and marks which one is now — so the
-    card keeps one visual, not two of the same thing.
+    those numbers are printed beside it to the unit.
 
-    What remains is three things that each say something the others do not:
-    the figure (exactly where you are), the note (what is still owed, or the
-    blackout, or that the goal is hit), and the sparkline (how this week
-    compares to the last eight).
+    THE SPARKLINE WENT THE SAME DAY, a few hours behind the ring, and for a
+    plainer reason than the ring did: the founder looked at what was left and
+    said "remove the bar below, just leave 76 /14 OUTREACH THIS WEEK /
+    Weekly goal hit." The pass that deleted the ring kept eight bars on the
+    argument that they were the better picture of the same fraction — this
+    week plus the eight before it, goal-hitting weeks filled, this week
+    marked. That argument was about which of two pictures to keep. It never
+    asked whether the card wanted a picture, and the answer is that it does
+    not: a rail card is read in the two seconds between finishing one queue
+    row and starting the next, and in those two seconds the eight-week shape
+    is decoration beside a figure that already says the week to the unit.
+    `pace_history` and `_pace_history` are deleted with it rather than left
+    computing eight weeks of `TruncWeek` counts for nobody, and so are
+    `.pace-spark`, `.pace-spark-bar` and `@keyframes mrail-grow`.
+
+    ONE WIDGET, TWO HALVES (same instruction, second sentence: "Combine this
+    with unsorted contacts, make into one widget"). What used to be the
+    "Where do they sit?" rail card is now an inset panel inside this one; the
+    block below carries the whole argument for how the two are told apart.
+
+    What remains at the top of the card is two things that each say something
+    the other does not: the figure (exactly where you are) and the note (what
+    is still owed, or the blackout, or that the goal is hit).
     {% endcomment %}
     <div class="rail-card pace-card panel">
       {% comment %}
@@ -1238,19 +1260,88 @@ copy exactly once, and this is the once.
         {% endcomment %}
         {% if pace.hit %}Weekly goal hit.{% elif blackout %}Resumes {{ blackout_resumes }}.{% else %}<b>{{ pace.remaining }}</b> more to go.{% endif %}
       </p>
-      {% comment %}Eight weeks of the same number the figure shows, so the
-      week has a memory. Since 2026-09-02 this is the card's ONLY picture,
-      the ring above it having been the same fraction drawn twice: this one
-      carries eight weeks where the ring carried one, so it is the one that
-      stayed. Height against the best of (goal, busiest week); filled bars
-      hit goal. Each bar carries its week in the title for hover and in
-      aria-label for readers.{% endcomment %}
-      <div class="pace-spark" role="img" aria-label="Last 8 weeks:{% for w in pace_history %} {{ w.n }}{% endfor %}">
-        {% for w in pace_history %}
-          <span class="pace-spark-bar{% if w.hit %} is-hit{% endif %}{% if forloop.last %} is-now{% endif %}"
-                style="--h: {{ w.pct }}%; --i: {{ forloop.counter0 }}" title="{{ w.label }}"></span>
-        {% endfor %}
-      </div>
+      {% comment %}
+      THE WEEK'S UNPLACED ARRIVALS, THE SECOND HALF OF THIS CARD. See
+      crm.today._unplaced_arrival_count's own module note for why the pool
+      exists at all; the short version is that this product never infers a
+      region it cannot entail, so a contact captured from Gmail at a firm
+      running both a US and a Hong Kong desk arrives blank and stays blank
+      until a person says otherwise. Correct, and the designed steady state.
+      What was missing is that nobody found out until it had reached 71 on
+      the founder's own account (2026-08-31, every one of them from Gmail
+      capture, 66 of them in two batches four days apart).
+
+      THE HEADING IS THE FOUNDER'S OWN, and so is the verb under it. "Where
+      do they sit?" replaced a heading that named a state ("Unplaced")
+      nobody could resolve unaided -- unplaced WHAT, and placed WHERE -- and
+      "Place them" is the same verb the Contacts caption on the Network page
+      already uses for this exact action, pointing at this exact tool. Both
+      words are fixed; every pass since has changed only how they are
+      presented, this one included.
+
+      AN INSET PANEL, NOT A SECOND STACK OF BLOCKS. The two halves of this
+      card are both "how your week is going" -- which is why the founder
+      asked for them together -- but they are not the same KIND of fact. The
+      figure above is a self-set goal you are measured against and there is
+      nothing to press: it has no action at all. This is a queue of work
+      waiting on you, and it has exactly one. Setting the queue on `--paper`
+      inside the card says that with a surface rather than with a rule: a
+      hairline between two stacked blocks says "and also", a contained
+      panel says "and inside this, something for you to do". `panel
+      panel--inset panel--flat` is the shared primitive doing all of it; the
+      only thing declared locally is where it sits.
+
+      ONE PRIMARY, AND IT IS THIS ONE. `btn btn-primary` on "Place them" is
+      the single accent fill in the merged card, which is what the pace half
+      having no action is worth. It was a `.rail-more` text link in the
+      corner of a heading two passes ago -- the right treatment for "see all"
+      on the Schedule and Deadlines cards, which send you to a fuller version
+      of what they are already showing. This is not a "see all": it is the
+      only way to do the thing the card is asking for.
+
+      THE COUNT IS THE WEEK'S, AND SAYS SO. `_unplaced_arrival_count` counts
+      the arrivals inside `UNPLACED_ARRIVAL_WINDOW_DAYS`, not the standing
+      pool, so on a board with a long backlog this reads smaller than the tab
+      it opens. That is not a disagreement: this number is a week's arrivals
+      and its face says "this week", while the tab counts every region-less
+      contact under its own heading.
+
+      ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
+      asks the question in its answerable shape (grouped by firm, select-all
+      per group, three region verbs). Nothing here rebuilds any of that: a
+      second place to set a region is exactly the duplicate-widget bug this
+      session removed three times over.
+
+      EXPIRES ON ITS OWN, and the card around it does not. The pace figure is
+      always present; this block is gated on the same count it prints, so an
+      ordinary week renders the figure, the note, and nothing else -- no
+      orphan heading, no empty action, no divider with nothing under it. The
+      Contacts page keeps its own passive caveat line unchanged as the
+      always-available fallback; that line answers a different question
+      ("how many rows in THIS region tab are here on a guess") and never
+      expires.
+
+      "market", not "region", stays deliberate even though `crm/views.py`
+      settled that PEOPLE sit in countries: the thing this is short of is the
+      key a firm's deadlines are matched on, which is the postings
+      vocabulary. The tool the button opens is where the student answers in
+      country terms. Nothing here names a market, which is the safest version
+      of the 2026-08-31 fix -- the note it replaced hardcoded "Hong Kong or
+      US", the founder's own two regions, so any student recruiting anywhere
+      else read a card naming markets they do not target.
+
+      What is NOT here is why it matters. "Coverage matches a firm's
+      deadlines to a person by market" is a fact about how the product works,
+      not one the student acts on, so it is the caption's `title`. Same rule
+      the rest of this rail follows: keep the fact, cut the explanation.
+      {% endcomment %}
+      {% if unplaced_arrival_count %}
+        <div class="unplaced-card panel panel--inset panel--flat">
+          <h3 class="rail-title">Where do they sit?</h3>
+          <p class="unplaced-count" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one."><span class="unplaced-n">{{ unplaced_arrival_count }}</span> new this week, no market set.</p>
+          <a class="btn btn-primary unplaced-act" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
+        </div>
+      {% endif %}
     </div>
 
     {% comment %}
@@ -1425,116 +1516,6 @@ copy exactly once, and this is the once.
         </ul>
       </div>
     {% endif %}
-
-    {% comment %}
-    Unplaced arrivals. See crm.today._unplaced_arrival_count's own module note
-    for the whole argument; the short version is that this product never infers a
-    region it cannot entail, so a contact captured from Gmail at a firm
-    running both a US and a Hong Kong desk arrives blank and stays blank until
-    a person says otherwise. Correct, and the designed steady state. What was
-    missing is that nobody found out until it had reached 71 on the founder's
-    own account (2026-08-31, every one of them from Gmail capture, 66 of them
-    in two batches four days apart).
-
-    RENDER POSITION, LAST OF THE THREE DATED/ACTIONABLE CARDS since
-    2026-08-31 (the founder's own words: "outreach this week goes on top,
-    then deadlines, then unplaced"). Pace led with nothing to lead with
-    before this move; Deadlines carries a real clock, `open_run` and all.
-    This card carries neither a goal nor a date — it is a standing question,
-    same rung as the "Firms with no contacts yet" lane that used to live
-    here and was removed for the identical reason cards above it earn their
-    place with a fresher fact — so it goes last of the three rather than
-    first.
-
-    THE HEADING IS THE FOUNDER'S OWN, and so is the verb under it. "Where do
-    they sit?" replaced a heading that named a state ("Unplaced") nobody
-    could resolve unaided — unplaced WHAT, and placed WHERE — and "Place
-    them" is the same verb the Contacts caption on the Network page already
-    uses for this exact action, pointing at this exact tool. Both words are
-    fixed; every pass since has changed only how they are presented.
-
-    A COUNT AND A BUTTON, NOTHING ELSE (2026-09-02, the founder's own words:
-    "make Place them into a button, don't show people's names, just show how
-    many people need to be placed"). What was here was up to five names with
-    their firms, each row a link to the same tab, under a one-line note, with
-    "Place them" as a text link in the heading's corner.
-
-    Three things went and each was the same mistake. The NAMES were a roster
-    the card could not act on: the reader could not tell whether five was the
-    ask or the top of a pile, and reading a person and their firm here made
-    no part of the trip to the tool shorter. THE CAP went with
-    them — a count has one row whatever it counts, so there is nothing left
-    to cap. And THE NOTE went, because with a count on the face its two
-    facts are said twice: the count line states the window ("this week") and
-    the missing fact ("no market set"), and what the note added on top was
-    the mechanism, which is explanation and now lives in that line's own
-    `title=`.
-
-    THE COUNT IS THE WEEK'S, AND SAYS SO. `_unplaced_arrival_count` counts
-    the arrivals inside `UNPLACED_ARRIVAL_WINDOW_DAYS`, not the standing
-    pool, so on a board with a long backlog this card reads smaller than the
-    tab it opens. That is not a disagreement: the card's number is a
-    week's arrivals and its face says "this week", while the tab counts
-    every region-less contact under its own heading. The old argument for
-    printing nothing was that "71" makes a student close the tab — the
-    answer to that is a number that is honestly small, not no number.
-
-    THE VERB IS A REAL BUTTON, `btn btn-primary`, the shared control every
-    other action in this app uses. It was a `.rail-more` text link in the
-    corner of the heading, which is the right treatment for "see all" on the
-    Schedule and Deadlines cards above — those send you to a fuller version
-    of what the card is already showing. This one is not a "see all": it is
-    the only way to do the thing the card is asking for, and it is now the
-    only action on the card, which is what earns the accent fill.
-
-    ONE DESTINATION, AND IT IS THE ONE THAT ALREADY WORKS. The Unplaced tab
-    asks the question in its answerable shape (grouped by firm, select-all per
-    group, three region verbs). Nothing here rebuilds any of that: a second
-    place to set a region is exactly the duplicate-widget bug this session
-    removed three times over.
-
-    EXPIRES ON ITS OWN, like every other card in this rail vanishes when its
-    condition stops holding. Nothing stored, no dismiss button, no flag. The
-    Contacts page keeps its own passive caveat line unchanged as the
-    always-available fallback; that line answers a different question ("how
-    many rows in THIS region tab are here on a guess") and never expires.
-    {% endcomment %}
-    {% if unplaced_arrival_count %}
-      <div class="rail-card unplaced-card panel">
-        {% comment %}
-        A QUESTION, ITS SIZE, AND ITS VERB. The heading asks; the figure says
-        how big the answer is; the button is where it gets answered.
-
-        THE CAPTION CARRIES TWO FACTS AND NO MECHANISM. "new this week" is
-        the seven-day arrival window (`crm.today.UNPLACED_ARRIVAL_WINDOW_
-        DAYS`) and is the reason this card exists rather than showing every
-        region-less contact on the account; it is also what makes the figure
-        honest against the fuller pool on the tab. "no market set" is the
-        missing fact itself, in the words the heading is asking for.
-
-        What is NOT here is why it matters. "Coverage matches a firm's
-        deadlines to a person by market" is a fact about how the product
-        works, not one the student acts on, so it is the caption's `title`.
-        Same rule the rest of this rail follows: keep the fact, cut the
-        explanation.
-
-        "market", not "region", stays deliberate here even though
-        `crm/views.py` settled that PEOPLE sit in countries: the thing this
-        card is short of is the key a firm's deadlines are matched on, which
-        is the postings vocabulary. The tool the button opens is where the
-        student answers in country terms.
-
-        The old two-line note hardcoded "Hong Kong or US" -- the founder's
-        own two regions -- so any student recruiting anywhere else read a
-        card naming markets they do not target. Nothing on this card names a
-        market now, which is the safest version of that fix.
-        {% endcomment %}
-        <h3 class="rail-title">Where do they sit?</h3>
-        <p class="unplaced-count" title="Coverage matches a firm's deadlines to a person by market. These arrived from capture with no market on file, and nothing infers one."><span class="unplaced-n">{{ unplaced_arrival_count }}</span> new this week, no market set.</p>
-        <a class="btn btn-primary unplaced-act" href="{% url 'crm:contact_list' %}?scope=unplaced">Place them</a>
-      </div>
-    {% endif %}
-
     <div class="rail-card activity-card panel">
       <h3 class="rail-title">Recent Activity</h3>
       {% if activity %}

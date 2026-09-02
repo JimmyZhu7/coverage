@@ -21,9 +21,24 @@ schemes against the demo account. Rail card heights, desktop, before -> after:
     Where do they sit?  247 -> 229
     Recent Activity     310 -> 310   (rewritten, not shortened)
 
-and the stacked rail at 375px, 1088 -> 1059. A Django test client has no
-layout engine, so those numbers are quoted rather than re-run; what is
-checked here is the markup and the CSS text that produce them.
+and the stacked rail at 375px, 1088 -> 1059.
+
+THE SAME NIGHT, A THIRD PASS on the two cards this file's section 5 covers.
+The founder read the shortened rail and asked for the sparkline to go and
+for the two cards to become one ("remove the bar below, just leave 76 /14
+OUTREACH THIS WEEK / Weekly goal hit. Combine this with unsorted contacts,
+make into one widget"), so those two rows above are now one row:
+
+    Pace + Where do they sit?   327 -> 245   at 1280x800
+                                333 -> 251   at 375x812
+
+where the "before" is the two card boxes plus the 16px rail gap between
+them, both colour schemes identical at both widths. The pace half alone,
+with nothing unplaced, is 100px.
+
+A Django test client has no layout engine, so those numbers are quoted
+rather than re-run; what is checked here is the markup and the CSS text that
+produce them.
 """
 
 from __future__ import annotations
@@ -90,6 +105,35 @@ def _card(html: str, heading: str) -> str:
     rest of a large page."""
     start = html.index(f'<h3 class="rail-title">{heading}')
     return html[start:html.index("</div>", start)]
+
+
+def _pace_card(html: str) -> str:
+    """The pace card and everything now inside it.
+
+    Anchored on the CLASS NAME, never on a whole class attribute: this card
+    has picked up `panel` (D-13) and could pick up more, and matching the
+    attribute exactly is how four guards broke on the night of 2026-09-01.
+
+    The end of the slice is the card's own closing tag, found by counting
+    `<div` against `</div>` from the opening tag. It used to be "the first
+    `</div>` after `pace-spark`", which stopped existing when the sparkline
+    was deleted — and would have been wrong anyway from 2026-09-02, when the
+    unplaced block moved inside this card and gave it a nested div.
+    """
+    start = html.index('class="rail-card pace-card')
+    start = html.rindex("<div", 0, start)
+    depth, i = 0, start
+    while True:
+        nxt_open = html.find("<div", i)
+        nxt_close = html.index("</div>", i)
+        if nxt_open != -1 and nxt_open < nxt_close:
+            depth += 1
+            i = nxt_open + 4
+            continue
+        depth -= 1
+        i = nxt_close + 6
+        if depth == 0:
+            return html[start:i]
 
 
 def _css_rule(css: str, selector: str) -> str:
@@ -392,24 +436,39 @@ def test_the_pace_ring_is_gone_and_took_its_css_with_it():
     a meter.
 
     Deleted rather than left as dead rules, which is the other half of the
-    same cleanup."""
+    same cleanup.
+
+    THE SPARKLINE FOLLOWED IT the same day (see
+    `test_the_pace_card_carries_no_picture_at_all`), so the slice below can
+    no longer end at `pace-spark` and ends at the card's own closing tag
+    instead. `pace-grow` stays on the dead list and `mrail-grow` joins it:
+    the sparkline's bars were the only thing in this stylesheet using it.
+    """
     html = _page(_user(email="pace@example.com", tracks=("ib",)))
     # 'class="rail-card pace-card"' stopped matching once D-13's panel
     # primitive appended "panel" to the same attribute (2026-09-02).
-    card = html[html.index('class="rail-card pace-card'):]
-    card = card[:card.index("</div>", card.index("pace-spark"))]
+    card = _pace_card(html)
     assert "pace-ring" not in card
     css = _styles_of(html, strip_comments=True)
-    for dead in (".pace-ring", ".pace-track", ".pace-fill", "pace-grow"):
+    for dead in (".pace-ring", ".pace-track", ".pace-fill", "pace-grow",
+                 ".pace-spark", "mrail-grow"):
         assert dead not in css, f"{dead} is dead CSS now that the ring is gone"
 
 
-def test_the_week_is_still_stated_to_the_unit_and_still_has_its_memory():
-    """The ring measured nothing of its own — it drew `done / goal`
-    imprecisely and capped — so removing it removes a picture, not a fact.
-    The figure carries the count exactly and the sparkline carries eight
-    weeks where the ring carried one, which is why the sparkline is the
-    visual that stayed."""
+def test_the_week_is_still_stated_to_the_unit():
+    """REWRITTEN 2026-09-02, second pass. It was
+    `..._and_still_has_its_memory` and its second half pinned the sparkline
+    as the visual that survived the ring, on the argument that eight weeks
+    beat one.
+
+    The founder answered that argument a few hours later by asking for no
+    picture at all ("remove the bar below, just leave 76 /14 OUTREACH THIS
+    WEEK / Weekly goal hit."), so the memory is gone and only the fact it was
+    drawn beside remains. That fact is what this test was always really
+    protecting: the ring measured nothing of its own — it drew `done / goal`
+    imprecisely and capped — and neither did the bars, so what has to survive
+    every one of these deletions is the count, exactly, to the unit.
+    """
     user = _user(email="pace2@example.com", tracks=("ib",))
     contact = Contact.all_objects.create(user=user, name="Katherine Johnson")
     Touch.all_objects.create(
@@ -419,8 +478,10 @@ def test_the_week_is_still_stated_to_the_unit_and_still_has_its_memory():
     html = _page(user)
     assert 'class="pace-done">1</span>' in html
     assert 'class="pace-goal">/' in html
-    assert 'class="pace-spark"' in html
-    assert 'aria-label="Last 8 weeks:' in html
+    assert "Last 8 weeks:" not in html, (
+        "the sparkline's aria-label is back; the eight-week memory was "
+        "deleted, not hidden"
+    )
 
 
 def test_the_figure_label_cannot_break_apart_in_the_middle_of_itself():
@@ -444,16 +505,186 @@ def test_the_figure_label_cannot_break_apart_in_the_middle_of_itself():
     assert "white-space: nowrap" in _css_rule(_styles_of(html), ".pace-lbl")
 
 
-def test_the_pace_card_carries_one_picture_not_two_of_the_same_number():
-    """The founder's count was four distinct things in one card. What is left
-    is three that each say something the others do not: the figure (exactly
-    where you are), the note (what is still owed), and the sparkline (how this
-    week compares to the last eight)."""
-    html = _page(_user(email="pace4@example.com", tracks=("ib",)))
-    card = html[html.index('class="rail-card pace-card'):]
-    card = card[:card.index("</div>", card.index("pace-spark"))]
-    assert card.count("<svg") == 0, "the only picture left is the sparkline"
-    assert card.count('class="pace-spark"') == 1
+def test_the_pace_card_carries_no_picture_at_all():
+    """REWRITTEN 2026-09-02, second pass; it read
+    `..._carries_one_picture_not_two_of_the_same_number` and pinned exactly
+    one sparkline in a card that had just lost its ring.
+
+    That version answered "which of the two pictures stays". The founder's
+    next instruction answered a question it had not asked — whether the card
+    wants a picture — with "remove the bar below, just leave 76 /14 OUTREACH
+    THIS WEEK / Weekly goal hit." A rail card is read in the seconds between
+    two queue rows, and in those seconds an eight-week shape is decoration
+    beside a figure that already states the week to the unit.
+
+    So the count that matters is zero, and it is asserted over the card as it
+    is now — the unplaced block moved inside it the same day, and this guard
+    has to keep holding with that block present. The `.unplaced-act` button
+    is not a picture; `<svg>`, `<canvas>` and the spark classes are.
+    """
+    user = _user(email="pace4@example.com", tracks=("ib",))
+    contact = Contact.all_objects.create(user=user, name="Mary Jackson")
+    Touch.all_objects.create(
+        user=user, contact=contact, kind="outreach", channel="email",
+        ts=timezone.now(),
+    )
+    card = _pace_card(_page(user))
+    for drawing in ("<svg", "<canvas", "pace-spark", "role=\"img\""):
+        assert drawing not in card, (
+            f"the pace card grew a {drawing}; the figure and the note are "
+            "the whole of its top half"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5b. Pace and "Where do they sit?" as ONE widget (2026-09-02, third pass).
+#
+# "Combine this with unsorted contacts, make into one widget." Both halves
+# are facts about this week, which is why they are together, but they are not
+# the same KIND of fact: the pace figure is a self-set goal you are measured
+# against and has no action at all, while the unplaced block is a queue of
+# work waiting on you and has exactly one. Everything below pins that
+# distinction being carried by the markup rather than by a comment.
+# ---------------------------------------------------------------------------
+def _merged_user(email="merge@example.com"):
+    """Both halves at once: a pace figure and something unplaced under it.
+
+    Deliberately NOT `_unplaced_user` from section 3 — that one is shared by
+    the copy tests above and a rename there would be a second edit to guards
+    this change has no business touching.
+    """
+    user = _user(email=email, tracks=("ib",))
+    Contact.all_objects.create(user=user, name="Ada Lovelace", region="us")
+    Contact.all_objects.create(user=user, name="Jude Yoon", source="capture")
+    return user
+
+
+def test_the_two_cards_are_one_card(client):
+    """The founder asked for one widget, so there is one rail card carrying
+    both halves and no second card carrying either.
+
+    `rail-card` is the load-bearing token: the unplaced block still has its
+    own `unplaced-card` class (its styling and every guard in
+    `test_unplaced_arrivals.py` hang off it) and what it no longer has is the
+    class that makes something a card in this rail.
+    """
+    user = _merged_user()
+    from crm.today import _cockpit_context
+    assert _cockpit_context(user)["unplaced_arrival_count"], (
+        "precondition: an unplaced arrival exists, so both halves render"
+    )
+
+    html = _page(user)
+    assert 'class="rail-card unplaced-card' not in html, (
+        "the unplaced block is a rail card again; it belongs inside the pace "
+        "card"
+    )
+    card = _pace_card(html)
+    assert 'class="pace-figure"' in card
+    assert "Where do they sit?" in card
+    assert "Place them" in card
+
+
+def test_the_pace_figure_is_the_headline_and_the_count_is_not(client):
+    """One headline per card. The pace figure keeps `--fs-figure` in the
+    display face; the count beside "new this week" is demoted to `--fs-l`,
+    which is what stops the merged card from reading as two numbers arguing
+    about which one you were meant to look at."""
+    html = _page(_merged_user(email="merge2@example.com"))
+    css = _styles_of(html)
+    assert "var(--fs-figure)" in _css_rule(css, ".pace-done")
+    count = _css_rule(css, ".unplaced-n")
+    assert "font-size: var(--fs-l)" in count
+    assert "var(--fs-figure)" not in count
+
+
+def test_the_merged_card_has_exactly_one_primary(client):
+    """The pace half has no action at all, which is precisely what earns the
+    unplaced half's verb the only accent fill in the widget. A second primary
+    in here would make the card ask twice."""
+    card = _pace_card(_page(_merged_user(email="merge3@example.com")))
+    assert card.count("btn-primary") == 1, (
+        f"expected one primary in the merged card; card was:\n{card}"
+    )
+    assert re.search(r'class="btn btn-primary[^"]*"[^>]*>Place them</a>', card)
+    assert "rail-more" not in card, (
+        "the corner text link is back; the founder replaced it with a button"
+    )
+
+
+def test_the_halves_are_told_apart_by_a_surface_not_by_a_rule(client):
+    """The distinction is carried by an inset panel, not by a hairline with
+    two stacked blocks either side of it. `panel panel--inset panel--flat` is
+    the shared primitive doing all of it, so the merged card declares no
+    panel shape of its own — and `--flat` matters: a panel inside a panel
+    that casts a shadow looks like it is floating off its own card."""
+    html = _page(_merged_user(email="merge4@example.com"))
+    block = re.search(r'<div class="([^"]*\bunplaced-card\b[^"]*)"', html)
+    assert block, "the unplaced block did not render"
+    classes = block.group(1).split()
+    for modifier in ("panel", "panel--inset", "panel--flat"):
+        assert modifier in classes, (
+            f"the unplaced block is missing {modifier}; it is meant to be "
+            f"the shared primitive, not a local shape. Got: {classes}"
+        )
+    local = _css_rule(_styles_of(html), ".unplaced-card")
+    for redeclared in ("background", "box-shadow", "border-radius",
+                       "border:", "border-top", "border-bottom"):
+        assert redeclared not in local, (
+            f"`.unplaced-card` sets {redeclared}, which is the panel "
+            "primitive's job"
+        )
+
+
+def test_with_nothing_unplaced_the_card_is_the_pace_half_alone(client):
+    """FIRST DEGRADATION CASE, and the one the merge could most easily get
+    wrong. The unplaced card used to vanish on its own by being absent from
+    the rail; folded inside another card it has to vanish without leaving an
+    orphan heading, an empty action, or the top half of a divider.
+
+    The pace card itself is always present, so "nothing unplaced" is not
+    "no card" — it is a card with one half.
+    """
+    user = _user(email="merge5@example.com", tracks=("ib",))
+    Contact.all_objects.create(user=user, name="Ada Lovelace", region="us")
+    from crm.today import _cockpit_context
+    assert _cockpit_context(user)["unplaced_arrival_count"] == 0, (
+        "precondition: nothing arrived unplaced this week"
+    )
+
+    card = _pace_card(_page(user))
+    assert 'class="pace-figure"' in card, "the pace half is always present"
+    assert "unplaced-card" not in card
+    assert "Where do they sit?" not in card, "an orphan heading survived"
+    assert "Place them" not in card, "an empty action survived"
+    assert "btn-primary" not in card, (
+        "the merged card kept a primary with nothing left to press it for"
+    )
+
+
+def test_the_goal_not_yet_hit_reads_the_same_in_both_halves(client):
+    """SECOND DEGRADATION CASE. "Weekly goal hit." is one of three things the
+    note says, and the merge must not have quietly made it the only one the
+    layout was checked against — the card is at its tallest with an unmet
+    goal AND an unplaced block, which is the state the founder's own account
+    is in most weeks.
+
+    The two halves are independent: a missed goal changes the note and
+    nothing else, and the queue below it neither appears nor disappears
+    because of it.
+    """
+    user = _merged_user(email="merge6@example.com")
+    from crm.today import _cockpit_context
+    ctx = _cockpit_context(user)
+    assert not ctx["pace"]["hit"], "precondition: the goal is not hit"
+    assert ctx["unplaced_arrival_count"], "precondition: something is unplaced"
+
+    card = _pace_card(_page(user))
+    assert "Weekly goal hit." not in card
+    assert "more to go." in card
+    # And the queue half is unchanged by the miss.
+    assert "Where do they sit?" in card
+    assert "Place them" in card
 
 
 # ---------------------------------------------------------------------------
