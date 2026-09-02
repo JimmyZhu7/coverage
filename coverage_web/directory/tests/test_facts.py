@@ -597,6 +597,89 @@ def test_an_explicit_usd_code_does_not_add_a_redundant_suffix():
     assert got["value"] == "$120k–$140k"  # no "USD" suffix — it's the default
 
 
+# --- Pay: a single stated figure (S5, 2026-09-01) ---------------------------
+# `_PAY` required a RANGE, because US pay-transparency law requires one and
+# the boards that comply post one. 189 of the 2,700 open campus rows carrying
+# detail text state ONE figure instead and got nothing at all — more rows than
+# the range pattern finds in total. Fixtures below are the live shapes named
+# in the 2026-09-01 audit: DRW, Jump, CIBC, PIMCO, BMO, Raymond James.
+
+@pytest.mark.parametrize("text,value,unit", [
+    ("The annual base salary for this position is $90,000.", "$90k", "year"),
+    ("Compensation: $250,000 per year", "$250k", "year"),
+    ("The hourly rate for this role is $36.00 per hour", "$36/hr", "hour"),
+    ("Salary: $ 205,000.00", "$205k", "year"),
+    ("Base pay rate: $43.27/hour", "$43.27/hr", "hour"),
+])
+def test_a_single_stated_figure_is_extracted_with_its_unit(text, value, unit):
+    got = extract_pay(text)
+    assert got is not None, text
+    assert got["value"] == value
+    assert got["unit"] == unit
+    # NEVER A RANGE. A single figure is a single figure; the product does not
+    # invent a band around it.
+    assert got["low"] == got["high"]
+    assert "–" not in got["value"] and "-" not in got["value"]
+
+
+def test_a_single_figure_still_carries_its_currency_and_its_evidence():
+    """BMO's shape. The chip must not render a CAD number identically to a
+    USD one, and the sentence it came from travels with it as it does for
+    every other fact in this module."""
+    got = extract_pay("The base salary for this position is $80,000 CAD.")
+    assert got["value"] == "$80k CAD"
+    assert got["currency"] == "CAD"
+    assert "80,000" in got["phrase"]
+
+
+def test_a_bare_dollar_figure_is_not_pay():
+    """The gate is the point. Without a pay LABEL in front or a UNIT behind,
+    a dollar amount in a job description is a scholarship, a deal size or a
+    gift card, and this module's whole contract is that a keyword gates the
+    value."""
+    for text in ("A $5,000 scholarship is available to interns.",
+                 "Our clients raised $250,000 in seed funding.",
+                 "Complete the survey for a $50 gift card.",
+                 "We advise on transactions of $500 million.",
+                 # The label is real, the number is real, the pay is somebody
+                 # else's — the ceiling a range never needed and a single
+                 # figure does.
+                 "Total compensation to our clients exceeded $50,000,000."):
+        assert extract_pay(text) is None, text
+
+
+def test_a_range_still_wins_over_a_single_figure_in_the_same_posting():
+    """The single-figure path is a strict FALLBACK: when the posting states a
+    range, that range is the answer, and a stray labelled figure elsewhere in
+    the text may not replace or widen it."""
+    got = extract_pay(
+        "Pay Range: $85,000 - $95,000. A signing bonus of $10,000 is also "
+        "offered. The base salary is competitive.")
+    assert got["value"] == "$85k–$95k"
+
+
+def test_two_singles_are_not_merged_into_a_range():
+    """A signing bonus is not the bottom of a salary band. The range path
+    merges nearby matches because a multi-city posting states one range per
+    city under one heading; singles carry no such guarantee, so the fallback
+    takes the FIRST qualifying figure and stops."""
+    got = extract_pay(
+        "The annual base salary is $90,000. A signing bonus of $30,000 per "
+        "year is also offered.")
+    assert got["value"] == "$90k"
+    assert got["low"] == got["high"] == 90_000.0
+
+
+def test_cents_on_an_annual_range_no_longer_defeat_the_pattern():
+    """Raymond James posts "$70,304.00-$80,500.00". The comma-group
+    alternative had no room for the cents, so the pattern read "$70,304" and
+    then failed to find a separator before ".00-", and a perfectly ordinary
+    annual range extracted nothing."""
+    got = extract_pay("Salary Range: $70,304.00-$80,500.00")
+    assert got["value"] == "$70k–$80k"
+    assert got["unit"] == "year"
+
+
 # --- Rolling ---------------------------------------------------------------
 
 def test_stated_rolling_review_is_read():

@@ -39,6 +39,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date
+from functools import lru_cache
 from typing import Mapping, Sequence
 
 from directory.classify import (
@@ -112,6 +113,42 @@ W_REGION_TARGET = 16
 #: at which point this should go back to 0; or blank rows still reaching #1
 #: at -8, at which point it should grow.
 W_REGION_UNKNOWN = -8
+#: THE ROW STATES A MARKET and it is NOT one of the student's. The posting's
+#: own words put this job in London, and the student's own profile says Hong
+#: Kong and the United States: two statements, and they disagree. Until this
+#: weight existed that scored ZERO — the same as a row whose location we never
+#: managed to read — so a stated wrong market was literally cheaper than our
+#: own ignorance about a right one (`W_REGION_UNKNOWN` is -8). Measured
+#: 2026-09-01 on the founder's live rail (hk/us, class 2029): THREE of his six
+#: rendered picks were European — Morgan Stanley's Glasgow insight day at 90,
+#: and two Bank of America London off-cycles at 89 — each carrying tier 1, a
+#: track and a warm contact and paying nothing at all for being in a market he
+#: did not name. 908 of his 2,710 open campus rows are `eu` and another 709 are
+#: `other`; a free pass on that axis is a free pass on 60% of the board.
+#:
+#: MINUS `W_REGION_TARGET`, exactly. A market the student named is worth +16,
+#: so a market they did not is worth -16 and the swing between them is 32 —
+#: wider than any single inferred axis (a firm-coverage track match is at most
+#: 20), which is the point: geography is not a tiebreak for a sophomore who
+#: cannot fly to London for a first-round. TWICE `W_REGION_UNKNOWN` on purpose,
+#: because a stated fact outranks an absent one — "we could not place this
+#: role" is a charge against the product and stays small, while "this role is
+#: in Europe" is the posting talking about itself and binds.
+#:
+#: Applied ONLY when `profile.regions` is non-empty (a student who named no
+#: markets has no market for the row to be outside of, and scores 0 as before),
+#: and only when the row's region is a market a student could have named or the
+#: "other" bucket that means a stated location outside all six. NEVER for
+#: `global`: a posting that says it has no single place has not stated a market
+#: to be wrong about, and penalising it would re-run the `W_REGION_UNKNOWN`
+#: mistake in the other direction.
+#:
+#: What would change it: a measured rate of students applying out-of-market
+#: (relocation is real for a US student targeting London), or the mismatch
+#: chip turning out to be the only thing standing between a thin-board student
+#: and an empty rail — at which point the honest fix is the empty rail, not a
+#: smaller number.
+W_REGION_MISMATCH = -16
 
 # 3. Industry preference.
 #: First overlap between the student's tracks and the firm's.
@@ -128,6 +165,39 @@ W_TRACK_CAP = 20
 #: track outright (21) — the scorer preferring the role it had guessed about
 #: to the one that had told it.
 W_TRACK_STATED = 26
+#: The title STATES a function that is none of the six tracks — Operations,
+#: Technology, Internal Audit, Compliance, a retail branch. Not silence: the
+#: posting said what the job is, and it is not the job this student is
+#: recruiting for.
+#:
+#: Zero, until now. `_track_fit` returned "nothing, and no claim" for these,
+#: which reads as neutrality and is not: every OTHER axis on a `none` row is a
+#: property of the FIRM, so a tier-1 bank the student has a contact at carries
+#: its helpdesk req to 62 points on tier + region + warmth alone, with nothing
+#: on the track axis to say the job is a helpdesk job. Measured 2026-09-01 on
+#: the founder's live board: 676 of 2,710 open campus rows answer `none`, 160
+#: of them cleared `MIN_SCORE` for him, and two sat in his top ten — Nomura's
+#: "2027 Operations Summer Analyst Program" at 90, second on the rail.
+#:
+#: MINUS `W_TRACK_CAP`, exactly. 20 is the most an INFERRED track match can
+#: earn (the firm covers your tracks, the title is silent), so a title that
+#: says Operations must not merely forfeit that 20, it must cost the same
+#: again: the swing from "silent at a bank that covers IB" to "states
+#: Operations at the same bank" is 40, the whole width of the inherited-track
+#: axis, twice. Under `W_TRACK_STATED` (26) in magnitude on purpose — declining
+#: to claim a match is a weaker statement than naming one, and a `none` from
+#: this blocklist is our reading of a title, not the firm's own taxonomy.
+#:
+#: A PENALTY AND NOT A SKIP, deliberately, because the blocklist has been wrong
+#: before and will be again: `\brecruit(ing|ment)\b` once answered "none" for
+#: five Piper Sandler investment banking summer associate reqs, and
+#: `\boperations?\b` for every "Consulting - Strategy & Operations" on the
+#: board. A false `none` on a row that is tier 1, in the student's market and
+#: states their class still scores 26 + 20 + 30 - 20 = 56 and stays visible; a
+#: skip would have deleted it with no way for any other evidence to argue.
+#: What would change it: `none` rows still reaching a rendered pick at -20, at
+#: which point it should grow toward `W_CLASS_STATED_MISMATCH`'s -25.
+W_TRACK_NONE = -20
 
 # 4. The student's own NETWORK at the firm — the CRM data this product calls
 #    its moat, which until 2026-08-09 contributed nothing to ranking. A warm
@@ -303,6 +373,14 @@ REGION_FULL = {
     "hk": "Hong Kong", "us": "United States", "sg": "Singapore",
     "eu": "Europe", "cn": "Mainland China", "jp": "Japan",
 }
+
+#: The region values that are the POSTING STATING A PLACE, and so the only ones
+#: `W_REGION_MISMATCH` may charge for. The six tracked markets a student can
+#: name in Settings, plus "other" — which `classify.normalize_region` gives to
+#: a location it read successfully and that sits outside all six. Deliberately
+#: excludes "global" (the posting saying it has no single place) and "" (the
+#: location did not parse, which is `W_REGION_UNKNOWN`'s case, not this one).
+_STATED_MARKETS = frozenset(TRACKED_REGIONS) | {"other"}
 
 #: Short track labels for the reason chips (the long ones live in views.py's
 #: TRACK_LABELS and are far too wide for a chip).
@@ -763,12 +841,19 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
         # said 2035, and printing it would typeset the product's own bookkeeping
         # as the firm's words.
         from directory.facts import GRAD_YEAR_MAX
+        open_high = hi >= GRAD_YEAR_MAX and lo != hi
         if lo == hi:
             label = str(lo)
-        elif hi >= GRAD_YEAR_MAX:
+        elif open_high:
             label = f"{lo}+"
         else:
-            label = f"{lo}–{hi}"
+            # A PLAIN HYPHEN, and the chip below carries no em dash either.
+            # These strings are not only chip text: `Recommendation.why` joins
+            # them and `crm.digest` prints that join into an email, where "For
+            # 2027–2028 grads — you" wrapped at the em dash and left "— you"
+            # dangling on its own line. The founder's copy rule is no em
+            # dashes anywhere a student reads.
+            label = f"{lo}-{hi}"
         if not (lo <= profile.class_year <= hi):
             # The posting named a different class. This is a veto, not a
             # subtraction: no other class/cycle evidence gets to argue with the
@@ -784,13 +869,56 @@ def _class_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
                 f"not your {profile.class_year}.",
                 "class",
             )]
-        points += W_CLASS_STATED
-        reasons.append(Reason(
-            f"Class of {label}" if lo == hi else f"For {label} grads — you",
-            f"The posting itself states it is for {label} graduates, "
-            f"which includes your {profile.class_year}.",
-            "class",
-        ))
+        # AN OPEN WINDOW WHOSE FLOOR IS YEARS BELOW THIS STUDENT IS A NEAR
+        # MISS, NOT A MATCH. "Graduation date must be after January 2026" is a
+        # sentence about who is NOT excluded, not a sentence about who the
+        # programme is for, and containment alone cannot tell the two apart:
+        # the floor enumerates to the extractor's horizon, 2029 falls inside
+        # it, and `W_CLASS_STATED` (30) paid out as if the firm had written
+        # "Class of 2029". Measured 2026-09-01 on the founder's live rail
+        # (class 2029): THREE of his top five rode this — two Bank of America
+        # London off-cycles ("after January 2026", floor three years back) and
+        # Baird's year-round securities processing internship — each scoring
+        # the same 30 points as a posting that names his class outright, which
+        # is the rarest and strongest statement on the whole board. An
+        # off-cycle analyst seat open to everyone who graduated in the last
+        # four years is a real opportunity and a terrible pick.
+        #
+        # ONE YEAR is the line, and it is the line `_class_fit` already draws
+        # everywhere else: a gap of 1 is `W_CLASS_DERIVED_NEAR`'s "students do
+        # apply a year out, but only just", a gap of 2 is what
+        # `role_matches_level` refuses outright. So a floor at 2028 or 2029 for
+        # a 2029 student is the firm describing this year's cohort with a
+        # tolerance, and keeps the full stated bonus; a floor at 2026 is the
+        # firm describing four cohorts at once, and pays `W_CLASS_DERIVED_NEAR`
+        # — the same 6 points the product gives any other "adjacent, worth a
+        # look, not a fit" signal. The chip still prints the floor, because
+        # "For 2026+ grads" is true and is exactly the fact that tells the
+        # student why this is not their year's programme.
+        #
+        # Only the SCORE moves. `_eligibility` reads the same window through
+        # its own path and still refuses to block a student the sentence
+        # includes, so nothing here re-hides a row; and a CLOSED window
+        # ("2027–2028"), however wide, is untouched, because a firm that named
+        # both ends of it named the cohorts it meant.
+        near_open = open_high and (profile.class_year - lo) > 1
+        points += W_CLASS_DERIVED_NEAR if near_open else W_CLASS_STATED
+        if near_open:
+            reasons.append(Reason(
+                f"For {label} grads",
+                f"The posting states it is for {label} graduates, so your "
+                f"{profile.class_year} is not excluded. But it names no "
+                f"class of its own, and its floor is "
+                f"{profile.class_year - lo} years before you.",
+                "class",
+            ))
+        else:
+            reasons.append(Reason(
+                f"Class of {label}" if lo == hi else f"For {label} grads (yours)",
+                f"The posting itself states it is for {label} graduates, "
+                f"which includes your {profile.class_year}.",
+                "class",
+            ))
         # Deliberately falls through to the cycle bonus below but NOT to the
         # derived-from-cohort branch. A stated class year is the authoritative
         # answer to "which class is this for", so inferring a second, weaker
@@ -874,7 +1002,13 @@ def _region_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     regions, a blank costs `W_REGION_UNKNOWN`, with a chip that says the
     product could not place it — a penalty for our own ignorance, never a
     claim about the role. A student who named no regions has no market for
-    the blank to be wrong about, and it still scores zero for them."""
+    the blank to be wrong about, and it still scores zero for them.
+
+    A role that DOES resolve to a market, and to one the student never named,
+    is the opposite case and costs `W_REGION_MISMATCH`. Zero there meant a
+    London posting and a Hong Kong posting scored identically on the geography
+    axis for a Hong Kong student — not a hedge, but the axis switched off for
+    exactly the rows it exists to separate."""
     if not c.region:
         if profile.regions:
             return W_REGION_UNKNOWN, [Reason(
@@ -898,6 +1032,19 @@ def _region_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     if c.region in targets:
         return W_REGION_TARGET, [Reason(
             short, f"{full} — one of the regions on your profile.", "region",
+        )]
+    if profile.regions and c.region in _STATED_MARKETS:
+        named = ", ".join(REGION_SHORT.get(r, r.upper()) for r in profile.regions)
+        if c.region == "other":
+            # `normalize_region` files a location it DID read but that sits
+            # outside all six tracked markets under "other" (Toronto, Sydney,
+            # Mumbai). It is a stated place, so it binds, but there is no label
+            # for it that would mean anything in a chip.
+            chip, where = "Not in your regions", "a market Coverage does not track"
+        else:
+            chip, where = f"Not in your regions ({short})", full
+        return W_REGION_MISMATCH, [Reason(
+            chip, f"This role is in {where}. You named {named}.", "region",
         )]
     return 0, []
 
@@ -934,9 +1081,37 @@ _ROLE_FUNCTION: tuple[tuple[re.Pattern[str], str], ...] = tuple(
          r"\bmarkets\s+(?:summer|program(?:me)?|intern(?:ship)?|placement)s?\b", "st"),
         (r"\bprivate equity\b|\bbuyout\b|\bgrowth equity\b|\bprivate capital\b"
          r"|\bprivate markets?\b|\binfrastructure investing\b", "pe"),
-        (r"\basset management\b|\bwealth management\b|\bportfolio management\b"
+        # `\bwealth management\b` USED to sit in this list and now sits in
+        # `_NON_TRACK_FUNCTION` instead: retail wealth advisory is not asset
+        # management, and filing it here put "AMP Financial Advisor Trainee"
+        # and "Wealth Management Full-time Branch Analyst" under the AM label
+        # for every student who picked AM (72 open campus rows on 2026-09-01).
+        # The DIVISION name "Asset & Wealth Management" is the exception and
+        # is spelled out here: it is the GS/JPM umbrella over both businesses,
+        # it genuinely covers asset management, and without this clause the
+        # blocklist's `\bwealth management\b` would swallow the eight open
+        # "Asset and Wealth Management Quantitative Strats" rows that answer
+        # `am` today. Listed first so `_track_spans` covers the whole phrase
+        # and `_names_non_track`'s span rule protects it.
+        (r"\basset\s*(?:&|and)\s*wealth management\b"
+         r"|\basset management\b|\bportfolio management\b"
          r"|\binvestment management\b|\bmulti-?asset\b", "am"),
-        (r"\bconsult(ing|ant)\b|\bstrategy (and|&) operations\b|\badvisory\b", "consulting"),
+        # Bare `\badvisory\b` was here and came out. It is the Big 4's name
+        # for the whole non-audit half of the firm ("Advisory - Associate -
+        # Milano - Deals Valuation") and the boutiques' name for investment
+        # banking ("Strategic Advisory & Restructuring" at PJT, "Sovereign
+        # Advisory, Financial Restructuring Group" at Rothschild, "Global
+        # Banking and Advisory (Coverage)" at SocGen), so it named no
+        # function at all: 56 of the 83 open campus rows carrying the word
+        # answered "consulting" on the strength of that word alone, including
+        # nine PJT restructuring analyst seats in Hong Kong and London that
+        # are the most on-track thing on the board for a student recruiting
+        # IB. Those rows are now SILENT and inherit their firm's coverage,
+        # which is the honest answer: the title did not say. "Advisory" as
+        # part of a real consulting phrase is unaffected, because
+        # `\bconsult(ing|ant)\b` is still here and PwC's own "Advisory
+        # (Consulting)" carries it.
+        (r"\bconsult(ing|ant)\b|\bstrategy (and|&) operations\b", "consulting"),
         (r"\bcorporate strateg(y|ic)\b|\bbusiness development\b", "corp-strat"),
     )
 )
@@ -1055,7 +1230,112 @@ _NON_TRACK_FUNCTION = re.compile(
     # Analyst" — purely because the division prefix in front of them said
     # "Investment Bank" (see `_DIVISION_PREFIX`). 11 rows board-wide carry
     # one of the two phrases; none of them also states a track.
-    r"|\bsecurities services\b|\bglobal payments\b",
+    r"|\bsecurities services\b|\bglobal payments\b"
+    # ---- 2026-09-01 census: the 439 silent support-function titles ----
+    # `role_function` answered "" for 1,316 of 2,723 open campus rows, and a
+    # hand pass over a 40-row sample judged 29 of them answerable "none" by
+    # rule. Measured with the extended vocabulary below: 439 of the 1,316 turn
+    # over, 227 of them at firms whose `Firm.tracks` include ib or st, which
+    # is to say 227 rows rendering "matches IB / S&T" today for a job that is
+    # nothing of the kind — TD's "Personal Banking Associate Trainee", HSBC's
+    # "Off-Cycle Actuarial Student Work Placement", RBC's "AI Data Analyst",
+    # Vanguard's "College to Corporate IT Internship". Each clause below was
+    # run against the whole open board before it was added, and the
+    # co-occurrence count (titles that ALSO state a track today, and so change
+    # answer) is quoted with it.
+    #
+    # Engineering, under every name it goes by. 159 open campus rows; 11 state
+    # a track today and change answer, and 9 of those are the point rather
+    # than the cost: "Trading Systems Engineer Graduate" (Optiver, 6 rows) and
+    # "BMO Capital Markets Winter 2027, Full Stack Engineer" are software
+    # jobs at a trading desk, not trading jobs, exactly as "Trading Operations
+    # Analyst" already answers "none" here. The 2 genuine losses are a pair of
+    # "Engineering & Construction - Infrastructure sector | Junior Consultant"
+    # internships in Rome and Milan, where the word names the client SECTOR;
+    # they now decline rather than claim consulting, which is this file's
+    # standing call for a co-occurring non-track word.
+    r"|\bengineer(ing|s)?\b|\bsoftware\b|\bhardware\b|\bfpga\b|\bprogrammer\b"
+    r"|\bd[eé]veloppeur\b"
+    # Actuarial (28 rows, 0 collisions), the audit and tax firms' own words
+    # for their practices (119 rows for `assurance`, 0 collisions — PwC and
+    # EY "Assurance" is the audit line, and `\brisk assurance\b` above was
+    # already the narrower case of it), product control under its European
+    # name (3 rows), market risk (4), and the legal department's junior
+    # titles in three languages (2). None of these collides with anything.
+    r"|\bactuar(y|ies|ial)\b|\bassurance\b|\bcontrolling\b|\bmarket risk\b"
+    r"|\bparalegal\b|\bjuriste\b|\bimpuestos\b|\bchef de projet\b"
+    # HR under the name Goldman and Morgan Stanley give it, and the internal
+    # real-estate function under Goldman's. 12 and 2 rows, 0 collisions.
+    r"|\bhuman capital\b|\bworkplace solutions\b"
+    # Product management (6 rows). The one title that also states a track is
+    # "Wealth Management, Product Management and Design", which is a
+    # non-track row on both counts after this edit.
+    r"|\bproduct management\b"
+    # IT and DATA, both deliberately QUALIFIED rather than bare. `\bit\b` on
+    # its own matches the English word "it" and, measured, took EY's "Junior
+    # IT Consultant" and a French "Capital Market IT" role with it; `\bdata\b`
+    # on its own hit 105 rows and broke 18, including Bank of America's
+    # "Global Markets Quantitative Strategies Data Group" (a real S&T desk)
+    # and Oliver Wyman's "Data & Analytics Consulting" (a real consulting
+    # practice, and the reason `data\s*(&|and)\s*analytics` is NOT in the
+    # list below). The qualified forms are the department's own job-title
+    # vocabulary: 24 and 47 open campus rows, 1 and 3 collisions, and every
+    # one of those four is a title this list should be catching anyway
+    # ("Associate – IT Asset Management (ITAM)" answered `am` off the words
+    # "Asset Management").
+    r"|\bit\s+(?:intern(?:ship)?|analyst|support|services|audit|graduate"
+    r"|program(?:me)?|placement|risk|infrastructure|asset management)\b"
+    r"|\binformation systems\b"
+    r"|\bdata\s+(?:analyst|analytics|scien(?:ce|tist)|engineer(?:ing)?"
+    r"|management|governance|platform|quality|steward|warehouse)\b"
+    # The bank's OTHER banks: the retail branch network, the private bank,
+    # and the corporate/commercial/transaction banking arm. Coverage lets a
+    # student pick six tracks and none of them is any of these — `cb` and `wm`
+    # were both measured against the board on 2026-09-01 and both failed the
+    # supply gate (18 hk+us rows across 7 firms for cb, 47% single-firm
+    # concentration for wm), so they are HELD, not shipped, and until they
+    # ship the honest answer for these titles is "not one of your tracks"
+    # rather than the bank's own ib/st coverage inherited by silence.
+    # 125 open campus rows carry a banking phrase; 2 state a track today
+    # (HSBC's "Private Bank and Wealth Management ... Singapore", which is
+    # both), and across the WHOLE 26,492-row board exactly ONE title carries
+    # both "investment banking" and one of these — an experienced-hire
+    # "Investment & Corporate Banking – Energy" req — so the tie-break the
+    # research warns about ("Investment Banking must win over Commercial")
+    # has no campus row to decide. Note this supersedes the note above about
+    # bare `\bcorporate\b`: the bare word stays out because "Corporate
+    # Finance" and "Corporate Advisory" are IB, and "Corporate Banking" is
+    # now named explicitly instead of being left to it.
+    r"|\b(?:personal|retail|consumer|private|corporate|commercial|business)"
+    r"\s+bank(?:ing|er)?\b"
+    # The corporate/private bank's front line under its own job title. 9 open
+    # campus rows, 0 of which state a track today, and every one of them is
+    # either "Relationship Management - Corporate and Institutional Banking"
+    # or "Relationship Management - Private Bank": the phrase does not appear
+    # on this board attached to anything else. Two of them are HSBC's
+    # "International Wealth and Premier Banking" internships, which sat at
+    # ranks 3 and 4 of the demo student's rail chipped "matches IB". Kept as
+    # the whole phrase rather than a bare `\bmanager\b`, and NOT extended to
+    # "client relationship management", which is institutional sales at an
+    # asset manager and a different argument.
+    r"|\brelationship manag(?:er|ers|ement)\b"
+    # Back-office securities processing, which `\bsecurities services\b`
+    # above does not reach. 1 open campus row, 0 collisions: Baird's
+    # "Internship - Securities Processing (Year-Round)", rank 5 on the demo
+    # student's rail chipped "matches IB". Deliberately not `securities
+    # lending`, which is a real prime-brokerage desk.
+    r"|\bsecurities (?:processing|operations)\b"
+    # Wealth management and its front line, moved OFF the `am` pattern (see
+    # `_ROLE_FUNCTION`). 108 open campus rows, 79 of which answer `am` today,
+    # so a student who picked Asset Management gets Raymond James' "AMP
+    # Financial Advisor Trainee" and Goldman's "Private Wealth Management —
+    # New Associate" in an `?track=am` facet and in their picks. The eight
+    # "Asset and Wealth Management" division rows keep answering `am`, because
+    # that phrase is now spelled out in the am pattern and the span rule
+    # protects it.
+    r"|\bwealth management\b|\bprivate wealth\b|\bwealth advisor(?:y)?\b"
+    r"|\bfinancial advisor\b|\badvisor trainee\b|\bclient associate\b"
+    r"|\bprivate client\b",
     re.I)
 
 
@@ -1175,6 +1455,32 @@ def role_function(title: str) -> str:
     return "none"
 
 
+#: `role_function` memoised on the title alone. Nine regexes over one string
+#: is not expensive once; it is expensive ~1,900 times, which is how many
+#: candidates `recommend()` scores for the founder on a single Opportunities
+#: request — measured 2026-09-01 at ~34ms of a request that budgets single
+#: digits for the whole picks build, and paid again by `role_matches_tracks`
+#: for every row the advisor's snapshot and the digest's relevance filter
+#: read.
+#:
+#: THE KEY IS THE TITLE AND NOTHING ELSE, which is what makes this safe. The
+#: classifier is a pure function of the title over module-level constants: no
+#: profile, no request, no clock, no database. So one student's answer is
+#: every student's answer, an entry can never leak across a tenant boundary,
+#: and the only thing that could stale an entry is an edit to `_ROLE_FUNCTION`
+#: or `_NON_TRACK_FUNCTION` in this file — which is a source change, which
+#: restarts the process. The input space is bounded by the board rather than
+#: by traffic (13,464 distinct titles across 16,029 open rows), so `maxsize`
+#: is set above it and the cache is a full memo table in practice.
+#:
+#: `directory.views` holds a sibling cache over the same function for the feed
+#: path. Two caches, one classifier: this module must not import the view
+#: layer, and a shared cache is not worth inverting that dependency for.
+#: Tests that reach into the vocabulary must call `role_function_cached.
+#: cache_clear()` — see the autouse fixture in `tests/test_recommend.py`.
+role_function_cached = lru_cache(maxsize=32768)(role_function)
+
+
 def role_matches_tracks(title: str, tracks) -> bool:
     """Whether a role's OWN TITLE **states** one of the tracks a student is
     recruiting for. An ALLOWLIST, not a blocklist — the role has to say it.
@@ -1246,7 +1552,7 @@ def role_matches_tracks(title: str, tracks) -> bool:
     wanted = set(tracks or ())
     if not wanted:
         return True
-    fn = role_function(title)
+    fn = role_function_cached(title)
     return bool(fn) and fn != "none" and fn in wanted
 
 
@@ -1526,11 +1832,32 @@ def _track_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
       the title names nothing                      -> the firm's coverage,
         ("Summer Analyst Program")                    as before
     """
-    fn = role_function(c.title)
+    fn = role_function_cached(c.title)
     if fn == "none":
         # The role said what it is and it is not one of these tracks. Claiming
-        # "matches IB" here would be the card lying about the job.
-        return 0, []
+        # "matches IB" here would be the card lying about the job — and so, it
+        # turns out, was saying nothing at all: silence on this axis let the
+        # firm's tier, market and warmth carry an Operations programme to the
+        # top of the rail unopposed. See `W_TRACK_NONE`.
+        #
+        # A student who named NO tracks scores zero here, exactly as before:
+        # there is no track for the posting's function to be outside of, and
+        # penalising them would be the product inventing a preference on their
+        # behalf.
+        if not profile.tracks:
+            return 0, []
+        # "IB, S&T or PE", never "IB or S&T or PE": the tooltip is the only
+        # place a student is told WHICH tracks the posting missed, and a
+        # student recruiting for all six should be able to read the list.
+        labels = [TRACK_SHORT.get(t, t.upper()) for t in profile.tracks]
+        named = (labels[0] if len(labels) == 1
+                 else ", ".join(labels[:-1]) + " or " + labels[-1])
+        return W_TRACK_NONE, [Reason(
+            "Not your tracks",
+            f"The posting names its own function and it is not {named}. "
+            f"{c.firm_name} does cover your tracks; this role does not.",
+            "track",
+        )]
     if fn:
         if fn not in profile.tracks:
             return 0, []

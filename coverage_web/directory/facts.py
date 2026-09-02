@@ -654,11 +654,59 @@ def extract_assessment(text: str) -> dict | None:
 # CA, CO and WA must state a range, and no campus board shows it. Hourly and
 # annual both appear; the unit travels with the number so the chip can never
 # read "$45" and mean a year.
+#
+# The cents on the comma-group alternative are not decoration: Raymond James
+# posts "$70,304.00-$80,500.00", and without `(?:\.\d{2})?` the pattern read
+# "$70,304" and then failed to find a separator before ".00-$80,500.00", so a
+# perfectly ordinary annual range extracted nothing at all.
+_MONEY = r"\d{2,3}(?:,\d{3})+(?:\.\d{2})?|\d{2,3}(?:\.\d{2})?"
+_UNIT = r"per hour|hourly|an hour|/\s?hour|per year|annually|per annum|/\s?year|a year"
+
 _PAY = re.compile(
-    r"\$\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d{2})?)\s*"
-    r"(?:-|–|—|to)\s*\$?\s?(\d{2,3}(?:,\d{3})+|\d{2,3}(?:\.\d{2})?)"
-    r"([^.\n]{0,40}?(?:per hour|hourly|an hour|per year|annually|per annum))?",
+    r"\$\s?(" + _MONEY + r")\s*"
+    r"(?:-|–|—|to)\s*\$?\s?(" + _MONEY + r")"
+    r"([^.\n]{0,40}?(?:" + _UNIT + r"))?",
     re.IGNORECASE)
+
+# The 189 postings that state ONE figure. `_PAY` above requires a range,
+# because US pay-transparency law requires one and the boards that comply post
+# one — but 189 of the 2,700 open campus rows carrying detail text on
+# 2026-09-01 state a single number instead and got nothing: DRW's "annual base
+# salary ... is $90,000", Jump's "$250,000 per year", CIBC's "$36.00 per hour",
+# PIMCO's "Salary: $ 205,000.00", BMO's "$80,000 CAD". That is more rows than
+# the range pattern finds in total, and every one of them is the firm stating
+# its pay as plainly as a range does.
+#
+# TWO WAYS TO QUALIFY, and a bare dollar figure qualifies by neither. Either a
+# pay LABEL sits within 40 characters in front of it ("base salary is
+# $90,000"), or a UNIT follows it ("$250,000 per year"). Without one of the
+# two, "$5,000 scholarship", "$2,000,000 raised" and "a $50 gift card" all
+# read as compensation. The magnitude guards in `extract_pay` then apply
+# exactly as they do to a range, so the unit can never be guessed wrong.
+#
+# `low == high`, ALWAYS. A single figure is a single figure; the product does
+# not manufacture a band around it, and `_rate`/`$Nk` already render a
+# degenerate pair as one number.
+_PAY_LABEL = (r"salary|salaries|base pay|basic pay|base salary|pay rate|"
+              r"hourly rate|rate of pay|compensation|pay range|remuneration")
+#: "... base salary for this role is $90,000". Group 1 the figure, group 2 the
+#: unit phrase if the sentence also carries one.
+_PAY_LABELLED = re.compile(
+    r"(?:" + _PAY_LABEL + r")[^.\n]{0,40}?\$\s?(" + _MONEY + r")"
+    r"([^.\n]{0,12}?(?:" + _UNIT + r"))?",
+    re.IGNORECASE)
+#: "$250,000 per year", "$36.00 per hour". Same two groups, unit required.
+_PAY_UNITED = re.compile(
+    r"\$\s?(" + _MONEY + r")\s*([^.\n]{0,12}?(?:" + _UNIT + r"))",
+    re.IGNORECASE)
+#: A CEILING the range path never needed and the single path does. A range
+#: takes two figures and a separator to fire; one labelled figure fires on a
+#: sentence like "total compensation to our clients exceeded $50,000,000",
+#: where the label is real, the number is real, and the pay is somebody else's.
+#: The highest campus figure on the board is Jump's $250,000, so a million is
+#: an order of magnitude of headroom and still an order of magnitude below the
+#: deal sizes these descriptions quote.
+_PAY_ANNUAL_MAX = 1_000_000
 
 
 def _money(raw: str) -> float | None:
@@ -723,8 +771,9 @@ def _trim_footer(phrase: str) -> str:
     return trimmed if trimmed else phrase
 
 
-def extract_pay(text: str) -> dict | None:
-    candidates = []
+def _pay_candidates(text: str) -> list:
+    """Every (match, low, high, hourly) the RANGE pattern justifies."""
+    out = []
     for m in _PAY.finditer(text):
         low, high = _money(m.group(1)), _money(m.group(2))
         if low is None or high is None or high < low:
@@ -737,9 +786,51 @@ def extract_pay(text: str) -> dict | None:
                 continue
         elif low < 10_000:
             continue
-        candidates.append((m, low, high, hourly))
+        out.append((m, low, high, hourly))
+    return out
+
+
+def _pay_single(text: str):
+    """The first SINGLE stated figure, as the same 4-tuple with low == high.
+
+    A strict fallback, run only when the range pattern found nothing, and it
+    returns ONE match rather than merging nearby ones the way the range path
+    does. The merge exists because a multi-city posting states one range per
+    city under a single heading; singles have no such guarantee, and merging
+    "$90,000 base salary" with a "$10,000 signing bonus" 200 characters later
+    would invent a "$10k-$90k range" that no firm wrote. One figure, one
+    number, `low == high`.
+    """
+    best = None
+    for rx in (_PAY_LABELLED, _PAY_UNITED):
+        for m in rx.finditer(text):
+            v = _money(m.group(1))
+            if v is None:
+                continue
+            tail = (m.group(2) or "").lower()
+            # The unit comes from the posting's own words where it gave any,
+            # and from magnitude where it did not — the same two-step the
+            # range path uses, so a single figure can never be classified by a
+            # rule the range beside it would not have used.
+            hourly = "hour" in tail if tail else v < 500
+            if hourly:
+                if v > 500:
+                    continue
+            elif not 10_000 <= v <= _PAY_ANNUAL_MAX:
+                continue
+            if best is None or m.start() < best[0].start():
+                best = (m, v, v, hourly)
+            break
+    return best
+
+
+def extract_pay(text: str) -> dict | None:
+    candidates = _pay_candidates(text)
     if not candidates:
-        return None
+        single = _pay_single(text)
+        if single is None:
+            return None
+        candidates = [single]
 
     anchor = candidates[0]
     hourly = anchor[3]
