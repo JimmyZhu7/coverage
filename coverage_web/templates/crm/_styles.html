@@ -361,7 +361,15 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      student has to fill in before they may tap Add. */
   .act-fill { display: grid; grid-template-columns: auto minmax(0, 1fr);
     gap: 6px var(--s2); align-items: center; margin-top: var(--s2); }
-  .act-fill-lab { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
+  {% comment %}
+  `margin: 0` because coverage.css §7's `label` carries `var(--s4) 0 var(--s1)`
+  — the right margin for a stacked form, wrong for a label sitting BESIDE its
+  control. Measured 2026-09-02: it made the Role row 39.2px tall around a
+  30.2px input, nine pixels of a stacked form's rhythm inside a grid that is
+  not stacked, twice per card.
+  {% endcomment %}
+  .act-fill-lab { margin: 0; font-size: var(--fs-xs); color: var(--ink-3);
+    white-space: nowrap; }
   .act-fill-in { width: 100%; min-width: 0; font: inherit; font-size: var(--fs-s);
     padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
     background: var(--surface); color: var(--ink); }
@@ -831,6 +839,146 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     border-color: var(--accent-line); }
   .act-card.act-proposal { border-left-color: var(--accent-ink); }
   .lane-proposals .lane-bulk { margin-left: auto; display: flex; gap: var(--s2); }
+
+  {% comment %}
+  THE PROPOSAL CARD'S OWN GRID, 2026-09-02. Measured before this pass at
+  1280: 188.8px per card, and the founder had 39 arrive in one batch.
+
+  WHAT WAS WRONG. The card put FOUR children into `.act-card`'s THREE-column
+  ledger grid, so the fourth wrapped: identity, evidence and the two blanks
+  took row one, and the buttons fell to row two under the NAME. That is the
+  whole defect the founder photographed. Nothing lined up because nothing was
+  placed — the row-two button block began a second, private layout, the
+  identity block and the ask were a card apart, and the two inputs the
+  student fills sat furthest from the tap that commits them.
+
+  WHAT IT IS NOW. Two blocks, two columns:
+
+      ┌ FIRM  [Not in your network] ─────┬ Role   [_______________] ┐
+      │ Name  address@firm.com           │ Region [_____________ v] │
+      │ You reached out: <subject>       │ [ Add to network ] Dismiss│
+      └──────────────────────────────────┴──────────────────────────┘
+
+  `.act-who` is the person and the reason we are asking. `.act-ask` is the
+  ask: the two blanks, then the tap that sends them. Wrappers rather than four
+  placed grid children, because the two halves are different lengths — a
+  two-line subject on the left, a fixed form on the right — and a shared row
+  grid would have opened a hole under whichever one ran short. Each half flows
+  on its own and they meet at a top line (`align-items: start`), which is the
+  one alignment the four loose zones never had.
+
+  SCOPED TO THE LANE, NOT TO `.act-proposal`. The mail-facts card wears
+  `act-proposal` too (for the edge colour alone) and has no `.act-fill`; a
+  class-scoped rule would have rebuilt a card that never asked for it.
+
+  The right column's floor is also what stops the Role input truncating its
+  own placeholder. Measured before this pass at 1280: the input was 203px wide
+  with 185px of usable inner width against 226px of placeholder text, so the
+  card asked the student for a role in a box too small to show the question.
+  {% endcomment %}
+  .lane-proposals .act-card { align-items: start;
+    grid-template-columns: minmax(0, 1fr) minmax(19rem, 21rem);
+    gap: var(--s3) var(--s5); }
+  .act-who { min-width: 0; display: flex; flex-direction: column; gap: var(--s1); }
+  .act-ask { min-width: 0; display: flex; flex-direction: column; gap: var(--s2); }
+  .act-ask > .act-fill { margin-top: 0; }
+
+  {% comment %}
+  The eyebrow: the firm, then the verdict about the person, on one line. A
+  `baseline` alignment rather than `center` — `.opp-firm` is uppercase 12px
+  and the pill is 11px in its own padded box, and centring them made the firm
+  name ride visibly low against its own chip.
+  {% endcomment %}
+  .act-eyebrow { display: flex; align-items: baseline; flex-wrap: wrap;
+    gap: var(--s1) var(--s2); min-width: 0; }
+  .act-eyebrow .opp-firm { flex: 0 1 auto; }
+  {% comment %}
+  Name and address on one line, and the address takes the slack: it is the
+  fact that tells two people with the same name apart, so it gets whatever
+  width the name leaves and ellipsises rather than wrapping the pair onto two
+  lines. It wraps under the name only when there is genuinely no room, which
+  is what the phone layout does.
+  {% endcomment %}
+  .act-wholine { display: flex; align-items: baseline; flex-wrap: wrap;
+    gap: var(--s1) var(--s2); min-width: 0; }
+  .act-mail { flex: 1 1 auto; min-width: 0; color: var(--ink-3);
+    font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; }
+  {% comment %}
+  The ask's two buttons on ONE row. `.act-quick` is a right-aligned COLUMN
+  everywhere else, which is correct for a ledger row whose ghosts are a quiet
+  afterthought; here the pair is Add-or-not, one decision with two answers,
+  and stacking them cost a whole row of card height per person for nothing.
+  Both keep the classes the 44px coarse-pointer floor and the post-swap focus
+  rule already target.
+
+  Right-ragged and content-width, not stretched: the row then ends on the same
+  edge as the two inputs above it, which is the one vertical line this column
+  has, and a queue of thirty-nine proposals is not thirty-nine full-width navy
+  slabs. That is `.act-quick`'s own rule from the ledger, kept.
+  {% endcomment %}
+  .lane-proposals .act-quick { flex-direction: row; align-items: center;
+    justify-content: flex-end; gap: var(--s2); }
+  .lane-proposals .act-primary, .lane-proposals .act-ghosts { flex: 0 0 auto; }
+  {% comment %}
+  THE COMPACT CONTROL THE STYLESHEET ALREADY ASKED FOR. `.act-fill-in` has
+  declared `padding: 4px 8px` and `--fs-s` since the blanks were added, and
+  not one character of it ever applied: coverage.css §7 styles every text
+  input as `input[type="text"]`, 0,1,1 against this rule's 0,1,0. The card
+  rendered two full-size 41px form controls, so 88px of its 188 was two boxes
+  that were never meant to be that big. Typed as
+  `input.act-fill-in` / `select.act-fill-in` the intent finally lands: same
+  specificity as the global rule, later in the cascade, 30px tall.
+
+  The select keeps room for the chevron the global rule paints into its
+  background, scaled down with the padding — a narrower box with the arrow
+  still at 38px would have run the words under it.
+
+  The finger floor is NEW, not a leftover: at 41px these two controls were
+  three pixels under a real touch target and nothing said so, because nothing
+  in §16b covers an input. Setting the compact padding without the floor would
+  have taken them to 30 and made a passing accident into a shipped defect.
+  {% endcomment %}
+  input.act-fill-in, select.act-fill-in { padding: 5px 10px; font-size: var(--fs-s);
+    border-radius: 8px; border-color: var(--line); }
+  select.act-fill-in { padding-right: 28px; background-position: right 9px center; }
+  {% comment %}
+  AND THE ONE THE STUDENT ACTUALLY TOUCHES. base.html's `enhance()` wraps every
+  non-multiple `<select>` in `.csel`, hides the native control as
+  `.csel-native` and draws a `.csel-btn` in its place — so `select.act-fill-in`
+  governs a 1px clipped element and the visible box takes coverage.css's full
+  `9px 14px`. Region has to be told the same thing the Role input was told, on
+  the class that is really rendering, or the two blanks are visibly different
+  sizes in a two-line form. `.act-fill` scopes it: no other select on the site
+  is asked to be this small.
+  {% endcomment %}
+  .act-fill .csel { display: flex; }
+  .act-fill .csel-btn { padding: 5px 10px; font-size: var(--fs-s);
+    border-radius: 8px; border-color: var(--line); }
+  @media (pointer: coarse) {
+    input.act-fill-in, select.act-fill-in, .act-fill .csel-btn { min-height: 44px; }
+  }
+
+  {% comment %}
+  Under 640px of queue the two halves stack, identity and evidence over blanks
+  and buttons, which is markup order and reading order both. The column rule
+  has to be RESTATED here rather than left to the shared `.act-card` collapse:
+  `.lane-proposals .act-card` is 0,2,0 and outranks it at every width, so
+  without this the phone kept the two-column form and rendered the labels on
+  top of the name. The media query is the same no-container-queries fallback
+  the ledger rule keeps.
+
+  The buttons stay a row here too, and Add takes the slack: at 351px there is
+  room for the pair, and a phone is where a full-width primary is worth most.
+  {% endcomment %}
+  @container queue (max-width: 640px) {
+    .lane-proposals .act-card { grid-template-columns: minmax(0, 1fr); }
+    .lane-proposals .act-primary { flex: 1 1 auto; }
+  }
+  @media (max-width: 700px) {
+    .lane-proposals .act-card { grid-template-columns: minmax(0, 1fr); }
+    .lane-proposals .act-primary { flex: 1 1 auto; }
+  }
 
   /* What they replied to. The card's most decision-changing line, so the
      subject itself is the emphasised half and the "Replied to:" label is
