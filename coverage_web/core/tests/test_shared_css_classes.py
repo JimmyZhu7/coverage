@@ -42,6 +42,11 @@ DYNAMIC_FAMILIES = {
     "band-": "band-{{",
     "conf-": "conf-{{",
     "prio-": "prio-{{",
+    # The eligibility verdict on a role row and in the drawer, whose kind
+    # names the reason ("visa_firm_no", "year_out"). Added 2026-09-02 when the
+    # drawer gained the verdict the row already carried, which brought a
+    # sibling of an existing class into a stylesheet the checker reads.
+    "vd-": "vd-{{",
 }
 
 # Classes emitted by something that is not our template source at all.

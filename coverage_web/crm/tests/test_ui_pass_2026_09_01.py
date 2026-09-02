@@ -16,6 +16,7 @@ quoted in the docstrings rather than re-run.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -437,7 +438,7 @@ def test_the_shared_stylesheet_states_the_control_shape_and_motion_rules():
     rules the next pass checks against — if they go, the drift has nothing
     standing against it.
     """
-    css = open("static/css/coverage.css").read()
+    css = _css()
     assert "THE CONTROL-SHAPE RULE" in css
     assert "a capsule is allowed for a SEGMENTED CHOICE among peers" in css.replace(
         "\n", " "
@@ -447,17 +448,36 @@ def test_the_shared_stylesheet_states_the_control_shape_and_motion_rules():
         assert rule in css
 
 
-def test_the_dead_rules_are_gone_and_the_used_one_stayed():
+def _css() -> str:
+    """The shared stylesheet, found from THIS file rather than from the
+    working directory. `open("static/css/coverage.css")` only resolves when
+    pytest is invoked from `coverage_web/`, so these tests passed or errored
+    depending on where the runner happened to stand."""
+    return (Path(__file__).resolve().parents[2] / "static" / "css"
+            / "coverage.css").read_text(encoding="utf-8")
+
+
+def test_the_dead_rules_are_gone():
     """`.stats`/`.stat`, `.deflist` and `.honesty` had zero uses in any
-    template — every `git grep` hit for the last one was prose in a comment
-    or `.price-honesty`, which draws its own thing. `.page-head` has 14 real
-    uses on the allauth and account pages and stays.
-    """
-    css = open("static/css/coverage.css").read()
+    template. Every `git grep` hit for the last one was prose in a comment
+    or `.price-honesty`, which draws its own thing.
+
+    `.page-head` used to be asserted here as the counterweight, on the
+    grounds that it had 14 real uses and so proved the sweep was reading
+    live code. It has none now: the header consolidation moved all 14 to
+    `.pagehead pagehead--compact` and deleted the old selector, so the
+    counterweight became the assertion most likely to be wrong. It is
+    replaced below by one the consolidation cannot invalidate."""
+    css = _css()
     assert "\n.stats {" not in css and "\n.stat {" not in css
     assert "\n.deflist {" not in css
     assert "\n.honesty {" not in css
-    assert ".page-head {" in css
+    assert ".page-head" not in css, (
+        "`.page-head` is back. There is one page-header system now, "
+        "`.pagehead`, and a second one is what this file exists to prevent."
+    )
+    # The counterweight: the sweep is reading a real stylesheet, not "".
+    assert ".pagehead {" in css
 
 
 def test_the_touch_floor_and_the_edge_token_exist():
@@ -465,8 +485,19 @@ def test_the_touch_floor_and_the_edge_token_exist():
     place, Settings, by a rule only Settings could see. And eleven surfaces
     hand-set `border-left: 3px` for the same signature edge.
     """
-    css = open("static/css/coverage.css").read()
-    assert "@media (pointer: coarse) {\n  .btn { min-height: 44px; }\n}" in css
+    css = _css()
+    # Matched as a rule inside the block rather than as the whole block. The
+    # block later took the shell's own finger targets, moved out of an inline
+    # <style> in base.html, and an exact-text assertion on the whole thing
+    # went red over a change that added to what it was guarding.
+    # EVERY coarse block, not the first. The stylesheet has more than one and
+    # the .btn floor is not in the earliest, so a `re.search` here silently
+    # read a block that never claimed to carry it.
+    coarse = "\n".join(
+        m.group(1) for m in
+        re.finditer(r"@media \(pointer: coarse\) \{(.*?)\n\}", css, re.S))
+    assert coarse, "no (pointer: coarse) block in the shared stylesheet"
+    assert ".btn { min-height: 44px; }" in coarse
     assert "--edge-w: 3px;" in css
 
 

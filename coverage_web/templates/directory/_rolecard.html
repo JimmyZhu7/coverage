@@ -64,7 +64,7 @@ only reintroduce the clipping bug this file's history is full of.
   and becomes visible text on the ~3% of rows the `unconfirmed` note fires
   for. The title is on the outer span rather than the figure inside it
   because the figure already carries the `reported` provenance tooltip and a
-  nested `title` wins on hover — two different facts, two different hover
+  nested `title` wins on hover. Two different facts, two different hover
   targets, neither swallowing the other.
   {% endcomment %}
   <span class="rr-due"{% if r.verified_days is not None %} title="Coverage last confirmed this posting live {% if r.verified_days == 0 %}today{% elif r.verified_days == 1 %}1 day ago{% else %}{{ r.verified_days }} days ago{% endif %}"{% endif %}>
@@ -167,15 +167,15 @@ only reintroduce the clipping bug this file's history is full of.
       {% comment %}
       HOW THIS FIRM HIRES. Directly after the verdict and before the
       posting's own facts, because it is the same KIND of fact as the
-      verdict — a statement about the reader's route in, not about the
-      posting — and it changes what the rest of the row is worth reading
+      verdict, a statement about the reader's route in rather than about the
+      posting, and it changes what the rest of the row is worth reading
       for. On a Jane Street row, "you know someone here" is not the lever;
       the assessment is.
 
       A LINK, not a chip, and that is the honesty part: the tooltip states
       the limit ("Coverage does not score your network here") and the firm
       page is where the fuller answer lives. The wording says the firm hires
-      by assessment and stops there. It never says networking hurts — no
+      by assessment and stops there. It never says networking hurts. No
       source shows that, only that no mechanism is documented
       (`research-st-quant.md` Q3), and the difference between those two
       claims is the whole reason this chip is allowed to exist.
