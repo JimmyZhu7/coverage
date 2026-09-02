@@ -212,6 +212,45 @@ W_NETWORK_WARM = 14
 #: Someone there has replied but not yet talked. Real, weaker.
 W_NETWORK_REPLIED = 7
 
+#: THE NETWORK AXIS AT A TEST-GATED FIRM. Zero, not a reduced multiplier, and
+#: the zero is the whole point.
+#:
+#: WHAT IT ENCODES. Both weights above encode the same claim: a relationship
+#: at the firm changes the odds of the application. That claim is a statement
+#: about a MECHANISM — a warm intro reaching a banker who forwards a resume —
+#: and at a firm whose process is a test the mechanism is not merely weaker,
+#: it is absent from the firm's own description of how it hires. Jane
+#: Street's FAQ declines one-to-one coffee chats by policy; Citadel
+#: Securities' campus funnel is entirely competitions and events
+#: (`research-st-quant.md` Q3, Grade A). Scoring a warm contact there is the
+#: product asserting a route the firm says it does not run.
+#:
+#: WHY ZERO AND NOT, SAY, HALF. A fraction would encode "the mechanism works
+#: less well here", which is a quantitative claim no source supports. What
+#: the sources support is a claim about presence: no documented path. Zero is
+#: the honest magnitude for an axis with nothing under it, and it is also the
+#: value the axis already returns for a student with no contacts at the firm
+#: — so nothing new is invented, an existing branch is simply reached.
+#:
+#: WHAT THIS MUST NOT BE READ AS. Not a penalty. `_network_fit` may not
+#: return a negative here, and the chip may not say networking hurts: the
+#: same file is explicit that no source shows networking is counterproductive
+#: at these firms, only that no mechanism is documented. A negative weight
+#: would be the product inventing the stronger claim.
+#:
+#: WHAT WOULD CHANGE IT. A quant or proprietary firm publishing a referral or
+#: campus-ambassador route, or an observed conversion through one. Then this
+#: firm stops being `assessment` in `Firm.recruiting_style` and the axis
+#: scores normally with no code change at all — which is why the switch is a
+#: per-firm column rather than a constant in here.
+#:
+#: BLAST RADIUS, measured 2026-09-02: 15 firms carry `recruiting_style =
+#: "assessment"` and hold 302 open campus rows between them. On the founder's
+#: own account the effect is zero — every firm in play on his board is
+#: `campus`, he has warm contacts at 13 firms and none of them is an
+#: assessment firm, and his six picks are unchanged.
+W_NETWORK_ASSESSMENT = 0
+
 # 4b. Firm tier (the student's own `crm.UserFirm.tier`).
 #: Tier 1 must outrank tier 3. It does, by construction, and by enough that
 #: tier alone clears `MIN_SCORE` while tier 3 alone does not.
@@ -710,6 +749,16 @@ class Candidate:
     #: year facet was rebuilt to prevent; this field closes the same gap for
     #: ranking.
     grad_years: tuple[str, ...] = ()
+    #: How the firm hires, from `Firm.recruiting_style` — "campus" (the
+    #: default: coffee chats and referrals move the process) or "assessment"
+    #: (the process is a test or competition). Flattened here for the same
+    #: reason `firm_tracks` is: this module stays free of Django and does not
+    #: follow a foreign key mid-scoring.
+    #:
+    #: `_network_fit` is its only reader, and reads it to return ZERO rather
+    #: than to penalise anything. See that function for the evidence and the
+    #: limit on what may be said about it.
+    recruiting_style: str = ""
 
     @classmethod
     def from_opportunity(cls, o, *, blocked: bool = False) -> "Candidate":
@@ -720,6 +769,7 @@ class Candidate:
             class_year=o.class_year or "", region=o.region or "",
             location=o.location or "",
             firm_tracks=tuple(o.firm.tracks or []),
+            recruiting_style=o.firm.recruiting_style or "",
             deadline=o.deadline,
             blocked=bool(blocked),
             grad_years=tuple(
@@ -1908,8 +1958,26 @@ def _network_fit(profile: Profile, c: Candidate) -> tuple[int, list[Reason]]:
     Chip text says what the relationship IS, never who it is with: the
     reasons render on a shared board surface, and a contact's name does not
     belong in a scoring chip. The tooltip points at the firm page, where
-    "Your Network Here" already names names behind the login."""
+    "Your Network Here" already names names behind the login.
+
+    AT A TEST-GATED FIRM THIS AXIS DOES NOT SCORE. The reason chip says so
+    out loud rather than the score silently going quiet: a student with a
+    real contact at SIG should be able to see that Coverage read the
+    relationship and declined to count it, and why. See
+    `W_NETWORK_ASSESSMENT` for what the zero encodes and what would change
+    it. The chip is issued only where the student HAS a relationship —
+    telling someone with no contacts at Optiver that their network does not
+    score there is a sentence about nothing."""
     warmth = profile.warm_firms.get(c.firm_id)
+    if warmth and c.recruiting_style == "assessment":
+        return W_NETWORK_ASSESSMENT, [Reason(
+            "Test-gated firm",
+            "You know someone here, and this axis is not scored at this "
+            "firm: its own process is a test or competition, and no route "
+            "from a conversation into the pipeline is documented. Worth "
+            "having anyway; it is not what moves this one.",
+            "network",
+        )]
     if warmth == "warm":
         return W_NETWORK_WARM, [Reason(
             "You know someone here",

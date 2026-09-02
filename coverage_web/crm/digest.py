@@ -321,8 +321,18 @@ def _cycle_note(user, recs) -> str:
     different programme, so when the picks are mixed the suffix names the
     ones it is about ("the summer internship roles here are a year
     early"). A pick with no intake year gets the bare sentence — nothing
-    about its timing is known to say."""
+    about its timing is known to say.
+
+    AND WHEN THE STUDENT'S OWN CYCLE OPENS, appended as a second sentence
+    from `directory.views.cycle_open_estimate`. Deliberately not restated
+    here: this function and the Picked column's header are two renderings of
+    one fact, and the day the digest wrote its own month range is the day the
+    email and the page could disagree about a date (P5). The whole sentence,
+    including the word "estimated" and the firm count, arrives already built,
+    and is "" whenever the corpus cannot say — in which case the note is
+    exactly what it was before."""
     from directory.recommend import CYCLE_LABELS, parse_target_cycle
+    from directory.views import cycle_open_estimate
 
     labels = [
         str(v).strip() for v in (getattr(user, "target_cycles", None) or []) if str(v).strip()
@@ -343,11 +353,22 @@ def _cycle_note(user, recs) -> str:
         f"cycle{'' if len(targets) == 1 else 's'}"
     )
 
+    def _with_open_estimate(text: str) -> str:
+        """`text` plus the "when does mine open" sentence, if there is one.
+
+        Applied at every path that returns a note, never at the paths that
+        return "" — a student whose picks ARE in their cycle has no question
+        for this sentence to answer, and answering it anyway would be the
+        email volunteering a date about a cycle already underway.
+        """
+        opens = cycle_open_estimate(user)
+        return f"{text}. {opens}" if opens else text
+
     target_buckets = {bucket for _, (bucket, _) in targets}
     judged = [r.candidate for r in recs if r.candidate.bucket in target_buckets]
     cohorts = [_int_or_none(c.cohort) for c in judged]
     if not judged or any(c is None for c in cohorts):
-        return note
+        return _with_open_estimate(note)
 
     def _years_for(bucket: str) -> set[int]:
         return {year for _, (b, year) in targets if b == bucket}
@@ -363,7 +384,7 @@ def _cycle_note(user, recs) -> str:
         note += f"; {subject} are earlier intakes"
     else:
         note += f"; {subject} are other intakes"
-    return note
+    return _with_open_estimate(note)
 
 
 def _closing_this_week(user, *, today: date) -> list[dict]:

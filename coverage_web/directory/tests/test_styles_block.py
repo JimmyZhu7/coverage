@@ -108,9 +108,28 @@ def test_the_feeds_core_layout_rules_survive_rendering():
 
 
 def _feed_css() -> str:
+    """The FEED's own <style> block, not every block on the page.
+
+    It used to be all three joined, and that broke the moment the base
+    template grew a `@media (pointer: coarse)` rule of its own for the site
+    footer: `_coarse_block` below takes the FIRST such block in the joined
+    string, which is the footer's 224-character one, and every assertion
+    about `.rolerow`'s touch behaviour then failed with "no rule found" —
+    a true statement about the wrong block. The failure looked like the
+    stylesheet had lost the rule; it had not.
+
+    Selecting by content rather than by index because the block ORDER is the
+    base template's business and this file has no business pinning it: the
+    feed's block is the one that defines the row, so ask for that.
+    """
     blocks = _style_blocks("/opportunities/")
     assert blocks, "the feed should render its own <style> block"
-    return "\n".join(blocks)
+    feed = [b for b in blocks if re.search(r"^\s*\.rolerow\s*\{", b, re.M)]
+    assert feed, (
+        "no rendered <style> block defines `.rolerow` — the feed's own block "
+        "is missing or its late rules were dropped by a parse break."
+    )
+    return "\n".join(feed)
 
 
 def _rule(css: str, selector: str) -> str:

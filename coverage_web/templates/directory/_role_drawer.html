@@ -23,6 +23,27 @@ last and unmissable — this drawer is for deciding, not for applying.
   </p>
 </header>
 
+{% if pick_why %}
+  {% comment %}
+  WHY COVERAGE RATES THIS ONE, directly under the header and above everything
+  else. The Picked column prints this on the card; the drawer that card opens
+  printed nothing, so a student who clicked BECAUSE the product said "this
+  one" arrived at the panel where they actually decide with the reasoning
+  left behind.
+
+  Here it is one line of chip texts joined the way `Recommendation.why` joins
+  them, with every full sentence in the `title` — the same
+  one-line-not-pills call `_rolecard.html`'s `.rr-why` and `_results.html`'s
+  header both make, and for the same reason: a pile of chips wraps and
+  staggers whatever is under it.
+
+  Above `net` on purpose. "You know someone here" is one of these reasons
+  when it applies, so the summary has to come before the names it summarises,
+  or the panel answers the question after having already elaborated on it.
+  {% endcomment %}
+  <p class="drawer-why" title="{% for r in pick_why %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_why %}{{ r.text }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+{% endif %}
+
 {% if net %}
   {% comment %}
   YOUR PEOPLE HERE, directly under the title and above everything the posting
@@ -44,19 +65,68 @@ last and unmissable — this drawer is for deciding, not for applying.
   {% include "directory/_role_people.html" %}
 {% endif %}
 
-{% if facts %}
-  {% comment %}Every row carries its own evidence. A fact whose sentence we
-  cannot show is a fact this product does not state.{% endcomment %}
-  <section class="drawer-facts" aria-label="What the posting states">
-    {% for f in facts %}
-      <div class="drawer-fact">
-        <span class="df-k">{{ f.label }}</span>
-        <span class="df-v">{{ f.value }}</span>
-        <span class="df-why">{{ f.phrase }}</span>
-      </div>
-    {% endfor %}
-  </section>
-{% endif %}
+{% comment %}
+PARITY WITH THE CARD (2026-09-02). The drawer is "for deciding, not for
+applying" (top of this file) and it was missing the three things the card
+already had: the sponsorship answer, the personal eligibility verdict, and
+why this role was picked. A student clicked through from a card that said
+"Won't sponsor you here" into a panel that did not mention visas at all.
+
+The block is no longer gated on `facts`. Sponsorship renders on every row
+including the silent ones, because "the posting does not say" is the answer
+on most of them and an omitted line leaves the reader to supply a guess
+about the fact most able to end the decision.
+{% endcomment %}
+<section class="drawer-facts" aria-label="What the posting states">
+  {% comment %}
+  FIRST, and above the posting's own facts, for the same reason it leads
+  `_FACT_CHIP_ORDER` on the card: a role that will not sponsor you is the one
+  answer that can end the decision before any other matters.
+
+  A SENTENCE, NEVER A BADGE. The stated claims are four incommensurable kinds
+  and Barclays appends a right-to-work disclosure to every posting including
+  ones that also say it will sponsor (`research-eligibility-language.md §6`,
+  Grade A), so what shows is the extracted words with their label. `df-why`
+  is empty where the answer came from the firm's policy rather than the
+  posting: there is no posting sentence to quote, and `df-v` already says so.
+  {% endcomment %}
+  <div class="drawer-fact">
+    <span class="df-k">{{ sponsorship.label }}</span>
+    <span class="df-v">{{ sponsorship.value }}</span>
+    <span class="df-why">{{ sponsorship.phrase }}</span>
+  </div>
+  {% comment %}
+  THE ELIGIBILITY VERDICT — the one row here about the READER rather than
+  about the posting, which is why it carries its own class and sits between
+  the sponsorship answer and the posting's raw facts.
+
+  Signed-out readers and students who have stated nothing get the "not
+  stated" line instead: a verdict needs both sides to have spoken
+  (`views._eligibility`), and inventing one from a half-filled profile is the
+  guess this product's whole posture is against. `research-eligibility-
+  language.md §7` warrants exactly this distinct state where the requisition
+  and the programme page disagree — the honest sentence, not a blank.
+  {% endcomment %}
+  <div class="drawer-fact">
+    <span class="df-k">Eligibility</span>
+    {% if verdict %}
+      <span class="df-v vd-{{ verdict.kind }}">{{ verdict.label }}</span>
+      <span class="df-why">{{ verdict.why }}</span>
+    {% else %}
+      <span class="df-v">Eligibility not stated in this posting</span>
+      <span class="df-why"></span>
+    {% endif %}
+  </div>
+  {% for f in facts %}
+    {% comment %}Every row carries its own evidence. A fact whose sentence we
+    cannot show is a fact this product does not state.{% endcomment %}
+    <div class="drawer-fact">
+      <span class="df-k">{{ f.label }}</span>
+      <span class="df-v">{{ f.value }}</span>
+      <span class="df-why">{{ f.phrase }}</span>
+    </div>
+  {% endfor %}
+</section>
 
 {% if fetched %}
   {% comment %}

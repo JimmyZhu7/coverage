@@ -128,7 +128,23 @@ exactly the moment it had something to say.
             straight under the page's h1 — the 1→3 jump a screen-reader user
             hears as a missing level.{% endcomment %}
             <h2 class="firmcol-h"><span class="firmcol-name" id="pickcol-h">Picked for you</span></h2>
-            <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% else %}None match this filter{% endif %}</span>
+            {% comment %}
+            TWO KINDS OF EMPTY, and until 2026-09-02 only one of them had a
+            sentence. "None match this filter" is true when the student's
+            filters hid picks that exist; it is a lie when there were never
+            any picks to hide, and that second case did not even reach this
+            template — the column was not built at all, so the profile most
+            in need of an explanation got the least. See the `pick_cluster`
+            block in views.py.
+
+            The copy names the two levers a student can actually pull. It
+            does not quote the score bar: 25 is a scoring internal with no
+            meaning outside `recommend.py`, and printing it invites a "why is
+            this one 24" question the number cannot answer. The cycle
+            sentences below carry the rest of the answer, which on an
+            early-cycle profile is usually the whole of it.
+            {% endcomment %}
+            <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% elif pick_cluster.nothing_scored %}Nothing on the board scores high enough for you yet{% else %}None match this filter{% endif %}</span>
             {% comment %}
             The shared "why", as ONE text line in the firm columns' own third-
             line voice ("Tier 1"), not a row of pills. Pills wrapped
@@ -186,6 +202,28 @@ exactly the moment it had something to say.
               <span class="firmcol-cycle-note">{{ pick_cluster.cycle_note }}</span>
             {% endif %}
             {% comment %}
+            AND WHEN THE STUDENT'S OWN CYCLE OPENS. The sentence above says
+            the cycle has not opened; on the founder's board it fired and
+            then stopped, leaving the one question it raises unanswered while
+            `FirmDate` held the answer the whole time (28 `app_open` rows for
+            sa2028, 7 in Hong Kong and 16 in the US).
+
+            SECOND, not merged into the first. They are different claims with
+            different evidence: the first is a fact about today's board and
+            is certain; this one is a forecast off past cycles and says so in
+            its own words. One sentence carrying both would let the certainty
+            of the first lend itself to the second.
+
+            Same span class, so it reads as one block of context rather than
+            a new kind of thing. `""` whenever the corpus cannot say, in
+            which case nothing renders and the column is exactly as it was —
+            see `cycle_open_estimate` in views.py for the three-firm floor
+            and why every date here is labelled a forecast.
+            {% endcomment %}
+            {% if pick_cluster.cycle_open %}
+              <span class="firmcol-cycle-note">{{ pick_cluster.cycle_open }}</span>
+            {% endif %}
+            {% comment %}
             Never a silent truncation. This column obeys the filters like its
             neighbours, so it owns up to what they removed — and it stays on
             screen when they remove EVERYTHING, because a column that
@@ -197,6 +235,15 @@ exactly the moment it had something to say.
                 {% if pick_cluster.roles %}{{ pick_cluster.hidden_by_filter }} more hidden by your filters
                 {% else %}All {{ pick_cluster.total_picks }} of your picks are hidden by your filters{% endif %}
               </span>
+            {% endif %}
+            {% comment %}WHAT TO DO NEXT, and only on the empty-by-score
+            state: the filter case already offers its own reversal one click
+            above, and the full case needs no instruction. Settings is where
+            both levers live (target firms, tracks and regions), and it is a
+            link rather than a sentence about a link because the whole point
+            is that the student can act on it from here.{% endcomment %}
+            {% if pick_cluster.nothing_scored %}
+              <span class="firmcol-hidden">Add target firms or widen your tracks in <a href="{% url 'accounts:settings' %}">Settings</a>.</span>
             {% endif %}
           </div>
         </header>

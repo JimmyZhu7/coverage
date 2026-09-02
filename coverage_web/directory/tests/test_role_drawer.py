@@ -406,3 +406,160 @@ def test_my_applications_can_read_the_postings_it_tracks(client, django_user_mod
     assert f'data-role-id="{held.id}"' in body
     assert f'data-role-id="{unread.id}"' not in body, \
         "never offer to open what we do not hold"
+
+
+# ---------------------------------------------------------------------------
+# DRAWER PARITY WITH THE CARD (WS-OPP-06).
+#
+# The drawer is where the student DECIDES (this file's own opening note), and
+# it was missing three things the card already had: the sponsorship answer,
+# the personal eligibility verdict, and why the role was picked. A student
+# clicked through from a card reading "Won't sponsor you here" into a panel
+# that did not mention visas at all.
+# ---------------------------------------------------------------------------
+
+def _drawer(client, opp):
+    return client.get(reverse("role_description", args=[opp.id])).content.decode()
+
+
+def test_the_drawer_quotes_the_sponsorship_sentence_verbatim(client):
+    """The sentence, with its label, never a derived badge. The stated claims
+    are four incommensurable kinds and Barclays appends a right-to-work
+    disclosure to every posting including ones that also say it will sponsor
+    (`research-eligibility-language.md §6`, Grade A)."""
+    firm = Firm.objects.create(slug="ubs-spon", name="UBS")
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://ubs.test/spon", sponsorship="no",
+        raw={"detail_text": "Text.",
+             "facts": {"sponsorship": {
+                 "value": "no",
+                 "phrase": "We are unable to sponsor visas for this role."}}},
+    )
+    body = _drawer(client, o)
+    assert "Visa sponsorship" in body
+    assert "We are unable to sponsor visas for this role." in body
+
+
+def test_the_drawer_says_so_when_the_posting_states_no_sponsorship_answer(client):
+    """Silence is the answer on most rows, and a drawer that simply omits the
+    line leaves the reader to supply their own guess about the fact most able
+    to end the decision. P1: say what is not known."""
+    firm = Firm.objects.create(slug="quiet-spon", name="Quiet")
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://quiet.test/1", raw={"detail_text": "Text."})
+    body = _drawer(client, o)
+    assert "Visa sponsorship" in body
+    assert "Not stated in this posting" in body
+
+
+def test_the_drawer_states_the_eligibility_verdict_or_its_absence(client, django_user_model):
+    """Both halves. A student whose year the posting names gets the verdict;
+    a signed-out reader gets the honest "not stated" line rather than a blank
+    — a verdict needs both sides to have spoken."""
+    firm = Firm.objects.create(slug="elig", name="Elig")
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://elig.test/1",
+        raw={"detail_text": "Text.",
+             "facts": {"grad": {"value": "2028", "years": ["2028"],
+                                "phrase": "graduating in 2028"}}},
+    )
+    anon = _drawer(client, o)
+    assert "Eligibility not stated in this posting" in anon
+
+    user = django_user_model.objects.create_user(
+        email="elig@example.com", password="x" * 14)
+    user.class_year = 2028
+    user.save()
+    client.force_login(user)
+    signed_in = _drawer(client, o)
+    assert "Your year (2028)" in signed_in
+    assert "graduating in 2028" in signed_in
+
+
+def test_no_derived_sponsorship_badge_is_rendered_anywhere():
+    """The shape the research forbids, checked as absence in the templates
+    that could carry it. A boolean or a badge collapses four incommensurable
+    kinds of claim into one, which is exactly what
+    `research-eligibility-language.md §6` (Grade A) rules out."""
+    from pathlib import Path
+
+    templates = Path(__file__).resolve().parents[2] / "templates" / "directory"
+    for path in sorted(templates.rglob("*.html")):
+        text = path.read_text()
+        for banned in ("sponsorship_badge", "sponsors_ok"):
+            assert banned not in text, f"{path.name} renders a derived badge: {banned}"
+
+
+def test_the_drawer_prints_why_coverage_rates_this_one(client, django_user_model):
+    """The card's Picked column prints `pick_why`; the drawer that card opens
+    printed nothing, so the student who clicked BECAUSE the product said
+    "this one" arrived at the panel where they decide with the reasoning left
+    behind on the card."""
+    from crm.models import UserFirm
+
+    user = django_user_model.objects.create_user(
+        email="why-drawer@example.com", password="x" * 14)
+    user.tracks = ["ib"]
+    user.regions = ["us"]
+    user.save()
+    client.force_login(user)
+
+    firm = Firm.objects.create(slug="pjt-why", name="PJT", tracks=["ib"])
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    o = Opportunity.objects.create(
+        firm=firm, title="2027 Summer Analyst", bucket="internship",
+        status="open", url="https://pjt.test/1", region="us",
+        raw={"detail_text": "Text."})
+
+    body = _drawer(client, o)
+    assert "drawer-why" in body
+    assert "Tier 1" in body
+
+
+def test_a_role_under_the_bar_shows_no_reasoning(client, django_user_model):
+    """Whether a role IS in the top six needs the whole board ranked, which
+    is not a thing to do inside a single-role fetch. The bar used instead is
+    `MIN_SCORE` — the same one the ranker applies before ordering anything —
+    so a row below it shows nothing rather than a weak justification for
+    something the product is not recommending."""
+    user = django_user_model.objects.create_user(
+        email="thin-drawer@example.com", password="x" * 14)
+    user.tracks = ["ib"]
+    user.regions = ["us"]
+    user.save()
+    client.force_login(user)
+
+    # Untargeted, untiered, wrong region: nothing to score on.
+    firm = Firm.objects.create(slug="nobody", name="Nobody", tracks=["consulting"])
+    o = Opportunity.objects.create(
+        firm=firm, title="Operations Programme", bucket="internship",
+        status="open", url="https://nobody.test/1", region="eu",
+        raw={"detail_text": "Text."})
+
+    body = _drawer(client, o)
+    assert "drawer-why" not in body
+
+
+def test_the_card_now_carries_three_fact_chips(client):
+    """The cap moved from 2 to 3 because the constraint it was measured under
+    is gone: `.rr-meta` wraps, so a third chip costs a line break rather than
+    a cut chip. 128 open rows were hiding a third fact behind the old cap and
+    every one of them also stated sponsorship or a year of study."""
+    from directory.views import _FACT_CHIPS_MAX, _fact_chips
+
+    firm = Firm.objects.create(slug="threechip", name="Three Chip")
+    o = Opportunity.objects.create(
+        firm=firm, title="Summer Analyst", bucket="internship", status="open",
+        url="https://threechip.test/1", sponsorship="no",
+        raw={"facts": {
+            "sponsorship": {"value": "no", "phrase": "No sponsorship."},
+            "study": {"value": "Penultimate year", "phrase": "Penultimate year."},
+            "gpa": {"value": "3.5", "phrase": "Minimum GPA 3.5."},
+            "duration": {"value": "10 weeks", "phrase": "Ten weeks."},
+        }},
+    )
+    assert _FACT_CHIPS_MAX == 3
+    assert len(_fact_chips(o)) == 3

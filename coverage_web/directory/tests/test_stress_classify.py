@@ -328,3 +328,177 @@ def test_class_of_year_outside_window_is_not_promoted(year):
     # Outside the plausible window, "class of YYYY" is not a campus signal
     # by itself, and nothing else in this neutral title is either.
     assert classify_role(f"Class of {year} Investment Analyst") == OTHER
+
+
+# ===========================================================================
+# INVARIANT 7 — the three shapes the bucket rules were missing, each pinned
+# by the live title that found it (`audit-opportunities.md §A1` and D11,
+# re-measured against the board on 2026-09-02).
+#
+# These are EXAMPLE-BASED on purpose and sit in the stress file rather than
+# in `test_classify.py`'s CASES table because each one comes with a matrix:
+# the shape has to hold across every spelling the live boards use for it, and
+# the negative case beside it is what stops the new rule swallowing something
+# real. A single row in a CASES list would pin one spelling and leave the
+# other eleven free to regress.
+# ===========================================================================
+
+# 7a. A summer internship with its intake year written between the two words.
+# Eleven live Bank of America rows in both orders were filed `entry_level` —
+# a full-time graduate hire — because `summer analyst` is adjacency-only and
+# the campus-board fallback then matched the bare word "Analyst".
+_YEAR_IN_THE_MIDDLE = [
+    "Corporate Audit, Summer 2027 Analyst - Chester",
+    "Global Risk, Summer 2027 Analyst - London",
+    "Global Technology, Cyber Security, Summer 2027 Analyst - Chester",
+    "Global Quantitative Data Analytics, Summer 2027 Analyst - London",
+    "Global Operations Operations Analyst Summer 2027 - London",
+    "Global Operations, Operations Analyst Summer 2027 - Bromley",
+    "Global Technology Software Engineer Summer 2027 Analyst - Bromley",
+    "Chief People Organization, Summer 2027 Analyst - Chester",
+]
+
+
+@pytest.mark.parametrize("title", _YEAR_IN_THE_MIDDLE)
+def test_summer_year_analyst_is_an_internship(title):
+    assert classify_role(title) == INTERNSHIP
+    # And the campus-board hint cannot change it: the hint's whole job is to
+    # break ties on NEUTRAL titles, and this one is no longer neutral.
+    assert classify_role(title, campus_hint=True) == INTERNSHIP
+
+
+@pytest.mark.parametrize("year", [2024, 2027, 2031, 2035])
+def test_summer_year_analyst_holds_for_every_plausible_intake(year):
+    assert classify_role(f"Summer {year} Analyst") == INTERNSHIP
+    assert classify_role(f"Analyst Summer {year}") == INTERNSHIP
+
+
+@pytest.mark.parametrize("title", [
+    # A four-digit token that is not a plausible intake year must not be read
+    # as one — desk and requisition numbers run to four digits all over these
+    # boards.
+    "Analyst Summer 4021",
+    "Summer 1999 Analyst",
+])
+def test_a_four_digit_non_year_does_not_make_an_internship(title):
+    assert classify_role(title) != INTERNSHIP
+
+
+# 7b. Campus EVENTS. Three live Morgan Stanley rows sat in `other` because
+# the event vocabulary had no word for them: the conjunction in "Meet and
+# Greet" hides the object from `meet\s+(our|the)`, and "hackathon" was in no
+# list at all.
+_EVENT_TITLES = [
+    "Meet and Greet our Traders: Structuring, Corporates and Exotics Trading",
+    "Meet & Greet our Quants",
+    "2026 Morgan Stanley Hackathon - UK",
+    "2026 Morgan Stanley Hackathon - France",
+    "EU Campus - Aarhus Hackathon IMCity",
+    "Virtual Career Information Session - 2027 Corporate Summer Analyst",
+    "Women Who Lead: IB Networking Event",
+]
+
+
+@pytest.mark.parametrize("title", _EVENT_TITLES)
+def test_campus_events_are_insight_not_a_job(title):
+    assert classify_role(title) == INSIGHT
+    assert classify_role(title, campus_hint=True) == INSIGHT
+
+
+# 7c. THE RULE ORDER ITSELF. `classify_role`'s step 1 (insight) runs before
+# step 2 (internship), which is what makes an information session ABOUT a
+# summer analyst programme the session rather than the internship. That
+# ordering is load-bearing and the new event words inherit it, so it is
+# pinned here directly rather than left implicit in the cases above.
+#
+# The other half of the contract is what keeps the ordering safe: a word only
+# earns a place in `_INSIGHT` if it titles NO job on these boards. An
+# internship whose title carries no event word is untouched by every event
+# word in the vocabulary, which is what "an event pattern can never demote a
+# real internship" means in practice — and is the second test below.
+@pytest.mark.parametrize("event", [
+    "Information Session", "Meet and Greet", "Hackathon", "Coffee Chat",
+    "Networking Evening", "Insight Day",
+])
+def test_insight_runs_before_internship(event):
+    assert classify_role(f"{event}: 2027 Summer Analyst Programme") == INSIGHT
+    assert classify_role(f"2027 Summer Analyst Programme {event}") == INSIGHT
+
+
+@pytest.mark.parametrize("title", [
+    "2027 Summer Analyst - Investment Banking",
+    "Summer 2027 Analyst - Global Markets",
+    "Off-Cycle Internship, M&A",
+    "Software Engineering Co-op",
+])
+def test_a_plain_internship_is_never_demoted_by_the_event_vocabulary(title):
+    assert classify_role(title) == INTERNSHIP
+
+
+# 7d. "Campus" alone is the firm's word for the CHANNEL, not for the thing on
+# offer, so it only reaches `entry_level` beside a role or level word. Five
+# live rows left the bucket when this landed; nineteen kept it.
+@pytest.mark.parametrize("title", [
+    "Campus Quantitative Researcher, PhD (Full-Time)",
+    "Campus Full Time 2027 - Quantitative Trader - Amsterdam",
+    "Campus AI Research Engineer (Full-Time)",
+    "Research Associate (Campus)",
+    "Investment Banking Analyst (Campus 2026)",
+    "Campus Systems Engineer (Full-Time)",
+])
+def test_campus_with_a_role_word_is_still_an_entry_level_hire(title):
+    assert classify_role(title) == ENTRY_LEVEL
+
+
+@pytest.mark.parametrize("title,expected", [
+    # An HR job on the campus desk is not a campus hire.
+    ("Campus Sourcer", OTHER),
+    # A talent pool is not a posting.
+    ("2027 EU Campus Programme Talent Community", OTHER),
+    # An event. "Showcase" is in no vocabulary, so `other` is the honest
+    # answer here — better than `entry_level`, which claimed it was a job.
+    ("Morgan Stanley Infrastructure: 2026 Fall Campus Showcase", OTHER),
+    # A careers-advice session, likewise.
+    ("From Campus to Career: Interview Tips that Work (Virtual Session)", OTHER),
+    # The live IMC row carries a typo ("Hackahton") that no vocabulary can
+    # catch. It must at least stop claiming to be a full-time hire.
+    ("EU Campus - Aarhus Hackahton IMCity", OTHER),
+])
+def test_campus_without_a_role_word_is_not_an_entry_level_hire(title, expected):
+    assert classify_role(title) == expected
+
+
+# 7e. The provider's filing is coarser than its own titles. Crédit Agricole
+# files a management-trainee programme under the single value
+# "Internship/Trainee" because that value covers both kinds; the title says
+# "Graduate Trainee ... 管培生" out loud and that answer wins.
+def test_a_graduate_title_outranks_an_ambiguous_campus_filing():
+    title = "Graduate Trainee in CIB Coverage 企业金融部管培生-北京"
+    assert bucket_from_contract("Internship/Trainee", title) == ENTRY_LEVEL
+    # …and the Chinese spelling alone is enough, as it is in `_ENTRY`.
+    assert bucket_from_contract("Trainee", "管培生 - 北京") == ENTRY_LEVEL
+
+
+def test_an_explicit_internship_title_outranks_the_graduate_word():
+    # EY's live row uses "graduate" to describe the STUDENT, not the role.
+    # The internship rule runs first in `classify_role` and must run first
+    # here too, or every graduate-student internship becomes a full-time hire.
+    title = "Intern - EY-Parthenon - M&A Lead Advisory (graduate)"
+    assert bucket_from_contract("Internship/Trainee", title) == INTERNSHIP
+
+
+def test_the_title_never_overrides_a_filing_that_already_decided():
+    # A filing that says "graduate" outright decides on its own, and a filing
+    # that names no campus programme still decides nothing whatever the
+    # title says.
+    assert bucket_from_contract("Graduate Programme", "Summer Analyst") == ENTRY_LEVEL
+    assert bucket_from_contract("Permanent", "Graduate Trainee") == ""
+    assert bucket_from_contract("", "Graduate Trainee") == ""
+
+
+@pytest.mark.parametrize("key", _CAMPUS_CONTRACT_KEYS)
+def test_a_silent_title_leaves_every_filing_exactly_as_it_was(key):
+    # P3: the title check may only ever ADD an answer where the title speaks.
+    # A title with no graduate word must produce the same bucket the filing
+    # produced before this parameter existed.
+    assert bucket_from_contract(key, "Financial Analyst, Paris") == bucket_from_contract(key)

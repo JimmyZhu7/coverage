@@ -16,6 +16,36 @@ in document order.
 {% endcomment %}
 <span class="track" id="track-{{ r.id }}">
   {% if r.track_status is None %}
+    {% comment %}
+    A POSTING NOBODY TOOK DOWN gets the sentence instead of the button.
+
+    The row is NOT closed and its outbound link is untouched — a prose
+    deadline may not close a row, and the evidence is direct: 11 of 17 Citi
+    postings that stated a close date were still live past it, one by eight
+    months (`research-ats-lifecycle.md` unsafe #1, and see
+    `_ABANDONED_AFTER_DAYS` in views.py for the threshold's own argument).
+    The firm's page stays the record. What the product withdraws is the
+    recommendation implicit in a Save button: it will not ask a student to
+    put a posting in their pipeline when the firm has left it up a month
+    past the date it published.
+
+    REPLACED, not disabled. A greyed-out button says "not now" and there is
+    no "now" here; it also still reads as an affordance the reader failed to
+    earn, when the fact being reported is the firm's, not theirs.
+
+    "NOT FOR ME" STAYS, on the line below. It is the row's only exit, and an
+    abandoned posting is exactly the row a student most wants gone — taking
+    both verbs away would leave the feed's longest-dead rows as the only
+    ones that cannot be cleared from it.
+
+    ONLY THE UNTRACKED BRANCH. A student who already saved this role keeps
+    the "Saved" button (further down this file) and can still un-save it:
+    withdrawing a control someone has already used would strand their own
+    row, which is a worse failure than the one this fixes.
+    {% endcomment %}
+    {% if r.abandoned %}
+      <span class="track-abandoned" title="{{ r.abandoned.why }}">{{ r.abandoned.label }}</span>
+    {% else %}
     <button type="button" class="track-btn"
             hx-post="{% url 'track_opportunity' r.id %}" hx-vals='{"status": "saved"}'
             hx-target="closest .track" hx-swap="outerHTML"
@@ -23,6 +53,7 @@ in document order.
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 11.5l-3.5 2 .9-3.9L2.5 6.9l4-.35L8 3l1.5 3.55 4 .35-2.9 2.7.9 3.9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
       Save
     </button>
+    {% endif %}
     {% comment %}Save's opposite. Without it the only verbs were "act on
     this" and "scroll past it forever", so a feed of 894 roles never got
     smaller no matter how many decisions the student made.

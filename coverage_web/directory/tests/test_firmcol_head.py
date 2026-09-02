@@ -169,26 +169,36 @@ def test_the_picked_column_renders_shared_reasons_in_the_firmcol_why_line(db):
 def test_the_picked_column_really_does_render_a_shorter_id_stack(feed_with_both_columns):
     """The condition that made centring fail, asserted on real markup.
 
-    Not a hypothetical: Picked's stats row is shorter than every firm
-    column's, which is the asymmetry that made centring fail.
+    REWRITTEN 2026-09-02, and the old assertion is why. It read
+    `stats[0].strip() == ""` — Picked's stats row present and EMPTY — with a
+    failure message saying "if it now carries chips, this test is no longer
+    exercising the failure". It does now carry something: the `fc-eyebrow`
+    span ("PICKED") moved into that slot when the column stopped relying on
+    the accent wash for its identity, so the empty state the assertion
+    described is no longer reachable and the test had been failing rather
+    than guarding anything.
 
-    Rewritten 2026-09-02. It used to assert that row was EMPTY, and its own
-    failure message named the day that would stop being true: the row now
-    carries a "Picked" eyebrow, added so the column is distinguishable on a
-    board where every firm is one of the student's own and the accent border
-    therefore says nothing. Empty was never the property under test, though.
-    Short was. A tier pill is what a firm column puts there, so the guard is
-    that Picked does not carry one.
+    The INVARIANT is unchanged and is what this now pins: the Picked column's
+    id stack is shorter than a firm column's, because it carries no tier
+    pill. That is the whole reason the header needs `align-items: start`
+    rather than centring — a shorter stack centred against a taller one is
+    the misalignment this file exists for. Asserting the eyebrow's presence
+    as well keeps the row's real content named, so a future edit that empties
+    it is a failure here rather than a silent change of premise.
     """
     html = feed_with_both_columns.get("/opportunities/").content.decode()
     html = _STYLE_RE.sub("", html)
 
     stats = re.findall(r'<div class="firmcol-stats">(.*?)</div>', html, re.S)
     assert len(stats) >= 2, f"expected the Picked column and a firm one, got {len(stats)}"
+    assert "fc-eyebrow" in stats[0], (
+        "the Picked column's stats row should carry its eyebrow — that word "
+        "is what stops the column reading as a firm called 'Picked for you'"
+    )
     assert "firmcol-tier" not in stats[0], (
-        "the Picked column now carries a tier pill, so its id stack is no "
-        "longer shorter than a firm column's and this test no longer "
-        "exercises the centring failure it was written for"
+        "the Picked column has no tier, and a tier pill appearing here would "
+        "mean its id stack is no longer the shorter one this header's "
+        "`align-items: start` exists for"
     )
     assert "firmcol-tier" in stats[1], "a firm column should carry its tier pill"
     assert ":empty" not in _feed_css(), (

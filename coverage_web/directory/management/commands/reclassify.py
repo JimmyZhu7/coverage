@@ -81,7 +81,8 @@ class Command(BaseCommand):
                 # Mirrors ingest exactly (a nightly re-run must not undo what
                 # ingest classified): the provider's own filing decides
                 # outright where it speaks, the title rules where it is silent.
-                bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"))
+                bucket = (bucket_from_contract(
+                              (opp.raw or {}).get("contract_type"), title)
                           or classify_role(title, campus_hint=hint))
                 cohort = (opp.cohort or extract_cohort(title)
                           or cohort_from_provider_title(opp.raw))
