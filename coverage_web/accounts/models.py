@@ -282,6 +282,15 @@ class User(AbstractUser):
     # expiry command's own selection query relies on exactly that
     # distinction to leave such an account alone.
     pro_trial_ends_at = models.DateTimeField(null=True, blank=True)
+    # When the student dismissed the "your Pro trial ended" banner on
+    # Settings (accounts/trials.py::trial_ended_notice, the sentence the two
+    # comments above promised and nothing rendered until now). Stored on the
+    # account rather than in the session or localStorage: what is being
+    # acknowledged is a change to what this account can do, and it should
+    # not come back on the laptop after it was closed on the phone. Null on
+    # every account that never had a trial, and on one whose banner is still
+    # standing.
+    pro_trial_notice_dismissed_at = models.DateTimeField(null=True, blank=True)
     onboarded_at = models.DateTimeField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, blank=True)

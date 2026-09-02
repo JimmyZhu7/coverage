@@ -7,12 +7,16 @@ second decorator each command would need to add separately, so a command
 that records a JobRun always also pings its check, and there is exactly one
 place to look for either mechanism.
 
+`JobHeartbeat` is the same idea for a LONG-RUNNING worker, where "one row
+per run" would mean one row for the life of the deploy: it keeps a single
+row and bumps its `finished_at` on every tick. See its own docstring.
+
 Otherwise kept deliberately dumb — a context manager writing two rows'
 worth of timestamps plus one best-effort HTTP GET, nothing else — because
-the six commands it wraps (gmail_backfill, gmail_watch_renew, refresh,
-send_deadline_push_alerts, send_weekly_digest, pro_trial_expire) already
-have their own retry/failure handling for the WORK itself; this only
-answers "did the job run, and when."
+the commands it wraps (gmail_backfill, gmail_watch_renew, refresh,
+send_deadline_push_alerts, send_weekly_digest, pro_trial_expire,
+capture_autopilot_worker, gmail_poll) already have their own retry/failure
+handling for the WORK itself; this only answers "did the job run, and when."
 """
 
 from __future__ import annotations
@@ -45,11 +49,12 @@ EXPECTED_INTERVALS: dict[str, timedelta] = {
     # here is a run that never starts, and the strip says "within a few
     # minutes".
     "autopilot": timedelta(minutes=5),
-    # gmail_poll is a long-running worker (render.yaml's coverage-gmail-poll),
-    # not a cron — it wraps every tick in track_job_run("gmail-poll") on a
-    # 120s loop (DEFAULT_INTERVAL in gmail_poll.py). Ten minutes is five
-    # missed ticks' worth of slack: enough that an ordinary GC pause or a
-    # slow Gmail API call never trips this, not so much that a genuinely
+    # gmail_poll is a long-running worker (render.yaml's coverage-gmail-live),
+    # not a cron — in loop mode it bumps a single `JobHeartbeat` row's
+    # `finished_at` once per 120s tick (DEFAULT_INTERVAL in gmail_poll.py)
+    # rather than writing a row per tick; see that class below. Ten minutes
+    # is five missed ticks' worth of slack: enough that an ordinary GC pause
+    # or a slow Gmail API call never trips this, not so much that a genuinely
     # dead worker sits unflagged for the length of the old --interval-free
     # gap this dict used to leave for it entirely.
     "gmail-poll": timedelta(minutes=10),
@@ -81,6 +86,70 @@ def _ping_healthcheck(name: str) -> None:
         requests.get(url, timeout=5)
     except requests.RequestException:
         logger.exception("healthcheck ping failed for job %r", name)
+
+
+class JobHeartbeat:
+    """The long-running-worker counterpart to `track_job_run` below.
+
+    WHY A SECOND SHAPE AT ALL. `track_job_run` writes one row per run, which
+    is exactly right for a cron: a run is a discrete thing with a start, an
+    end and an outcome. A worker has none of that — `gmail_poll --interval
+    120` is ONE run that lasts until the next deploy, ticking 720 times a
+    day. Wrapping each tick in `track_job_run` would write 720 rows a day of
+    pure noise (the reason gmail_poll's own docstring refused to), and
+    wrapping the whole process in one would record a `running` row that
+    never becomes a success, so /ops/health/cron/ would report the poller
+    dead forever — which is precisely what it did.
+
+    So: ONE row per worker process, its `finished_at` bumped on every tick.
+    The health view's query is "the most recent SUCCESS row for this name,
+    ordered by finished_at" (ops/views.py), which reads a moving
+    `finished_at` exactly the way it reads a fresh row — no change needed
+    there, and `EXPECTED_INTERVALS["gmail-poll"]` keeps meaning what it says.
+    `started_at` stays pinned to when the process booted, so the row also
+    answers "how long has this worker been up".
+
+    A FAILED TICK GETS ITS OWN ROW, and the heartbeat row is left alone.
+    Flipping the heartbeat to `failed` would take the job's only success row
+    out of the health view's reach and report a live worker as `never_run`
+    over one bad Postgres second. Failures are rare and individually
+    interesting, so they are worth a row each — the same reasoning
+    gmail_poll.py already applies to its `gmail_poll_error` Import rows.
+    """
+
+    def __init__(self, name: str):
+        self.name = name
+        self.run: JobRun | None = None
+
+    def beat(self) -> JobRun:
+        """Record that one tick just finished cleanly. Creates the row on
+        the first call, bumps `finished_at` on every call after."""
+        now = timezone.now()
+        if self.run is not None:
+            # A queryset UPDATE rather than `instance.save(update_fields=...)`
+            # so the row count is visible: a worker outlives any row-pruning
+            # a human does in admin, and `save()` on a row that no longer
+            # exists raises rather than telling us to start a new one.
+            if JobRun.objects.filter(pk=self.run.pk).update(finished_at=now):
+                self.run.finished_at = now
+                _ping_healthcheck(self.name)
+                return self.run
+            self.run = None
+        self.run = JobRun.objects.create(
+            name=self.name, started_at=now, finished_at=now,
+            status=JobRun.STATUS_SUCCESS,
+        )
+        _ping_healthcheck(self.name)
+        return self.run
+
+    def failed(self) -> JobRun:
+        """Record one failed tick as its own row — see the class docstring
+        on why this never touches the heartbeat row."""
+        now = timezone.now()
+        return JobRun.objects.create(
+            name=self.name, started_at=now, finished_at=now,
+            status=JobRun.STATUS_FAILED,
+        )
 
 
 @contextmanager

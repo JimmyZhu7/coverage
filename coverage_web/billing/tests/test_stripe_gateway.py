@@ -31,17 +31,32 @@ def student():
     return User.objects.create_user(email="topup-student@example.com", password="x")
 
 
-def _fake_checkout_completed_event(event_id: str, user_id: int, pack_key: str) -> dict:
+def _fake_checkout_completed_event(
+    event_id: str,
+    user_id: int,
+    pack_key: str,
+    *,
+    payment_status: str = "paid",
+    event_type: str = "checkout.session.completed",
+) -> dict:
     """The shape `stripe.Webhook.construct_event` hands back — a dict-like
     Stripe `Event` object. A plain dict works fine here: `stripe_gateway.
     handle_webhook_event` only ever does `event["type"]` / `event["data"]
-    ["object"]` / `event["id"]` subscripting, never attribute access."""
+    ["object"]` / `event["id"]` subscripting, never attribute access.
+
+    `payment_status` is a REAL field on a real Checkout Session and is now
+    the thing the handler grants on. It defaults to "paid" here so every
+    pre-existing test in this file still describes the case it was written
+    for (a card checkout, money in hand); the unpaid case gets its own tests
+    below rather than being smuggled into these."""
     return {
         "id": event_id,
-        "type": "checkout.session.completed",
+        "type": event_type,
+        "api_version": stripe_gateway.STRIPE_API_VERSION,
         "data": {
             "object": {
                 "id": "cs_test_123",
+                "payment_status": payment_status,
                 "metadata": {"user_id": str(user_id), "pack_key": pack_key},
             }
         },
@@ -206,7 +221,10 @@ class TestHandleWebhookEvent:
         event = {
             "id": "evt_bad_user_id",
             "type": "checkout.session.completed",
-            "data": {"object": {"metadata": {"user_id": "not-a-number", "pack_key": "small"}}},
+            "data": {"object": {
+                "payment_status": "paid",
+                "metadata": {"user_id": "not-a-number", "pack_key": "small"},
+            }},
         }
 
         with patch("stripe.Webhook.construct_event", return_value=event):
@@ -232,6 +250,189 @@ class TestHandleWebhookEvent:
             )
 
         assert resp.status_code == 200
+
+
+class TestPaymentStatusGate:
+    """`checkout.session.completed` fires when the customer finishes the
+    FORM. With Stripe's dynamic payment methods on (the default), a delayed
+    method — a bank debit, a voucher — completes the session with
+    `payment_status="unpaid"` and settles later, or never. The handler used
+    to grant on the event type alone, so those credits landed before the
+    money did.
+    """
+
+    def _configure(self, settings):
+        settings.STRIPE_SECRET_KEY = "sk_test_x"
+        settings.STRIPE_WEBHOOK_SECRET = "whsec_x"
+        settings.CREDIT_PLANS = {
+            "free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}
+        }
+
+    def test_an_unpaid_completed_session_grants_nothing(self, settings, student):
+        self._configure(settings)
+        billing_credits.balance(student)
+        before = billing_credits.balance(student)
+        event = _fake_checkout_completed_event(
+            "evt_unpaid", student.id, "small", payment_status="unpaid"
+        )
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")  # must not raise
+
+        assert (
+            CreditLedger.objects.for_user(student)
+            .filter(kind=CreditLedger.KIND_PURCHASE).count() == 0
+        )
+        assert billing_credits.balance(student) == before
+
+    def test_an_unpaid_session_is_not_recorded_as_processed(self, settings, student):
+        """Deliberately NOT marked processed: the later settlement arrives as
+        a different event id, so recording this one blocks nothing — but
+        leaving it unrecorded means a redelivery re-reads `payment_status`
+        rather than being short-circuited by a decision taken while the money
+        was still in flight."""
+        self._configure(settings)
+        event = _fake_checkout_completed_event(
+            "evt_unpaid_2", student.id, "small", payment_status="unpaid"
+        )
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")
+
+        assert ProcessedStripeEvent.objects.filter(stripe_event_id="evt_unpaid_2").count() == 0
+
+    def test_a_session_with_no_payment_status_at_all_grants_nothing(self, settings, student):
+        """A payload missing the field entirely — a hand-crafted test event, a
+        shape from an older API version — is treated as not-paid. Absence is
+        never read as consent to grant."""
+        self._configure(settings)
+        event = {
+            "id": "evt_no_status",
+            "type": "checkout.session.completed",
+            "data": {"object": {"metadata": {"user_id": str(student.id), "pack_key": "small"}}},
+        }
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")
+
+        assert (
+            CreditLedger.objects.for_user(student)
+            .filter(kind=CreditLedger.KIND_PURCHASE).count() == 0
+        )
+
+    def test_the_delayed_settlement_event_does_grant(self, settings, student):
+        """`checkout.session.async_payment_succeeded` is how a delayed method
+        reports that the money actually arrived. Without handling it, the
+        unpaid gate above would mean such a customer never got their credits
+        at all."""
+        self._configure(settings)
+        billing_credits.balance(student)
+        event = _fake_checkout_completed_event(
+            "evt_async_ok", student.id, "small",
+            event_type="checkout.session.async_payment_succeeded",
+        )
+
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")
+
+        assert (
+            CreditLedger.objects.for_user(student)
+            .filter(kind=CreditLedger.KIND_PURCHASE).count() == 1
+        )
+
+    def test_the_unpaid_then_settled_pair_grants_exactly_once(self, settings, student):
+        """The real delayed-payment sequence, end to end: `completed` while
+        unpaid, then `async_payment_succeeded` once the debit clears. One
+        grant, from the second event."""
+        self._configure(settings)
+        billing_credits.balance(student)
+        unpaid = _fake_checkout_completed_event(
+            "evt_seq_1", student.id, "small", payment_status="unpaid"
+        )
+        settled = _fake_checkout_completed_event(
+            "evt_seq_2", student.id, "small",
+            event_type="checkout.session.async_payment_succeeded",
+        )
+
+        with patch("stripe.Webhook.construct_event", return_value=unpaid):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")
+        with patch("stripe.Webhook.construct_event", return_value=settled):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")
+
+        assert (
+            CreditLedger.objects.for_user(student)
+            .filter(kind=CreditLedger.KIND_PURCHASE).count() == 1
+        )
+
+    def test_the_failed_settlement_event_is_ignored(self, settings, student):
+        """Nothing was granted on the unpaid completion, so there is nothing
+        to reverse — `async_payment_failed` needs no handler and must not
+        become one by accident."""
+        self._configure(settings)
+        assert "checkout.session.async_payment_failed" not in stripe_gateway.GRANTING_EVENT_TYPES
+
+        event = _fake_checkout_completed_event(
+            "evt_async_fail", student.id, "small",
+            payment_status="unpaid",
+            event_type="checkout.session.async_payment_failed",
+        )
+        with patch("stripe.Webhook.construct_event", return_value=event):
+            stripe_gateway.handle_webhook_event(b"{}", "sig")
+
+        assert (
+            CreditLedger.objects.for_user(student)
+            .filter(kind=CreditLedger.KIND_PURCHASE).count() == 0
+        )
+
+
+class TestApiVersionPin:
+    """Unpinned, every object this module reads changes shape the day
+    Stripe's account default rolls forward — no deploy, no signal, and the
+    only symptom is a webhook that quietly stops granting."""
+
+    def test_the_pin_matches_the_installed_sdk(self):
+        """The pin exists to stop the ACCOUNT default moving, not to run the
+        SDK against a version it was not generated for. If a `stripe`
+        dependency bump moves its own default, this test is the moment the
+        constant gets reconsidered — deliberately a red test rather than a
+        silent behaviour change in production."""
+        assert stripe_gateway.STRIPE_API_VERSION == stripe.api_version
+
+    def test_checkout_sessions_are_created_against_the_pin(self, settings, student):
+        settings.STRIPE_SECRET_KEY = "sk_test_x"
+        settings.STRIPE_WEBHOOK_SECRET = "whsec_x"
+        with patch("stripe.checkout.Session.create", return_value=MagicMock(url="https://x")) as create:
+            stripe_gateway.create_checkout_session(
+                student, "small", success_url="https://x/ok", cancel_url="https://x/no"
+            )
+
+        _, kwargs = create.call_args
+        assert kwargs["stripe_version"] == stripe_gateway.STRIPE_API_VERSION
+
+    def test_an_endpoint_on_another_version_warns_but_still_grants(
+        self, settings, student, caplog
+    ):
+        """The endpoint's version is a Dashboard setting this code cannot
+        set, only report on. Dropping a real payment over it would be a
+        worse failure than reading a slightly older object shape."""
+        settings.STRIPE_SECRET_KEY = "sk_test_x"
+        settings.STRIPE_WEBHOOK_SECRET = "whsec_x"
+        settings.CREDIT_PLANS = {
+            "free": {"monthly_grant": 60, "message_cost": 1, "daily_burst": 15}
+        }
+        billing_credits.balance(student)
+        event = _fake_checkout_completed_event("evt_oldver", student.id, "small")
+        event["api_version"] = "2019-01-01"
+
+        with caplog.at_level("WARNING", logger="billing.stripe_gateway"):
+            with patch("stripe.Webhook.construct_event", return_value=event):
+                stripe_gateway.handle_webhook_event(b"{}", "sig")
+
+        assert "2019-01-01" in caplog.text
+        assert (
+            CreditLedger.objects.for_user(student)
+            .filter(kind=CreditLedger.KIND_PURCHASE).count() == 1
+        )
 
 
 class ConcurrentWebhookDeliveryTest(TransactionTestCase):

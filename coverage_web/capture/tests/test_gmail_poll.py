@@ -29,6 +29,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 from django.db import connections
+from django.utils import timezone
 from google.auth.exceptions import RefreshError
 
 from capture import gmail_live
@@ -406,6 +407,184 @@ class TestLoop:
     def test_a_non_positive_interval_is_rejected(self):
         with pytest.raises(CommandError):
             _run("--interval", "0")
+
+
+# ---------------------------------------------------------------------------
+# The loop's health row. `ops.tracking.EXPECTED_INTERVALS["gmail-poll"]` is
+# ten minutes, and the loop — the only mode render.yaml and the launchd
+# plist use — wrote no JobRun at all, so /ops/health/cron/ reported the one
+# job that IS the live-sync feature as dead forever while it synced every
+# two minutes.
+# ---------------------------------------------------------------------------
+
+class TestLoopHeartbeat:
+    def _stop_after(self, n: int):
+        """A `sync_connection` stand-in that lets `n` passes happen."""
+        passes: list[int] = []
+
+        def _sync(_conn):
+            passes.append(1)
+            if len(passes) == n:
+                signal.raise_signal(signal.SIGINT)
+
+        return _sync, passes
+
+    def test_the_loop_records_a_successful_job_run(self):
+        _connection(_user("poll-heartbeat@example.com"))
+        sync, _ = self._stop_after(1)
+
+        with patch.object(gmail_live, "sync_connection", side_effect=sync):
+            _run("--interval", "0.05")
+
+        run = JobRun.objects.filter(name="gmail-poll").latest("started_at")
+        assert run.status == JobRun.STATUS_SUCCESS
+        assert run.finished_at is not None
+
+    def test_many_passes_share_ONE_row_whose_finished_at_moves(self):
+        """A row per tick would be ~720 a day of `{}` — the noise the
+        command's own docstring refused to write, and the reason it wrote
+        nothing instead. One row, bumped."""
+        _connection(_user("poll-heartbeat-one@example.com"))
+        sync, passes = self._stop_after(4)
+
+        with patch.object(gmail_live, "sync_connection", side_effect=sync):
+            _run("--interval", "0.05")
+
+        assert len(passes) == 4
+        rows = list(JobRun.objects.filter(name="gmail-poll"))
+        assert len(rows) == 1
+        row = rows[0]
+        # The row is a heartbeat, not a run: started when the process did,
+        # finished at the most recent tick.
+        assert row.finished_at > row.started_at
+
+    def test_the_health_view_reads_the_poller_as_alive(self):
+        """The actual bug, end to end: this is the query /ops/health/cron/
+        runs, and it used to find nothing."""
+        _connection(_user("poll-heartbeat-health@example.com"))
+        sync, _ = self._stop_after(2)
+
+        with patch.object(gmail_live, "sync_connection", side_effect=sync):
+            _run("--interval", "0.05")
+
+        from ops.tracking import EXPECTED_INTERVALS
+
+        latest = (
+            JobRun.objects.filter(name="gmail-poll", status=JobRun.STATUS_SUCCESS)
+            .order_by("-finished_at").first()
+        )
+        assert latest is not None, "the poller would read as never_run"
+        assert (timezone.now() - latest.finished_at) < EXPECTED_INTERVALS["gmail-poll"]
+
+    def test_a_failed_pass_gets_its_own_row_and_leaves_the_heartbeat_alone(self):
+        """Flipping the heartbeat to `failed` would take the job's only
+        success row out of the health view's reach — a live poller reported
+        as `never_run` over one bad Postgres second."""
+        _connection(_user("poll-heartbeat-fail@example.com"))
+        attempts: list[int] = []
+        original = gmail_poll.Command._select
+
+        def _select(self, email):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise RuntimeError("database blinked")
+            signal.raise_signal(signal.SIGINT)
+            return original(self, email)
+
+        with patch.object(gmail_poll.Command, "_select", _select), \
+                patch.object(gmail_live, "sync_connection"):
+            _run("--interval", "0.05")
+
+        rows = JobRun.objects.filter(name="gmail-poll")
+        assert rows.filter(status=JobRun.STATUS_FAILED).count() == 1
+        assert rows.filter(status=JobRun.STATUS_SUCCESS).count() == 1
+
+    def test_a_dry_run_loop_still_writes_nothing(self):
+        """Rule 4 is unchanged: a dry run that recorded a successful run of a
+        job it did not perform would be the one lie this command tells."""
+        _connection(_user("poll-heartbeat-dry@example.com"))
+        stamps: list[int] = []
+
+        def _preview(_conn):
+            stamps.append(1)
+            if len(stamps) == 2:
+                signal.raise_signal(signal.SIGINT)
+            return {"reanchor": False, "message_ids": [], "latest_history_id": "1"}
+
+        with patch.object(gmail_live, "preview_sync", side_effect=_preview):
+            _run("--interval", "0.05", "--dry-run")
+
+        assert not JobRun.objects.filter(name="gmail-poll").exists()
+
+    def test_a_broken_heartbeat_write_never_takes_the_poller_down(self):
+        """The work is already committed; losing the receipt is strictly
+        better than losing the work — the same rule the Import rows follow."""
+        _connection(_user("poll-heartbeat-broken@example.com"))
+        sync, passes = self._stop_after(2)
+
+        with patch.object(gmail_live, "sync_connection", side_effect=sync), \
+                patch.object(
+                    gmail_poll.JobHeartbeat, "beat", side_effect=RuntimeError("no db")
+                ):
+            output = _run("--interval", "0.05")
+
+        assert len(passes) == 2, "the loop must keep running"
+        assert "could not record gmail-poll heartbeat" in output
+        assert "stopped." in output
+
+
+# ---------------------------------------------------------------------------
+# Unconfigured, in loop mode: idle, do not exit. render.yaml runs this as a
+# WORKER, and a worker that exits is a worker Render restarts — so a first
+# deploy with the GMAIL_LIVE_* keys still blank crash-looped the service.
+# ---------------------------------------------------------------------------
+
+class TestUnconfigured:
+    def test_a_single_pass_still_exits_immediately(self):
+        """The cron-friendly shape is unchanged: nothing to poll, return."""
+        out = StringIO()
+        with patch.object(gmail_live, "is_configured", return_value=False):
+            call_command("gmail_poll", stdout=out)
+
+        assert "not configured" in out.getvalue()
+        assert not JobRun.objects.filter(name="gmail-poll").exists()
+
+    def test_the_loop_idles_instead_of_exiting(self):
+        out = StringIO()
+
+        def _stop_it(*_a, **_kw):
+            signal.raise_signal(signal.SIGINT)
+            return True
+
+        with patch.object(gmail_live, "is_configured", return_value=False), \
+                patch("threading.Event.wait", side_effect=_stop_it):
+            call_command("gmail_poll", "--interval", "0.05", stdout=out)
+
+        output = out.getvalue()
+        assert "not configured" in output
+        assert "idling instead of exiting" in output
+        assert "stopped." in output
+
+    def test_idling_records_no_heartbeat(self):
+        """This process is up, but the job it names is not running. Telling
+        the health page "gmail-poll is healthy" while no mailbox is polled
+        would be worse than `never_run`, which is the honest reading."""
+        def _stop_it(*_a, **_kw):
+            signal.raise_signal(signal.SIGINT)
+            return True
+
+        with patch.object(gmail_live, "is_configured", return_value=False), \
+                patch("threading.Event.wait", side_effect=_stop_it):
+            call_command("gmail_poll", "--interval", "0.05", stdout=StringIO())
+
+        assert not JobRun.objects.filter(name="gmail-poll").exists()
+
+    def test_an_invalid_interval_is_still_rejected_before_the_config_check(self):
+        """A typo in the dockerCommand should fail loudly, not idle
+        forever."""
+        with patch.object(gmail_live, "is_configured", return_value=False):
+            with pytest.raises(CommandError):
+                call_command("gmail_poll", "--interval", "-1", stdout=StringIO())
 
 
 # ---------------------------------------------------------------------------

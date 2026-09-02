@@ -13,6 +13,29 @@ databases:
     plan: basic-256mb # adjust; Render's smallest paid Postgres. Free tier expires.
 
 services:
+  # ---- Shared cache (Render Key Value, i.e. Redis) ------------------------
+  # DECLARED HERE, NOT CREATED BY HAND. This used to be a `sync: false`
+  # REDIS_URL with a comment telling you to make the store in the dashboard
+  # and paste its internal URL in — which meant that on every deploy so far
+  # there was no cache, and settings/base.py fell back to LocMemCache.
+  # That is not a performance footnote: what lives in this cache is
+  # security counters. allauth's failed-login limit (5 per 5 minutes),
+  # core.views' search throttle and billing.views' waitlist throttle are all
+  # counts that only mean anything if the three gunicorn workers agree on
+  # them. Per-process, "5 attempts" is really 15, and every deploy resets
+  # all three to zero. django-axes reads the same REDIS_URL.
+  #
+  # `ipAllowList: []` means no public access — the store is reachable only
+  # from this Blueprint's own services, over Render's private network, which
+  # is exactly the access pattern here. `allkeys_lru` because everything in
+  # it is a counter with a TTL: evicting the coldest key under pressure is
+  # correct, refusing writes is not.
+  - type: keyvalue
+    name: coverage-kv
+    plan: free # 25MB; these are short-TTL counters, not a data store
+    maxmemoryPolicy: allkeys_lru
+    ipAllowList: [] # private network only
+
   # ---- Web service -------------------------------------------------------
   - type: web
     name: coverage-web
@@ -30,18 +53,34 @@ services:
           property: connectionString
       - key: DJANGO_SECRET_KEY
         generateValue: true # Render generates + stores it
+      # All three of these are OPTIONAL now, and were not. Render injects
+      # RENDER_EXTERNAL_HOSTNAME into every service it runs, and
+      # settings/production.py falls back to it for the host, the CSRF origin
+      # and SITE_URL — so a first Blueprint apply boots, passes its health
+      # check and mails working links with none of them filled in. Set them
+      # the moment you attach a custom domain (an explicit value always wins,
+      # and both list vars are comma-separated).
       - key: DJANGO_ALLOWED_HOSTS
-        sync: false # e.g. coverage-web.onrender.com (+ your custom domain)
+        sync: false # e.g. coverage-web.onrender.com,coverage.app
       - key: DJANGO_CSRF_TRUSTED_ORIGINS
         sync: false # e.g. https://coverage-web.onrender.com
-      # The rate-limit cache. Create a Render Key-Value store in the dashboard
-      # and paste its internal connection string here. NOT optional in
-      # practice: blank falls back to a per-process in-memory cache, and this
-      # service runs three gunicorn workers, so allauth's failed-login limits
-      # count three separate times and reset on every deploy. See the Cache
-      # section of settings/base.py.
+      # The scheme+host used for links built outside a request (the weekly
+      # digest's, the trial-ended email's). Was missing from this file
+      # entirely, so every digest link on a real deploy pointed at
+      # http://localhost:8000 — base.py's dev default. Now only needed for a
+      # custom domain; blank resolves to the Render hostname.
+      - key: SITE_URL
+        sync: false # e.g. https://coverage.app
+      # The rate-limit cache, wired from the `coverage-kv` Key Value store
+      # declared above. NOT optional in practice: blank falls back to a
+      # per-process in-memory cache, and this service runs three gunicorn
+      # workers, so allauth's failed-login limits count three separate times
+      # and reset on every deploy. See the Cache section of settings/base.py.
       - key: REDIS_URL
-        sync: false
+        fromService:
+          type: keyvalue
+          name: coverage-kv
+          property: connectionString
       - key: GOOGLE_OAUTH_CLIENT_ID
         sync: false
       - key: GOOGLE_OAUTH_CLIENT_SECRET
@@ -101,6 +140,21 @@ services:
         sync: false
       - key: GMAIL_LIVE_TOKEN_KEY
         sync: false
+      # ---- Stripe (billing/stripe_gateway.py) ----------------------------
+      # Pay-as-you-go credit top-ups. Both blank = `is_configured()` is False,
+      # the Settings card says top-ups aren't on yet, and the webhook 400s
+      # cleanly — the same dark-by-default posture as GMAIL_LIVE_* above.
+      # Declared here even while blank so they survive a Blueprint re-apply
+      # (a key typed into the dashboard but absent from this file is a key
+      # the next apply can drop) and so the deploy checklist has one place
+      # to look. Use a RESTRICTED key (`rk_`) with Checkout Sessions write
+      # and nothing else, never the account secret key. Register the webhook
+      # for checkout.session.completed AND async_payment_succeeded — see the
+      # handler's docstring on why the second one matters.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
 
   # ---- Gmail Live sync worker (long-running, not a cron) ----------------
   # Syncs every connected mailbox on a timer. A worker, not a cron job,
@@ -156,6 +210,17 @@ services:
           envVarKey: DJANGO_SECRET_KEY
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost # no HTTP served here; any value satisfies settings import
+      # The same cache the web service uses. A worker serves no HTTP and so
+      # counts no login attempts, but `capture.locks` and anything else that
+      # reaches for `django.core.cache` must see the SAME store the web
+      # service does, or a value written on one side is invisible on the
+      # other — and a per-process LocMemCache in an always-on worker is a
+      # cache that only ever grows. django-axes reads this same setting.
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: coverage-kv
+          property: connectionString
       # sync: false, NOT fromService — these start blank on coverage-web too
       # (docs/gmail-live-setup.md hasn't been done yet on a first deploy),
       # and fromService can't resolve a value that doesn't exist yet on the
@@ -273,11 +338,20 @@ services:
   # Google's users.watch() registration expires after 7 days regardless of
   # activity — this keeps it alive. gmail_live.is_configured() no-ops the
   # whole command until GMAIL_LIVE_* is set, same posture as VAPID above.
+  #
+  # 05:30, AFTER coverage-pro-trial-expire's 05:00. These two ran in the
+  # opposite order (renew 05:00, expire 05:30) and the ordering was
+  # backwards: this command renews the watch of every `plan="pro"`
+  # connection, so a trial that ended overnight got one last 7-day renewal
+  # half an hour before the flip that was meant to stop it. Harmless in
+  # practice today (nothing pulls the subscription), but the job that
+  # DECIDES who is Pro has to land before the job that ACTS on who is Pro,
+  # and half an hour of slack is enough for a slow expire pass.
   - type: cron
     name: coverage-gmail-watch-renew
     runtime: docker
     dockerfilePath: ./Dockerfile
-    schedule: "0 5 * * *" # 05:00 UTC — clear of the scrape's 00/06/12/18 marks
+    schedule: "30 5 * * *" # 05:30 UTC — after trial-expire, clear of the scrape's 00/06/12/18 marks
     dockerCommand: "uv run --package coverage-web python coverage_web/manage.py gmail_watch_renew"
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -316,11 +390,17 @@ services:
   # as that job. A fixed UTC hour is fine — this flips a plan, not a
   # per-student "today," so there is no timezone-correctness reason (unlike
   # the push-alerts/digest crons below) to anchor it to each student's own day.
+  #
+  # 05:00, THIRTY MINUTES BEFORE coverage-gmail-watch-renew — see that
+  # service's own comment for why the previous order was backwards. This job
+  # also sends the trial-ended email (blank EMAIL_URL = the Settings banner
+  # alone, no send) and unlocks the student's Free "Scan Now"; see the
+  # command's docstring.
   - type: cron
     name: coverage-pro-trial-expire
     runtime: docker
     dockerfilePath: ./Dockerfile
-    schedule: "30 5 * * *" # 05:30 UTC — right after gmail-watch-renew, clear of the scrape's 00/06/12/18 marks
+    schedule: "0 5 * * *" # 05:00 UTC — before gmail-watch-renew, clear of the scrape's 00/06/12/18 marks
     dockerCommand: "uv run --package coverage-web python coverage_web/manage.py pro_trial_expire"
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -336,6 +416,18 @@ services:
           envVarKey: DJANGO_SECRET_KEY
       - key: DJANGO_ALLOWED_HOSTS
         value: localhost
+      # The trial-ended email. Blank = no send at all (not a send to the
+      # logs): accounts.trials.email_is_configured() reads False on the
+      # console backend, and the Settings banner carries the whole notice
+      # instead. Set the same two values here as on coverage-web.
+      - key: EMAIL_URL
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
+      # For the "Open Settings" link in that email. Blank resolves to the
+      # Render hostname, same as on coverage-web.
+      - key: SITE_URL
+        sync: false
 
   # ---- Gmail Live first-connect backfill + "Scan Now" rescans, every ----
   # ---- 5 minutes ----------------------------------------------------------
@@ -408,11 +500,22 @@ services:
   # worker fails every run it claims with "AI isn't switched on", which is
   # also what the button says before it is ever tapped (the control is not
   # offered on a dark deploy at all).
+  #
+  # OFFSET TWO MINUTES FROM coverage-gmail-backfill, not on the same tick.
+  # Both jobs pre-clamp their work against the SAME student's credit balance
+  # (billing.credits.affordable_autopilot_rows and
+  # affordable_residue_threads) and firing on the same minute is what made
+  # the two clamps read one balance and then both debit it. The real fix is
+  # at the debit — billing.credits._spend_clamped re-runs the clamp inside a
+  # row lock — and this is belt and braces on top: a two-minute stagger
+  # means the common case never even reaches the lock. Still every five
+  # minutes, so the "a student is watching this one" reasoning above is
+  # untouched.
   - type: cron
     name: coverage-autopilot
     runtime: docker
     dockerfilePath: ./Dockerfile
-    schedule: "*/5 * * * *"
+    schedule: "2-59/5 * * * *" # 02, 07, 12, ... — two minutes off gmail-backfill's */5
     dockerCommand: "uv run --package coverage-web python coverage_web/manage.py capture_autopilot_worker"
     envVars:
       - key: DJANGO_SETTINGS_MODULE

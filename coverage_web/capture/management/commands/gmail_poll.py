@@ -56,10 +56,23 @@ RUN IT EITHER WAY
     python manage.py gmail_poll --email you@x.com  # one mailbox
 
 A single pass is the cron-friendly shape and records a `JobRun`
-("gmail-poll") the way every other cron command here does. The loop does
-NOT record one per pass — at the default interval that is 720 rows a day of
-pure noise — which is the same (accepted) monitoring gap
-`gmail_pubsub_listen` has as a long-running worker.
+("gmail-poll") the way every other cron command here does. The loop records
+ONE row and bumps its `finished_at` every pass (`ops.tracking.JobHeartbeat`)
+— not a row per pass, which at the default interval would be 720 a day of
+pure noise. That distinction used to be "the loop records nothing", which
+left `/ops/health/cron/` reporting the poller as `never_run` forever while
+it was in fact syncing every two minutes: the one job on that page whose
+health could not be read, and the only one that IS the live-sync feature on
+a Pub/Sub-free deployment.
+
+UNCONFIGURED IN LOOP MODE IS AN IDLE WORKER, NOT AN EXIT. `gmail_poll`
+returns immediately when `gmail_live.is_configured()` is False, which is
+right for a cron tick and wrong for render.yaml's `coverage-gmail-live`
+worker: a worker process that exits is a worker Render restarts, so a
+first deploy with the five `GMAIL_LIVE_*` values still blank crash-loops the
+service and emails about it until they are pasted in. With `--interval`
+given, the command instead says so once and then idles until it is stopped
+— exit code 0, one clear log line, no restart storm.
 
 THE FOUR OPERATIONAL RULES
 ---------------------------
@@ -124,7 +137,7 @@ from google.auth.exceptions import RefreshError
 from analytics.models import Import
 from capture import gmail_live, locks
 from capture.models import GmailConnection
-from ops.tracking import track_job_run
+from ops.tracking import JobHeartbeat, track_job_run
 
 # Two minutes. Deliberately not "as fast as the quota allows".
 #
@@ -206,10 +219,6 @@ class Command(BaseCommand):
     # -- entry point -------------------------------------------------------
 
     def handle(self, *args, **opts):
-        if not gmail_live.is_configured():
-            self.stdout.write("Gmail Live is not configured — nothing to poll.")
-            return
-
         interval = opts["interval"]
         if interval is not None and interval <= 0:
             raise CommandError("--interval must be greater than zero.")
@@ -220,6 +229,17 @@ class Command(BaseCommand):
         # Created in both modes so `_run_pass` has one thing to check, and
         # so a single pass over many mailboxes is interruptible too.
         stop = threading.Event()
+
+        if not gmail_live.is_configured():
+            self.stdout.write(
+                "Gmail Live is not configured (GMAIL_LIVE_CLIENT_ID, "
+                "GMAIL_LIVE_CLIENT_SECRET and GMAIL_LIVE_TOKEN_KEY are the "
+                "three this needs) — nothing to poll."
+            )
+            if interval is None:
+                return
+            self._idle(stop, interval=interval)
+            return
 
         if interval is None:
             if opts["dry_run"]:
@@ -236,6 +256,31 @@ class Command(BaseCommand):
 
     # -- the loop ----------------------------------------------------------
 
+    def _idle(self, stop: threading.Event, *, interval: float) -> None:
+        """Wait for a stop signal, doing nothing, and exit 0 — the
+        unconfigured-worker path from the module docstring.
+
+        Deliberately NO heartbeat: this process is up, but the job it names
+        is not running, and telling /ops/health/cron/ that "gmail-poll" is
+        healthy while no mailbox is being polled would be the one lie this
+        command tells. `never_run` is the honest reading of a deploy whose
+        Gmail Live keys were never pasted in.
+        """
+        restore = self._install_signal_handlers(stop)
+        self.stdout.write(
+            "idling instead of exiting: this is a long-running worker, and an "
+            "exit here would be restarted in a loop. Set the GMAIL_LIVE_* env "
+            "vars and redeploy to start polling."
+        )
+        try:
+            while not stop.is_set():
+                stop.wait(interval)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            restore()
+        self.stdout.write("stopped.")
+
     def _loop(self, stop: threading.Event, opts: dict, *, interval: float) -> None:
         """Run a pass every `interval` seconds until signalled.
 
@@ -248,6 +293,10 @@ class Command(BaseCommand):
         cursor" rather than for a fixed slice of time.
         """
         restore = self._install_signal_handlers(stop)
+        # One JobRun row for this process, its `finished_at` bumped per pass
+        # — see ops.tracking.JobHeartbeat and this module's docstring. A
+        # dry-run loop keeps rule 4 and writes none.
+        heartbeat = None if opts["dry_run"] else JobHeartbeat("gmail-poll")
         self.stdout.write(
             f"polling every {interval:g}s ... (Ctrl-C to stop)"
         )
@@ -265,6 +314,9 @@ class Command(BaseCommand):
                     # the process was gone; waiting out the interval and
                     # retrying is strictly better.
                     self.stderr.write(f"pass failed, retrying next interval: {exc}")
+                    self._beat(heartbeat, failed=True)
+                else:
+                    self._beat(heartbeat)
                 if stop.is_set():
                     break
                 remaining = interval - (time.monotonic() - started)
@@ -282,6 +334,22 @@ class Command(BaseCommand):
             restore()
             close_old_connections()
         self.stdout.write("stopped.")
+
+    def _beat(self, heartbeat, *, failed: bool = False) -> None:
+        """Record this pass against the poller's health row, and NEVER let
+        that bookkeeping take the poller down.
+
+        Same rule as `_write_import` below: a pass that synced real mail and
+        then could not write its own receipt has still done the work. The
+        cost of swallowing this is that a database outage looks like a dead
+        poller on /ops/health/cron/ — which, during a database outage, is
+        the right thing for that page to say anyway."""
+        if heartbeat is None:
+            return
+        try:
+            heartbeat.failed() if failed else heartbeat.beat()
+        except Exception as exc:  # noqa: BLE001 — see the docstring above.
+            self.stderr.write(f"could not record gmail-poll heartbeat: {exc}")
 
     def _install_signal_handlers(self, stop: threading.Event):
         """Make SIGINT and SIGTERM ask the loop to finish, rather than tear
@@ -492,8 +560,9 @@ class Command(BaseCommand):
     # something to say, and the count of them against the count of successful
     # polls is the exception-rate canary /ops/health/capture/ reads). The
     # "poll is alive at all" question is NOT answered here — that is the
-    # `JobRun` row `_loop` now writes per pass, which is a different question
-    # with a different retention story.
+    # single `JobRun` heartbeat row `_loop` bumps per pass
+    # (ops.tracking.JobHeartbeat), which is a different question with a
+    # different retention story.
     #
     # NEVER FATAL, on the same reasoning as rule 1: a poll that found real
     # mail, logged real touches, and then could not write its own bookkeeping

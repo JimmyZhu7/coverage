@@ -17,24 +17,33 @@ dollars/month; Google OAuth is free.
 1. Push this repo to GitHub (it already has a sensible `.gitignore`; the real
    `.env` is ignored — never commit it).
 2. Render → **New → Blueprint** → pick the repo. Render reads `render.yaml` and
-   proposes a **web service**, a **Postgres database**, and several **cron
+   proposes a **web service**, a **Postgres database**, a **Key Value store**
+   (`coverage-kv`, the shared rate-limit cache), and several **cron
    jobs/workers**.
 3. It will ask you to fill the `sync: false` env vars (they can't live in git).
-   Set these on the **web service** — leave them blank for now where noted and
-   come back after the later sections:
-   - `DJANGO_ALLOWED_HOSTS` = your Render hostname, e.g. `coverage-web.onrender.com`
-     (add your custom domain too once you attach one, comma-separated).
-   - `DJANGO_CSRF_TRUSTED_ORIGINS` = `https://coverage-web.onrender.com`
-     (scheme included; add the custom domain's origin too).
-   - `REDIS_URL` — Render → **New → Key Value**, then paste that store's
-     *internal* connection string here. Do this before real students sign up.
-     This cache holds the failed-login and password-reset counters; blank
-     means each of the three gunicorn workers keeps its own copy, so the
-     "5 failed logins per 5 minutes" limit is really 15 and resets on every
-     deploy. Blank is fine while you are the only user.
+   **Every one of them can be left blank on the first apply** — the service
+   boots, passes its health check, and serves the site without a single one.
+   Each blank has a consequence, and `manage.py deploy_preflight` (below)
+   prints them. Set these on the **web service** when you're ready:
+   - `DJANGO_ALLOWED_HOSTS` — optional. Blank falls back to
+     `RENDER_EXTERNAL_HOSTNAME`, which Render injects into every service, so
+     the app boots on `coverage-web.onrender.com` with nothing typed in. Set
+     it (comma-separated) when you attach a custom domain.
+   - `DJANGO_CSRF_TRUSTED_ORIGINS` — same: blank falls back to
+     `https://<render hostname>`. Set it for a custom domain, scheme included.
+   - `SITE_URL` — same fallback. This is the host used for links built
+     outside a request (the weekly digest, the trial-ended email). Blank used
+     to mean `http://localhost:8000` in every email; it no longer does.
+   - `REDIS_URL` — **already wired** from the `coverage-kv` service in
+     `render.yaml`; you don't paste anything. This cache holds the
+     failed-login, search and waitlist counters. Before it existed, each of
+     the three gunicorn workers kept its own copy, so the "5 failed logins
+     per 5 minutes" limit was really 15 and reset on every deploy.
    - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` (section 3).
    - `GMAIL_LIVE_*` (five keys) — optional; leave blank until you want real-time
-     Gmail (section 4, `docs/gmail-live-setup.md`).
+     Gmail (section 4, `docs/gmail-live-setup.md`). Blank no longer crash-loops
+     the `coverage-gmail-live` worker: it logs one line and idles.
+   - `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` — optional (section 8).
    - `APPLE_OAUTH_*`, `MICROSOFT_OAUTH_*`, `LINKEDIN_OAUTH_*` — optional; leave
      blank and those sign-in buttons show "Setup Needed" until you fill them.
    - `SENTRY_DSN` — optional; leave blank to disable.
@@ -46,6 +55,55 @@ dollars/month; Google OAuth is free.
 5. Health check: Render polls `/healthz`. When the service is green, open
    `https://<your-host>/` — the home page and `/opportunities/` should load
    (the feed is empty until you seed + scrape, section 2).
+
+### 1b. Preflight
+
+On the web service's **Shell**, before anything else:
+
+```bash
+uv run --package coverage-web python coverage_web/manage.py deploy_preflight
+```
+
+One line per thing that has broken a deploy of this app, each `PASS`, `WARN`
+or `FAIL`. It prints key **names** and verdicts only, never a value, so the
+output is safe to paste anywhere. `FAIL` means this deploy will not work and
+exits non-zero; `WARN` means a feature is dark and the line says which. A
+deploy that is all `PASS` and `WARN` is a working deploy.
+
+A value left as `changeme` is reported as a placeholder, not as configured —
+the command never guesses a value and never fills one in.
+
+### 1c. Cron ordering, and the one ordering that matters on a first apply
+
+`render.yaml`'s crons and the worker share the web service's image but have
+**no pre-deploy step of their own**. On the very first Blueprint apply they
+can therefore start before the web service's `migrate` finishes, and will
+traceback on missing tables until it lands. This is self-healing and noisy,
+not damaging: the next tick succeeds. If you want silence, suspend the
+`*/5` crons in the dashboard until section 2 is done, then resume them.
+`deploy_preflight` reports unapplied migrations as a `FAIL` for exactly this
+reason.
+
+The daily 05:00 block runs in this order, and the order is load-bearing:
+
+| UTC | Service | Why here |
+|---|---|---|
+| 05:00 | `coverage-pro-trial-expire` | Decides who is Pro. Also sends the trial-ended email and unlocks the student's Free "Scan Now". |
+| 05:30 | `coverage-gmail-watch-renew` | Acts on who is Pro. Renews only `plan="pro"` watches. |
+
+These used to be the other way round, so a trial that ended overnight got one
+last 7-day watch renewal half an hour before the flip that was meant to stop
+it. The job that decides has to land before the job that acts.
+
+The two `*/5` jobs are deliberately offset by two minutes
+(`coverage-gmail-backfill` on `*/5`, `coverage-autopilot` on `2-59/5`): both
+pre-clamp their work against the same student's credit balance, and firing on
+the same tick is what let two clamps read one balance. The real fix is at the
+debit (`billing.credits._spend_clamped` re-runs the clamp under a row lock);
+the offset is belt and braces.
+
+If you mirror these jobs into local launchd plists (`scripts/launchd/`), keep
+the same ordering: expire, then renew.
 
 ## 2. Create the admin + seed data (Render Shell)
 
@@ -131,6 +189,22 @@ Always `--dry-run` first when wiring up a new findings source: it runs every
 match, ratchet and dedup decision and writes nothing, and a mis-shaped batch
 that silently archives contacts as bounced is tedious to unpick.
 
+## 4c. Email (password resets, the weekly digest, the trial-ended notice)
+
+Unset `EMAIL_URL` prints mail to the service logs instead of sending it, so
+everything below works on a deploy with nothing bought. Two consequences
+worth knowing before real students arrive: nobody can self-serve a password
+reset, and the "your Pro trial has ended" mail is not sent at all (the
+Settings banner carries that notice on its own — `accounts/trials.py`
+deliberately does not count a message printed into a log as delivered).
+
+When you're ready: create a Resend (or equivalent) account, verify a sending
+domain, then set on **coverage-web**, **coverage-weekly-digest** and
+**coverage-pro-trial-expire**:
+
+- `EMAIL_URL` = `smtp+tls://resend:API_KEY@smtp.resend.com:587`
+- `DEFAULT_FROM_EMAIL` = `Coverage <no-reply@yourdomain>`
+
 ## 5. Custom domain (optional, when ready)
 
 Attach your domain to the Render web service, add it to `DJANGO_ALLOWED_HOSTS`
@@ -148,9 +222,38 @@ env vars via `fly secrets set`, add a `[deploy] release_command` running
 command) for the daily scrape. Render's built-in cron is the only reason it's
 the recommended default; everything else is equivalent.
 
+## 8. Stripe (only once Pro has a purchase path)
+
+`billing/` covers exactly one thing today: pay-as-you-go credit packs. There
+is no subscription, no customer portal, and no paid-Pro representation at all
+(see `docs/plans/b2b2c-sketch.md`). When you do turn it on:
+
+1. Dashboard → Developers → API keys → create a **restricted** key with
+   Checkout Sessions *write* and nothing else. `deploy_preflight` warns if
+   `STRIPE_SECRET_KEY` is not an `rk_` key.
+2. Developers → Webhooks → add `https://<your-host>/billing/webhook/` for
+   **`checkout.session.completed` and `checkout.session.async_payment_succeeded`**.
+   Both, not just the first: `completed` fires when the customer finishes the
+   form, which for a delayed method (bank debit, voucher) is not when the
+   money arrives. The handler grants only on `payment_status == "paid"`, so
+   without the second event a delayed payment would settle and never be
+   credited.
+3. Create the endpoint on API version **`2026-07-29.dahlia`**, the version
+   `billing/stripe_gateway.STRIPE_API_VERSION` pins outbound calls to. A
+   mismatch is logged as a warning on every delivery, not rejected.
+4. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` on **coverage-web**.
+   Both are already declared in `render.yaml` as `sync: false`, so they
+   survive a Blueprint re-apply.
+
 ## What still isn't automated (by design)
 
 - The Google OAuth clients (sections 3 and 4) — need your Cloud project.
 - The `firm_boards` DB table for ATS tokens (currently in
   `directory/boards.py`) — noted in the build follow-ups, not a blocker.
-- Billing — deliberately out of v1.
+- Paid Pro. Credit top-ups exist; a Pro *subscription* or a seat-based
+  institutional plan does not. `User.plan` is an admin flip with no expiry
+  for anything but a trial. `docs/plans/b2b2c-sketch.md` is the shape that
+  would fix it, unbuilt.
+- Database backups beyond the Render plan's own. `manage.py backup_db`
+  exists and is not in `render.yaml`; check the `coverage-db` plan's
+  retention in the dashboard.

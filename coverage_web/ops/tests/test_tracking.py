@@ -1,16 +1,22 @@
-"""track_job_run: the one call every render.yaml cron command wraps its work
-in. Nothing here exercises a real management command end to end — that's
-each command's own test module's job (e.g. capture/tests/test_gmail_backfill.py) —
-this only proves the wrapper itself records what actually happened.
+"""track_job_run and JobHeartbeat: the two shapes a job reports itself in.
+The first is one row per RUN, which every render.yaml cron wraps its work
+in; the second is one row per WORKER PROCESS, bumped per tick, for
+`gmail_poll --interval`. Nothing here exercises a real management command
+end to end — that's each command's own test module's job (e.g.
+capture/tests/test_gmail_backfill.py, capture/tests/test_gmail_poll.py) —
+this only proves the wrappers themselves record what actually happened.
 """
 
 from __future__ import annotations
 
+import time
+
 import pytest
 import requests
+from django.utils import timezone
 
 from ops.models import JobRun
-from ops.tracking import track_job_run
+from ops.tracking import JobHeartbeat, track_job_run
 
 pytestmark = pytest.mark.django_db
 
@@ -128,3 +134,106 @@ def test_a_ping_failure_does_not_fail_the_job_or_raise(settings, monkeypatch):
 
     run.refresh_from_db()
     assert run.status == JobRun.STATUS_SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# JobHeartbeat — the long-running-worker shape. `track_job_run` writes one
+# row per RUN, which for `gmail_poll --interval 120` means one row for the
+# life of the deploy: a `running` row that never becomes a success, so
+# /ops/health/cron/ reports the worker dead forever. Wrapping each tick
+# instead would be 720 rows a day. Hence: one row, bumped.
+# ---------------------------------------------------------------------------
+
+def test_the_first_beat_writes_one_successful_row():
+    beat = JobHeartbeat("gmail-poll").beat()
+
+    beat.refresh_from_db()
+    assert beat.name == "gmail-poll"
+    assert beat.status == JobRun.STATUS_SUCCESS
+    assert beat.finished_at is not None
+
+
+def test_repeated_beats_reuse_the_same_row_and_move_finished_at():
+    heartbeat = JobHeartbeat("gmail-poll")
+    first = heartbeat.beat()
+    first_finished = first.finished_at
+
+    time.sleep(0.01)
+    second = heartbeat.beat()
+
+    assert second.pk == first.pk
+    assert JobRun.objects.filter(name="gmail-poll").count() == 1
+    second.refresh_from_db()
+    assert second.finished_at > first_finished
+
+
+def test_the_health_view_query_reads_a_bumped_row_as_fresh():
+    """The row is only useful if the query /ops/health/cron/ actually runs
+    finds it: "most recent SUCCESS for this name, by finished_at"."""
+    heartbeat = JobHeartbeat("gmail-poll")
+    heartbeat.beat()
+    time.sleep(0.01)
+    heartbeat.beat()
+
+    latest = (
+        JobRun.objects.filter(name="gmail-poll", status=JobRun.STATUS_SUCCESS)
+        .order_by("-finished_at").first()
+    )
+    assert latest is not None
+    assert (timezone.now() - latest.finished_at).total_seconds() < 5
+
+
+def test_started_at_stays_pinned_to_when_the_worker_booted():
+    """The row answers two questions: "did it tick recently" (finished_at)
+    and "how long has this process been up" (started_at). Bumping both would
+    lose the second."""
+    heartbeat = JobHeartbeat("gmail-poll")
+    first = heartbeat.beat()
+    booted = first.started_at
+
+    time.sleep(0.01)
+    heartbeat.beat()
+
+    first.refresh_from_db()
+    assert first.started_at == booted
+
+
+def test_a_failed_tick_gets_its_own_row_and_does_not_touch_the_heartbeat():
+    """Flipping the heartbeat to `failed` would take the job's only success
+    row out of the health view's reach, reporting a live worker as
+    `never_run` over one bad database second."""
+    heartbeat = JobHeartbeat("gmail-poll")
+    alive = heartbeat.beat()
+
+    failure = heartbeat.failed()
+
+    assert failure.pk != alive.pk
+    assert failure.status == JobRun.STATUS_FAILED
+    alive.refresh_from_db()
+    assert alive.status == JobRun.STATUS_SUCCESS
+
+
+def test_a_beat_whose_row_was_deleted_underneath_it_starts_a_new_one():
+    """A worker outlives any row-pruning a human does in admin. The bump is a
+    queryset UPDATE precisely so the row count is visible, rather than a
+    `save(update_fields=...)` that raises on a row that is gone."""
+    heartbeat = JobHeartbeat("gmail-poll")
+    first = heartbeat.beat()
+    JobRun.objects.filter(pk=first.pk).delete()
+
+    second = heartbeat.beat()
+
+    assert second.pk != first.pk
+    assert second.status == JobRun.STATUS_SUCCESS
+
+
+def test_a_beat_pings_the_jobs_healthcheck(settings, monkeypatch):
+    """Same wrapper posture as `track_job_run`: one place records the run and
+    pings the check, so a job cannot do one without the other."""
+    settings.HEALTHCHECK_URLS = {"gmail-poll": "https://hc-ping.com/fake-poll-id"}
+    calls = []
+    monkeypatch.setattr("ops.tracking.requests.get", lambda url, **kw: calls.append(url))
+
+    JobHeartbeat("gmail-poll").beat()
+
+    assert calls == ["https://hc-ping.com/fake-poll-id"]

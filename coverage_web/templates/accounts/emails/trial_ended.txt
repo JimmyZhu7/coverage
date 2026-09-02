@@ -1,0 +1,26 @@
+{% autoescape off %}{% comment %}
+Plain text half of the trial-ended pair (accounts/trials.py::
+send_trial_ended_email). Autoescape off for the whole file for the reason
+weekly_digest.txt gives: Django autoescapes .txt templates too, and an
+"&" in a URL should arrive as an "&", not an entity.
+
+Three facts, in the order a student cares about them: it ended, what
+stopped, what did not. No upsell beyond the one line naming Pro, because
+there is nothing to buy yet (billing/stripe_gateway.py is unconfigured and
+the pricing page's Pro card carries an "In the works" badge) and a mail
+that pushes an unbuyable plan is the kind of thing that gets a product
+filtered.
+{% endcomment %}Coverage · your Pro trial has ended
+
+Your {{ trial_days }}-day Pro trial ended {{ ended_at|date:"j F Y" }}. Your
+account is back on the Free plan.
+
+What changed: real-time Gmail sync is paused, so replies and invites stop
+logging themselves. Scan Now still works, once a week, and it is unlocked
+for you right now.
+
+What did not: every credit, contact, touch and note you have is untouched.
+Nothing was deleted and nothing was clawed back.
+
+Settings: {{ settings_url }}
+{% endautoescape %}

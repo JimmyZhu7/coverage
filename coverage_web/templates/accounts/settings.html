@@ -1876,6 +1876,45 @@ that don't already declare explicit htmx behaviour.
           </div>
 
           {% comment %}
+          ---- "Your Pro trial ended" (accounts/trials.py::trial_ended_notice)
+          THE SENTENCE TWO COMMENTS PROMISED AND NOBODY WROTE. Both
+          accounts/models.py's note on `pro_trial_ends_at` and the
+          `pro_trial_expire` command's docstring said the trial timestamps
+          stay set so Settings "can keep saying your trial ended honestly",
+          and no template said it. The plan pill above flipped from Pro to
+          Free, real-time Gmail sync stopped, and the student found out by
+          noticing their mail had stopped logging itself.
+
+          Three facts, in the order they are wanted: the date, what stopped,
+          what did not. The last one is the load-bearing half — the whole
+          reason the reversion is safe is that nothing is taken away
+          (billing/credits.py's documented no-clawback), and a plan
+          downgrade that does not say so reads as one that did.
+
+          Dismissable, and the dismissal is a stored timestamp, not a
+          session flag: closing it on a phone must close it on a laptop. The
+          row disappears entirely once dismissed, so this is a notice, not a
+          permanent scar on the card.
+          {% endcomment %}
+          {% if credits.trial_ended %}
+          <div class="set-row" id="trial-ended">
+            <div class="set-row-main">
+              <span class="set-row-label">Pro trial ended {{ credits.trial_ended.ended_at|date:"j F" }}</span>
+              <div class="set-row-desc">
+                Real-time Gmail sync is paused. Scan Now is unlocked. Your
+                credits, contacts and touches stayed.
+              </div>
+            </div>
+            <div class="set-row-control">
+              <form method="post" action="{% url 'accounts:dismiss_trial_notice' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn">Got it</button>
+              </form>
+            </div>
+          </div>
+          {% endif %}
+
+          {% comment %}
           ---- Buy more credits (billing/stripe_gateway.py) ----
           The DISCLOSURE is unconditional; the dead buttons are not. Without
           Stripe configured this row used to draw every credit pack as a

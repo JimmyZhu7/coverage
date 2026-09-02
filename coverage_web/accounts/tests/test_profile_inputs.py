@@ -295,6 +295,25 @@ _BEFORE = ("accounts", "0014_user_school_emails")
 _AFTER = ("accounts", "0015_languages_study_level_affiliations")
 
 
+def _accounts_head(executor) -> tuple[str, str]:
+    """The accounts app's current leaf migration.
+
+    NOT `_AFTER`. This test migrates the real test database backwards and
+    forwards, and its last step has to leave it at the HEAD for every test
+    that runs after it in the same session. That step used to target
+    `_AFTER` — correct only while 0015 was the newest accounts migration,
+    and silently wrong the moment a 0016 landed: the whole suite from this
+    file onwards then ran against a `users` table missing the new column,
+    which presents as a cascade of unrelated `column ... does not exist`
+    failures hundreds of tests later, in files that have nothing to do with
+    migrations. Reading the leaf from the graph makes the test correct for
+    every future migration instead of for one.
+    """
+    leaves = [node for node in executor.loader.graph.leaf_nodes("accounts")]
+    assert len(leaves) == 1, f"accounts has {len(leaves)} leaf migrations: {leaves}"
+    return leaves[0]
+
+
 def _columns() -> set[str]:
     with connection.cursor() as cur:
         return {c.name for c in connection.introspection.get_table_description(cur, "users")}
@@ -363,8 +382,31 @@ def test_the_data_migration_moves_assets_into_the_columns_and_leaves_the_rest():
     assert restored.assets["advocate_target"] == 2
     assert "language" in _columns()
 
-    # Forward again, leaving the database at the head for every later test.
+    # Forward again, leaving the database at the head for every later test —
+    # the REAL head, read from the graph, not `_AFTER`. See `_accounts_head`.
     executor = MigrationExecutor(connection)
     executor.loader.build_graph()
-    executor.migrate([_AFTER])
+    executor.migrate([_accounts_head(executor)])
     assert "language" not in _columns()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_migration_walk_above_left_the_database_at_the_head():
+    """The guard the walk above needed and did not have.
+
+    Defined immediately after it so pytest runs it immediately after it
+    (definition order within a module), and it asserts the one thing the
+    rest of the suite silently depends on: nothing is left unapplied. When
+    0016 landed, the walk's final step was still hard-coded to 0015, so it
+    handed every subsequent test a `users` table one column short — and the
+    symptom surfaced as hundreds of `column ... does not exist` errors in
+    unrelated apps, with nothing pointing back here. An empty migration plan
+    is a one-line answer to "did this file put the database back".
+    """
+    executor = MigrationExecutor(connection)
+    plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
+
+    assert plan == [], (
+        "the migration walk in this module left the test database behind "
+        f"head: {[name for _, name in ((m.app_label, m.name) for m, _ in plan)]}"
+    )
