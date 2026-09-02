@@ -362,6 +362,31 @@ def _survivor_rank(row: Any, sticky_ids: frozenset) -> tuple:
     )
 
 
+def _competing_claims(cluster: list[Any]) -> bool:
+    """Does this cluster hold two rows that STATE different answers to the
+    same question? Then it is not a duplicate and nothing may be hidden.
+
+    The three vetoes, in one place because there are now two folds that need
+    them (`fold_duplicates` and `fold_city_variants`) and a veto that held on
+    one surface and not the other would be worse than no veto at all. Each
+    one's evidence is written up in `fold_duplicates`' own docstring, which
+    is where the argument for the shape lives; this function is only the
+    single definition of it (P5).
+
+    A blank or "unknown" is a posting that did not say, not a competing
+    claim, so it never blocks — only two DIFFERENT stated values do.
+    """
+    stated_deadlines = {d for d in (getattr(m, "deadline", None) for m in cluster)
+                        if d is not None}
+    stated_cohorts = {c for c in (getattr(m, "cohort", "") or "" for m in cluster)
+                      if c}
+    stated_sponsorship = {v for v in (getattr(m, "sponsorship", "") or ""
+                                      for m in cluster)
+                          if v in ("yes", "no")}
+    return (len(stated_deadlines) > 1 or len(stated_cohorts) > 1
+            or len(stated_sponsorship) > 1)
+
+
 def _cluster_by_location(members: list[Any]) -> list[list[Any]]:
     """Split same-firm, same-title rows into one cluster per place.
 
@@ -461,15 +486,7 @@ def fold_duplicates(
             if len(cluster) == 1:
                 keep.add(id(cluster[0]))
                 continue
-            stated_deadlines = {d for d in (getattr(m, "deadline", None) for m in cluster)
-                                 if d is not None}
-            stated_cohorts = {c for c in (getattr(m, "cohort", "") or "" for m in cluster)
-                               if c}
-            stated_sponsorship = {v for v in (getattr(m, "sponsorship", "") or ""
-                                              for m in cluster)
-                                  if v in ("yes", "no")}
-            if (len(stated_deadlines) > 1 or len(stated_cohorts) > 1
-                    or len(stated_sponsorship) > 1):
+            if _competing_claims(cluster):
                 keep.update(id(m) for m in cluster)
                 continue
             winner = min(cluster, key=lambda m: _survivor_rank(m, sticky))
@@ -477,3 +494,69 @@ def fold_duplicates(
             folded += len(cluster) - 1
 
     return [r for r in rows if id(r) in keep], folded
+
+
+def fold_families(
+    rows: Iterable[Any], family_of, *, sticky_ids: Iterable[int] = (),
+) -> tuple[list[Any], dict[int, int]]:
+    """One row per FAMILY, plus `{survivor_id: how many places it stands for}`.
+    Input order preserved.
+
+    A third fold, for a caller that has to answer "how many distinct JOBS is
+    this?" rather than "which rows are copies of one posting?". `family_of` is
+    the caller's own answer to what makes two rows the same job; a row it
+    returns `None` for is always its own family, because None means "no reason
+    to group this", never "group it with the others".
+
+    WHY THIS IS NOT `fold_duplicates`, and why it must never become it. That
+    function keys on firm plus the normalized title and then splits on the
+    stated city, which it treats as a HARD DIVIDER, deliberately and correctly:
+    a board that folded London into New York would delete a job from the
+    catalogue and the student who wanted London would never learn it existed.
+    This one exists precisely to cross that divider, so it is only ever safe
+    where the surface is a SHORTLIST rather than a catalogue — where a folded
+    row is still one click away on a page the student can reach, and where the
+    cost of naming one job six times is higher than the cost of naming it once.
+    `directory.views._bulk_save_offer` is that surface and carries the argument
+    for its own use of it. A board is not, and must keep using
+    `fold_duplicates`.
+
+    THE SURVIVOR AND THE VETOES ARE THE SAME ONES. `_survivor_rank` picks the
+    copy to keep and `_competing_claims` refuses to fold a family holding two
+    different stated deadlines, cohorts or sponsorship answers — one definition
+    each, shared with `fold_duplicates` (P5), because a veto that held on one
+    fold and not the other would be worse than no veto at all.
+
+    The place count is what keeps the fold from being silent (P4). A survivor
+    standing for four stated places carries `4` so its surface can say so; a
+    family whose rows state fewer than two distinct places carries nothing,
+    because those are repeat listings of one posting rather than one job in
+    several towns, and that is a different fact.
+    """
+    sticky = frozenset(sticky_ids)
+    rows = list(rows)
+
+    families: dict[Any, list[Any]] = {}
+    loose: list[Any] = []
+    for row in rows:
+        fam = family_of(row)
+        if fam is None:
+            loose.append(row)
+        else:
+            families.setdefault(fam, []).append(row)
+
+    keep: set[int] = {id(r) for r in loose}
+    places: dict[int, int] = {}
+    for cluster in families.values():
+        if len(cluster) == 1 or _competing_claims(cluster):
+            keep.update(id(m) for m in cluster)
+            continue
+        winner = min(cluster, key=lambda m: _survivor_rank(m, sticky))
+        keep.add(id(winner))
+        stated = {_location_cluster_key(getattr(m, "location", "") or "")
+                  for m in cluster}
+        stated.discard("")
+        if len(stated) > 1:
+            places[getattr(winner, "id", None)] = len(stated)
+
+    return [r for r in rows if id(r) in keep], places

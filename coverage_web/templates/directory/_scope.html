@@ -182,6 +182,23 @@ leads with fit and the year comes second.
                    target="_blank" rel="nofollow noopener"
                    title="Open this posting on the firm's board">{{ r.title }}</a>
               {% endif %}
+              {% comment %}
+              WHAT THE FOLD DID, said out loud. The offer keeps one row per
+              distinct job, so a firm running one programme in nine branch
+              offices is one row here rather than nine (see
+              `dupes.fold_city_variants`). Nine of the founder's twenty
+              offered roles were that one KeyBank programme, and five of this
+              panel's eight slots. Folding them and saying nothing would make
+              the panel read as if the other eight addresses did not exist,
+              which is the invisible filter this product does not ship (P4):
+              the chip names the count, so a student who wants a particular
+              town knows to go to the firm's column and pick it.
+
+              The cell is rendered on every row and left empty where there is
+              nothing to say, so the grid keeps one column per fact and the
+              dates stay under each other.
+              {% endcomment %}
+              <span class="peek-places">{% if r.places %}<span class="peek-places-n" title="One row per role. This one is open in {{ r.places }} places; the board lists them all.">{{ r.places }} cities</span>{% endif %}</span>
               {% comment %}The role card's own deadline treatment, class for
               class — `.meta-status` plus the level tint, the dotted rule and
               hidden "(reported)" when the date was read out of the posting's
@@ -209,7 +226,7 @@ leads with fit and the year comes second.
               sentence's count, the confirm sentence's count, this list, and
               the id set stashed for the confirm to write. Decrementing the
               number on screen and leaving the stash alone would be the
-              206/209/208 bug from the other end (see `_eligible_unsaved_ids`
+              206/209/208 bug from the other end (see `_bulk_save_offer`
               and `_refresh_feed`). The peek sits above the board, so there is
               no scroll position for a full swap to cost.
 

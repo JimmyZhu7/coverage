@@ -10,6 +10,11 @@ Pinned here:
     the student's class year AND be one the recommender would rank (see
     `_offer_fits`). Naming your year is what you may apply for; a bulk save
     is what you intend.
+  * The offer counts JOBS, not requisitions: a programme a firm files once
+    per branch office is one row, folded on `_family_key` (the rule the feed
+    already groups its firm columns on), and the peek says how many places
+    that row stands for. Found the same day, once fit had stopped the offer
+    being irrelevant and left it repetitive.
   * "Save them all" is offered only while the peek has shown every role in
     the offer — `BULK_SAVE_PEEK_MAX`, the panel's own cap.
   * `track_eligible` refuses to write without `confirmed=1` — the template's
@@ -805,3 +810,230 @@ def test_the_peek_is_a_disclosure_a_keyboard_can_reach(client):
     assert ('class="peek-toggle" aria-expanded="false" '
             'aria-controls="bulk-save-peek"') in body
     assert 'id="bulk-save-peek"' in body
+
+
+# ---------------------------------------------------------------------------
+# One row per JOB, not one per branch office
+# ---------------------------------------------------------------------------
+#
+# THE MEASURED DEFECT (founder's live offer, 2026-09-02; user 6, class 2029,
+# tracks ib+st, regions hk+us). The offer had just been narrowed from 56 roles
+# to 20 by `_offer_fits`, which fixed relevance and did nothing about
+# repetition: 9 of those 20 rows were one KeyBank programme filed as one
+# requisition per branch — Bellingham, Toledo, Cleveland, Erie, Goshen,
+# Cicero, Dayton, Boise, Pottstown — and five of the peek panel's eight
+# visible rows were that same title. Nearly half an offer, and most of what a
+# student could actually see of it, was one job.
+#
+# `fold_duplicates` cannot reach this and must not: it keys on the normalized
+# title (nine titles naming nine cities are nine strings) and then treats a
+# stated city as a hard divider, deliberately, because folding London into New
+# York on a BOARD deletes a job from the catalogue. A bulk-save offer is a
+# shortlist of decisions rather than a catalogue, so it folds — on
+# `_family_key`, the rule the feed's firm columns already group on, because
+# one page may not hold two answers to "is this the same programme in another
+# city?" (P5).
+#
+# Pinned here: the fold happens, it happens AFTER the eligibility and fit
+# gates, what gets saved is the survivor alone, the peek says how many places
+# a folded row stands for, and the count/peek/write invariant survives a fold.
+
+
+def _branch_opp(firm, base, city, *, class_year="2027", region="us",
+                deadline=None, cohort=""):
+    """One requisition of a programme run in several branch offices.
+
+    The title ends in the row's own city, which is the shape `_family_key`
+    recognises and the shape every firm in the measurement used.
+    """
+    return Opportunity.objects.create(
+        firm=firm, url=f"https://x/{base}/{city}".replace(" ", "-"),
+        title=f"{base} - {city}", location=city, bucket="internship",
+        status="open", class_year=class_year, region=region,
+        deadline=deadline, cohort=cohort,
+    )
+
+
+@pytest.mark.django_db
+def test_one_programme_in_six_cities_is_one_offer_row(client):
+    """The founder's complaint, at test scale: "this is still showing me so
+    many of the same role from different locations from the same bank"."""
+    user = _student()
+    firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
+    for city in ("Boise", "Toledo", "Goshen", "Cicero", "Erie", "Pottstown"):
+        _branch_opp(firm, "Summer Analyst Programme", city)
+    client.force_login(user)
+
+    body = client.get(reverse("opportunities")).content.decode()
+
+    assert len(client.session["bulk_save_offer"]) == 1
+    assert "1 role fits you and names your year" in body
+
+
+@pytest.mark.django_db
+def test_the_confirm_writes_the_survivor_and_not_the_whole_family(client):
+    """The fold has to mean the same thing to the write that it means to the
+    number. Saving all six because the banner counted one would be the
+    206/209/208 defect rebuilt from the other end — the banner naming a
+    commitment smaller than the one the click makes."""
+    user = _student()
+    firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
+    for city in ("Boise", "Toledo", "Goshen", "Cicero", "Erie", "Pottstown"):
+        _branch_opp(firm, "Summer Analyst Programme", city)
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+    offered = set(client.session["bulk_save_offer"])
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    written = set(UserOpportunity.objects.for_user(user)
+                  .values_list("opportunity_id", flat=True))
+    assert len(offered) == 1
+    assert written == offered
+
+
+@pytest.mark.django_db
+def test_the_peek_says_how_many_places_a_folded_row_stands_for(client):
+    """Fold, but never silently (P4). Six branch offices behind one row is a
+    fact the student needs in order to know the choice exists and that the
+    board is where to make it — the alternative is a panel that reads as if
+    the other five addresses were never posted."""
+    user = _student()
+    firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
+    for city in ("Boise", "Toledo", "Goshen", "Cicero", "Erie", "Pottstown"):
+        _branch_opp(firm, "Summer Analyst Programme", city)
+    client.force_login(user)
+
+    resp, peek, offer = _peek(client)
+
+    assert [r["places"] for r in peek["rows"]] == [6]
+    assert "6 cities" in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_a_row_standing_only_for_itself_says_nothing_about_places(client):
+    """The chip is a fact about a fold, so a row that folded nothing carries
+    none. A "1 city" on every ordinary role would be noise dressed as
+    information."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    resp, peek, _ = _peek(client)
+
+    assert [r["places"] for r in peek["rows"]] == [None]
+    # The chip's rendered ATTRIBUTE, not the word and not the bare class: both
+    # "cities" and `.peek-places-n` appear in this page's own stylesheet, and
+    # a test that reads prose out of a CSS block fails for reasons that have
+    # nothing to do with the feature.
+    assert 'class="peek-places-n"' not in resp.content.decode()
+
+
+@pytest.mark.django_db
+def test_the_count_the_peek_and_the_write_still_agree_over_a_fold(client):
+    """THE INVARIANT, asked of the surface that just started folding.
+
+    206/209/208 happened because three surfaces answered one question
+    separately. A fold is exactly the kind of change that reintroduces it —
+    it is easy to fold the number and not the list, or the list and not the
+    write. All four numbers here come from the single `_bulk_save_offer`
+    call: the banner's count, the peek's total, the ids the peek names, and
+    the rows the confirm creates."""
+    user = _student()
+    firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
+    for city in ("Boise", "Toledo", "Goshen", "Cicero"):
+        _branch_opp(firm, "Summer Analyst Programme", city)
+    # Two roles that are nobody's city variant, so the offer is a mix.
+    solo = Firm.objects.create(name="Solo Bank", slug="solo-bank")
+    Opportunity.objects.create(
+        firm=solo, url="https://x/solo-a", title="Markets Summer Analyst",
+        bucket="internship", status="open", class_year="2027")
+    Opportunity.objects.create(
+        firm=solo, url="https://x/solo-b", title="Research Summer Analyst",
+        bucket="internship", status="open", class_year="2027")
+    client.force_login(user)
+
+    resp, peek, offer = _peek(client)
+    body = resp.content.decode()
+
+    assert len(offer) == 3
+    assert "3 roles fit you and name your year" in body
+    assert peek["total"] == len(offer)
+    assert {r["id"] for r in peek["rows"]} == set(offer)
+    assert "Save 3 roles to My Applications?" in body
+
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    written = set(UserOpportunity.objects.for_user(user)
+                  .values_list("opportunity_id", flat=True))
+    assert written == set(offer)
+
+
+@pytest.mark.django_db
+def test_two_different_roles_at_one_firm_are_not_folded_together(client):
+    """The fold reads a city, not a firm. Moelis runs five different Virtual
+    Discovery Series events — Ask the Analysts, Acing the Interview, Life
+    Sciences, Capital Markets, Moelis 101 — all on the founder's live offer
+    and every one of them a different thing to attend. A per-firm cap would
+    have eaten four of them; this must not."""
+    user = _student()
+    firm = Firm.objects.create(name="Series Bank", slug="series-bank")
+    for n, topic in enumerate(("Ask the Analysts", "Acing the Interview",
+                               "Capital Markets Overview", "Bank 101"), 1):
+        Opportunity.objects.create(
+            firm=firm, url=f"https://x/series/{n}",
+            title=f"Virtual Discovery Series: {topic}",
+            bucket="internship", status="open", class_year="2027")
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+
+    assert len(client.session["bulk_save_offer"]) == 4
+
+
+@pytest.mark.django_db
+def test_a_family_with_two_stated_deadlines_is_left_whole(client):
+    """`_competing_claims`, the same veto `fold_duplicates` applies and for
+    the same reason: two different act-by dates is a repeating series, not one
+    job listed twice, and hiding either costs a date the student could still
+    make. The vetoes may not mean one thing on the board and another here, so
+    both folds read the one definition."""
+    import datetime as _dt
+
+    user = _student()
+    firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
+    _branch_opp(firm, "Summer Analyst Programme", "Boise",
+                deadline=_dt.date(2099, 3, 1))
+    _branch_opp(firm, "Summer Analyst Programme", "Toledo",
+                deadline=_dt.date(2099, 9, 1))
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+
+    assert len(client.session["bulk_save_offer"]) == 2
+
+
+@pytest.mark.django_db
+def test_the_fold_runs_after_the_gates_and_not_before(client):
+    """ORDER OF OPERATIONS, and it is load-bearing.
+
+    Fold first and a family's survivor can be a row the student's own filters
+    would have rejected, which then takes the qualifying sibling down with it.
+    Here the London copy would win `_survivor_rank` outright — it states a
+    deadline and New York does not — and London is in a market this student
+    never named. Gates first means only qualifying rows ever reach the fold,
+    so the survivor is always a role that could have been offered on its own.
+    """
+    import datetime as _dt
+
+    user = _fit_student()
+    firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
+    abroad = _branch_opp(firm, "Investment Banking Summer Analyst", "London",
+                         region="eu", deadline=_dt.date(2099, 3, 1))
+    here = _branch_opp(firm, "Investment Banking Summer Analyst", "New York",
+                       region="us")
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+
+    assert set(client.session["bulk_save_offer"]) == {here.id}
+    assert abroad.id not in client.session["bulk_save_offer"]

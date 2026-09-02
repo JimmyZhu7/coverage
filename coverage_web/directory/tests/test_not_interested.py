@@ -12,7 +12,7 @@ Pinned here:
     banner's count, the confirm sentence's count, the peek list, and the id
     set stashed in the session for `track_eligible` to write. All four move
     together or the 206/209/208 bug is back from the other end — see
-    `directory.views._eligible_unsaved_ids`.
+    `directory.views._bulk_save_offer`.
   * REVERSIBILITY. Both dismiss affordances hand back an undo in the same
     response, and undo puts the role back into every surface it left.
   * TENANCY. One student's "not for me" is invisible to another.

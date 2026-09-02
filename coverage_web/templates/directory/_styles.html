@@ -413,10 +413,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* One line per role: firm, title, when. The title is the elastic column and
      the only one allowed to clip — the firm is how you scan the list and the
      date is why you would act on it, so neither may lose characters. */
-  /* Four columns now, not three: the veto is the fourth. It gets `auto` like
-     the date, so the elastic title is still the only column allowed to clip
-     — the whole point of the row's original split. */
-  .peek-row { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) auto auto;
+  /* Five columns now: firm, title, the branch-count chip, the date, the veto.
+     Everything but the title gets `auto`, so the elastic title is still the
+     only column allowed to clip — the whole point of the row's original
+     split. The chip's cell is rendered even when a row has no count to show
+     (see `_scope.html`), because a column that appears on some rows and not
+     others would step the dates out from under each other. */
+  .peek-row { display: grid;
+    grid-template-columns: 7.5rem minmax(0, 1fr) auto auto auto;
     gap: 0 var(--s2); align-items: baseline; padding: 5px 0;
     font-size: var(--fs-xs); line-height: 1.35; }
   .peek-row + .peek-row { border-top: 1px solid var(--line); }
@@ -456,6 +460,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .peek-title-btn:focus-visible { outline: 2px solid var(--accent);
     outline-offset: 2px; }
   .peek-when { justify-self: end; }
+  /* The branch-count chip. Quieter than the date beside it on purpose: the
+     date is why you would act today and this is only what the row stands
+     for, so it reads as an annotation on the title rather than a second
+     status competing with the first. */
+  .peek-places { justify-self: end; }
+  .peek-places-n { display: inline-block; padding: 1px 6px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--paper);
+    font-size: var(--fs-nano); color: var(--ink-3); white-space: nowrap;
+    cursor: help; }
   .peek-more { margin: var(--s2) 0 0; padding-top: var(--s2);
     border-top: 1px solid var(--line); font-size: var(--fs-xs);
     color: var(--ink-3); }
@@ -487,7 +500,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     .peek:focus-within > .peek-panel,
     .peek[data-peek-state="open"] > .peek-panel { display: block; }
     .peek[data-peek-state="shut"] > .peek-panel { display: none; }
-    .peek-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .peek-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
     .peek-title { grid-column: 1 / -1; }
     /* No hover on a phone, so the veto is a real tap target rather than a
        4px-padded word: 44px wide and 32px tall is the floor the rest of this

@@ -69,7 +69,7 @@ from directory.deadlines import (
 )
 from directory import estimates
 from directory.boards import UNREACHABLE_BY_POLICY
-from directory.dupes import fold_duplicates
+from directory.dupes import fold_duplicates, fold_families
 from directory.facts import paragraphs
 from directory.models import Firm, Opportunity
 from directory.open_runs import (
@@ -4102,7 +4102,7 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
 
     # THE BULK-SAVE OFFER, resolved to ids here and stashed, so the confirm
     # dialog's number and the write are the same fact rather than two
-    # separately-derived ones (see `_eligible_unsaved_ids` for the 206/209/208
+    # separately-derived ones (see `_bulk_save_offer` for the 206/209/208
     # measurement that forced this). `track_eligible` reads the stash; it no
     # longer queries for a set of its own.
     #
@@ -4114,22 +4114,23 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # `profile` — the scorer's own, built once above for the Picked column —
     # travels with it, because the offer is now the intersection of "names
     # your year" and "the recommender would rank it" (see `_offer_fits`).
-    # Passing it rather than letting `_eligible_unsaved_ids` build its own is
+    # Passing it rather than letting `_bulk_save_offer` build its own is
     # two queries saved on the page that already holds the answer; every
-    # `_eligible_unsaved_ids` caller ends up with the same profile either way.
+    # `_bulk_save_offer` caller ends up with the same profile either way.
     # It is never None here: the only render that leaves it so returns above
     # (`cols_fragment`), and an anonymous visitor has no `elig_profile`.
-    bulk_save_offer = (
-        _eligible_unsaved_ids(request.user, rows, elig_profile,
-                              rec_profile=profile)
-        if elig_profile and elig_profile.get("class_year") else []
+    bulk_save_offer, bulk_save_places = (
+        _bulk_save_offer(request.user, rows, elig_profile, rec_profile=profile)
+        if elig_profile and elig_profile.get("class_year") else ([], {})
     )
     if request.user.is_authenticated:
         request.session[BULK_SAVE_OFFER_SESSION_KEY] = bulk_save_offer
     # The same list again, resolved to the rows already on the page, so the
     # banner can show WHICH roles it is offering before the student commits.
     # Derived from `bulk_save_offer` and nothing else — see `_bulk_save_peek`.
-    bulk_save_peek = _bulk_save_peek(bulk_save_offer, item_by_id)
+    # `bulk_save_places` rides the same call, so the "N cities" note a row
+    # carries describes the fold that produced this very list.
+    bulk_save_peek = _bulk_save_peek(bulk_save_offer, item_by_id, bulk_save_places)
     # WHETHER "SAVE THEM ALL" IS OFFERED AT ALL. One click that commits to
     # more roles than the peek can print is a commit to roles the student has
     # not looked at — the panel names the first `BULK_SAVE_PEEK_MAX` and
@@ -4196,7 +4197,7 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # It stops HERE, after the session stash above has been rewritten, and that
     # ordering is the whole point. The number on screen, the number in the
     # confirm sentence and the ids `track_eligible` will actually write are one
-    # fact resolved once (see `_eligible_unsaved_ids` for the 206/209/208
+    # fact resolved once (see `_bulk_save_offer` for the 206/209/208
     # measurement that forced that). A dismissal that updated only the number
     # on screen — or only the stash — would put the three back out of
     # agreement by a new route, and a subtler one than the original.
@@ -4651,8 +4652,17 @@ def _offer_fits(rec_profile, o) -> bool:
     return score_candidate(rec_profile, Candidate.from_opportunity(o))[0] >= MIN_SCORE
 
 
-def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]:
-    """The exact roles the "Save them all" banner is offering, as ids.
+def _bulk_save_offer(user, rows, profile, *, rec_profile=None):
+    """`(ids, places_by_id)` — the exact roles the "Save them all" banner is
+    offering, and for each one that stands for several branch offices, how
+    many places it covers.
+
+    THE ONE DERIVATION. The banner's number, the peek panel and the ids
+    `track_eligible` writes all come from this call and nowhere else, which is
+    the property the 206/209/208 incident bought (see below). `places_by_id`
+    rides along rather than being recomputed by the peek for the same reason:
+    a panel that said "9 cities" about a fold the save did not make would be
+    the same defect wearing different clothes.
 
     THE INTERSECTION OF ELIGIBILITY AND FIT. The posting has to name the
     student's class year (`year_ok`, the verdict contract's own positive
@@ -4679,6 +4689,53 @@ def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]
     read 208 — three numbers for one action, in a confirm dialog, which is
     the one place a number has to be exact.
 
+    ONE ROW PER DISTINCT JOB, LAST. `fold_duplicates` has already run over
+    `rows` upstream and it cannot reach this shape: a firm that opens one
+    programme in nine branch offices titles each requisition with its own
+    city, so nine titles hash nine ways and never meet — and even if they did,
+    that function splits on the stated city on purpose, because on a BOARD
+    folding London into New York deletes a job from the catalogue.
+
+    A bulk-save offer is not a catalogue. It is a shortlist of DECISIONS the
+    product asks a student to commit to in one click, and nine branches of one
+    programme is one decision whose city sub-choice gets made on the firm's own
+    board. Measured on the founder's live offer 2026-09-02 (user 6, class 2029,
+    tracks ib+st, regions hk+us): 9 of the 20 offered roles were a single
+    KeyBank programme, filling five of the peek's eight visible slots.
+
+    THE FAMILY RULE IS `_family_key`, THE ONE THE FEED ALREADY USES (P5). It
+    is the product's single answer to "is this the same programme in another
+    city?" — a trailing title segment every 4+ character word of which appears
+    in the row's own location — and the feed's firm columns already group on
+    it to draw their "+N more locations" disclosure. Writing a second
+    normalizer here would have given one page two answers to one question,
+    which is the defect this docstring is otherwise about.
+
+    It is a conservative rule and that is the right direction of error. It
+    folds 7 of the founder's 9 KeyBank rows and leaves two standing, because
+    their titles name the metro while their `location` names the suburb
+    ("- Cleveland, OH" at Chagrin Falls, "- Dayton, OH" at Vandalia) and
+    nothing in the row corroborates that those are the same place. A false
+    SPLIT costs a scroll; a false FOLD costs a job never seen (`dupes`' own
+    rule). Widening the family rule means changing the feed's grouping too,
+    with its own measurement, and is deliberately not done inside a bulk-save
+    fix.
+
+    AFTER THE GATES, NOT BEFORE, and the order is load-bearing. Fold first and
+    a family's survivor could be a row that fails the region or track test
+    while a sibling passes — a London copy winning the fold and taking a New
+    York role the student would have wanted down with it. Filtering first
+    means every row reaching the fold has already qualified on its own, so the
+    survivor is always a role this student could have been offered anyway and
+    the fold can only ever remove a repeat of it.
+
+    WHAT IS SAVED IS THE SURVIVOR, NOT THE FAMILY. Saving all nine because the
+    banner counted one would be the 206/209/208 defect rebuilt from the other
+    end. The rows it folds away are not lost: they are still on the board,
+    still in the firm's column behind its "+N more locations" disclosure,
+    still savable one at a time. What the offer declines to do is commit a
+    student, in one click, to eight addresses of a job they picked once.
+
     Sorted so the stashed batch is deterministic and two renders of the same
     board produce the same offer.
     """
@@ -4689,8 +4746,8 @@ def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]
         UserOpportunity.all_objects.filter(user=user)
         .values_list("opportunity_id", flat=True)
     )
-    return sorted(
-        o.id for o in rows
+    qualified = [
+        o for o in rows
         if o.id not in touched
         # A posting the feed has just declined to offer a Save button for
         # cannot be in the offer a "Save them all" button honours. The card
@@ -4705,7 +4762,30 @@ def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]
         # one line here that scores, and on the founder's board that is 56
         # rows out of 2,857 rather than the whole feed.
         and _offer_fits(rec, o)
-    )
+    ]
+    # The family is keyed on bucket and cohort as well as the base title, the
+    # same triple `_group_city_variants` uses — an internship and a full-time
+    # role that share a name are not one job, and neither are two intakes.
+    #
+    # `sticky_ids` is not passed: `touched` above has already removed every row
+    # this student has any relationship with, so no family reaching the fold
+    # holds one and `_survivor_rank`'s first tier can never fire.
+    def _family(o):
+        fk = _family_key(o)
+        return None if fk is None else (o.bucket, o.cohort, fk[0])
+
+    distinct, places = fold_families(qualified, _family)
+    return sorted(o.id for o in distinct), places
+
+
+def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]:
+    """The offer's ids alone, for callers with no peek to render.
+
+    A thin read of `_bulk_save_offer` rather than a second derivation of the
+    same set — that is the whole lesson of the 206/209/208 incident recorded
+    there, and it applies to a convenience wrapper as much as to a view.
+    """
+    return _bulk_save_offer(user, rows, profile, rec_profile=rec_profile)[0]
 
 
 #: How many of the offered roles the peek panel prints before it stops naming
@@ -4720,15 +4800,15 @@ def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]
 BULK_SAVE_PEEK_MAX = 8
 
 
-def _bulk_save_peek(offer_ids, item_by_id, *, cap=BULK_SAVE_PEEK_MAX):
+def _bulk_save_peek(offer_ids, item_by_id, places=None, *, cap=BULK_SAVE_PEEK_MAX):
     """The first few roles behind the "Save them all" banner, for its peek.
 
-    THE SET IS THE OFFER'S. `offer_ids` is the very list `_eligible_unsaved_ids`
+    THE SET IS THE OFFER'S. `offer_ids` is the very list `_bulk_save_offer`
     produced and `opportunities` stashes under `BULK_SAVE_OFFER_SESSION_KEY`
     for `track_eligible` to write — so what the panel names, what the confirm
     counts and what the click saves are one fact resolved once. Re-deriving
     the rows from a second query is precisely the mistake that put 206, 209
-    and 208 on one page load (see `_eligible_unsaved_ids`), and it would be a
+    and 208 on one page load (see `_bulk_save_offer`), and it would be a
     worse mistake here: a count that disagrees is an error, but a NAMED role
     that never gets saved is a promise broken by name.
 
@@ -4736,11 +4816,22 @@ def _bulk_save_peek(offer_ids, item_by_id, *, cap=BULK_SAVE_PEEK_MAX):
     columns already built for these same rows, so the panel reads what is on
     the page rather than asking the database a fourth question about it.
 
+    `places` comes from the SAME call, and is the fold speaking rather than
+    the panel guessing (P4). A row standing for nine branch offices says so,
+    because the offer quietly dropping eight addresses of one job and the
+    panel presenting the survivor as an ordinary single posting would be the
+    invisible filter this product does not ship. Rendered on a COPY of the
+    shared item dict: `item_by_id` is the same object the firm columns hold by
+    reference, and a "9 cities" note belongs to the peek's reading of the row,
+    not to every card on the page.
+
     Sorted by what a student is deciding on: dated roles soonest-first, then
     passed deadlines and undated ones, then alphabetically. That order is what
     makes the cap honest — the roles the cap hides are the ones with the least
     to say about acting today.
     """
+    places = places or {}
+
     def _key(r):
         dated = r["dated"] and r["level"] != "passed"
         return (
@@ -4755,8 +4846,9 @@ def _bulk_save_peek(offer_ids, item_by_id, *, cap=BULK_SAVE_PEEK_MAX):
     # future caller passing a narrower item map degrades to a shorter list
     # rather than a 500.
     rows = sorted((item_by_id[i] for i in offer_ids if i in item_by_id), key=_key)
+    shown = [dict(r, places=places.get(r["id"])) for r in rows[:cap]]
     return {
-        "rows": rows[:cap],
+        "rows": shown,
         # Stated, never implied. A panel that just stopped at eight would be
         # telling a student the offer is eight roles.
         "more": max(0, len(rows) - cap),
@@ -4792,7 +4884,7 @@ BULK_SAVE_SESSION_KEY = "bulk_save_batch"
 #: to write. The point of the stash is that the number in the confirm sentence
 #: and the rows the confirm creates are one fact, resolved once, rather than
 #: two queries that answered slightly different questions (they did: see
-#: `_eligible_unsaved_ids`). Session-backed for the same reason the undo batch
+#: `_bulk_save_offer`). Session-backed for the same reason the undo batch
 #: above is — it is meaningful only between the render and the click that
 #: follows it, and nothing later ever needs to query it.
 BULK_SAVE_OFFER_SESSION_KEY = "bulk_save_offer"
@@ -4998,7 +5090,7 @@ def _refresh_feed(request, *, scope_only=False, dismiss_undo=None):
     things at once: the hidden count, the "Save them all" sentence, the peek
     behind it, and the id list stashed in the session for `track_eligible` to
     write. Decrementing the visible number and leaving the stash alone is the
-    206/209/208 bug (see `_eligible_unsaved_ids`) reintroduced from the other
+    206/209/208 bug (see `_bulk_save_offer`) reintroduced from the other
     end — the screen and the write disagreeing, only now the screen is the one
     that is wrong. Running the real view is what keeps all four one fact,
     because the real view is where that fact is computed.
