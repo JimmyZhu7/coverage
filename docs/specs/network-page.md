@@ -285,14 +285,26 @@ offset on every card in the grid and a card with fewer facts leaves a gap
 rather than sliding the rest up:
 
 ```
-          padding                                            16
+          padding                                            12
 [x] (GH)  Grace Huang                       .cc-head         40   (the avatar)
+             gap                                              4
 [PARKED] [F] [T2] [HK]                      .cc-tags         16   (reserved)
+             gap                                              4
 J.P. Morgan · IB Analyst                    .cc-firm         21   (one line)
                                             (free space)
-9d since last touch     Log Touch   Edit    .cc-foot   margin-top: auto
-          padding                                            16
+             gap                                              4
+──────────────────────────────────────      .cc-foot   border-top, then 12
+9d since last touch     Log Touch   Edit               margin-top: auto
+          padding                                            12
 ```
+
+Which puts `.cc-tags` at 57px and `.cc-firm` at 77px from the top of every card
+on the board, the foot at 102px on every one of them, and the card at 179.4px at
+four across (where the foot wraps) or 156.2px everywhere else. Measured on all
+49 demo cards at 1280 and 375 in both colour schemes, with
+`content-visibility` forced visible — leave it on and every offscreen card
+reports its `contain-intrinsic-size` placeholder instead of its box, which
+reads as a flat "no change" whatever you changed.
 
 - The checkbox is the explicit target, not a wrapping `<label>`: the card is
   already full of its own click targets. It is centred by the row, not by a
@@ -326,6 +338,29 @@ J.P. Morgan · IB Analyst                    .cc-firm         21   (one line)
   in full on the contact detail page.
 - **Log Touch is a ghost button, Edit is plain.** They are not equals, and
   neither is navy (Part 4).
+- **The gaps are the hierarchy, and the seam is drawn.** The name, its pills and
+  its firm line are one identity block at 4px; the card's one real division is
+  the seam above the foot, which is 4px + a `--line` hairline + 12px. Flat 8px
+  gaps between all four slots said nothing about which of them belong together,
+  and 16px of vertical padding on four short lines put 32px of the card above
+  the avatar and below the buttons. Taking those back cost the card 23px at 1280
+  and 15px at 375 without moving a slot. The hairline is the dark-mode half: the
+  pill row renders empty on 29 of 49 demo cards and the seam sat 20px below it,
+  and bounded only by the card's own low-contrast edge the two read as one hole.
+  `--line` is that same edge token, so the rule needs no separate dark treatment.
+- **`margin-top: auto` is not where the slack was.** Measured, it collects 0.0px
+  on all 49 cards at both widths — the foot already sits at a fixed offset
+  because every slot above it is a fixed height. It stays as the guarantee for
+  the case it was written for: a grid row stretched taller than its content.
+- **The foot wraps to two rows at four across, and that is accepted.**
+  `.cc-since`'s 7.5rem floor plus 12px plus the 149.1px button pair wants 281.1px
+  against 253.5px of card. Forcing one row needs 27.6px, and the only sources are
+  the floor that keeps the wrap decision uniform across the grid (widest real
+  string 109px, so it cannot go below about 7rem) and the buttons' own padding
+  (14px → 8px). That leaves 2.4px of headroom at 1280 and still wraps at the
+  grid's 280px `minmax` floor. The two axes are spaced separately instead —
+  `column-gap` 12px across, `row-gap` 4px down — so the wrapped fact and controls
+  read as one footer.
 
 **Bulk bar.** Sticky, `hidden` until something is ticked. Three verbs: Snooze
 3d, Stop following up, Archive, plus Clear. Shift-click extends a range. Archive

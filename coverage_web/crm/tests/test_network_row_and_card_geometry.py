@@ -206,6 +206,13 @@ def test_every_contact_card_in_the_grid_is_one_height():
     (see the two tests below), so the tallest card in every warmth section is
     the same card, and the whole page settles on one height instead of one
     height per section.
+
+    Re-measured again after the spacing pass later the same day (see
+    `test_the_cards_gaps_group_the_identity_block` below), which took 23px
+    out of the card without touching any of that: heights 179.4 x49 at 1280
+    and 156.2 x49 at 375, both colour schemes, `.cc-firm` at 77px on all 49
+    every time. One height and one firm-line offset are the two properties
+    that pass bought and they are unchanged.
     """
     css = _styles(_page())
     grid = _rule(css, ".contact-grid")
@@ -220,6 +227,134 @@ def test_every_contact_card_in_the_grid_is_one_height():
     assert "margin-top: auto" in _rule(css, ".cc-foot"), (
         "the controls row floats after the firm line again instead of "
         "sitting a fixed distance off the bottom of the card."
+    )
+
+
+def test_the_cards_gaps_group_the_identity_block():
+    """"Cards still look a little weird ... ensure space is adequately taken
+    up, visually harmonious", reported looking at the board in DARK, after
+    the skeleton above had already made every card one height.
+
+    The skeleton was not the defect and none of it is undone here. What it
+    was SPENDING is. Every slot and every gap, measured on all 49 demo cards
+    at 1280 with `content-visibility` forced visible:
+
+        slot/gap        before   after
+        padding-top       16       12
+        .cc-head          40       40    the avatar; untouched
+        gap                8        4
+        .cc-tags          16       16    reserved; untouched
+        gap                8        4
+        .cc-firm        20.8     20.8    one line; untouched
+        gap                8        4
+        .cc-foot        67.6     64.6
+        padding-bottom    16       12
+        CARD           202.4    179.4    at 1280   (-11.4%)
+                       171.2    156.2    at 375    (-8.8%)
+
+    The first finding retires an assumption worth stating: `margin-top: auto`
+    was NOT hoarding the slack. It collected 0.0px on all 49 cards at both
+    widths, because everything above the foot is already a fixed height.
+    There was no pooled gap to redistribute — the air was spread evenly
+    through four identical 8px gaps and 16px of vertical padding.
+
+    Four slots separated by an identical gap say nothing about which of them
+    belong together, which is what made the card read as five loose rows. The
+    name, its pills and its firm line are one identity block at 4px, and the
+    only real division on the card is the seam above the foot (see the test
+    below). That is the hierarchy this pins.
+
+    The horizontal padding stays at `var(--s4)`: `.cc-firm`'s truncation
+    budget (253.5px at 1280, 283px at 375) and the 3.85em role cap were
+    measured against 16px sides, and narrowing them would re-open the
+    mid-word cut that rule exists to prevent.
+    """
+    css = _styles(_page())
+    card = _rule(css, ".contact-card")
+
+    assert "padding: var(--s3) var(--s4)" in card, (
+        "the card is back on 16px of vertical padding. That is 32px of the "
+        "179px card spent above the avatar and below the buttons, on a card "
+        "whose own content is four short lines."
+    )
+    assert "gap: var(--s1)" in card, (
+        "the card's slots are back on a flat 8px gap, so the name, its "
+        "pills and its firm line read as three unrelated rows instead of "
+        "one identity block — and the seam above the foot reads as just "
+        "another gap rather than the card's one division."
+    )
+
+
+def test_the_foot_is_the_cards_one_seam_and_it_is_drawn():
+    """The dark half of the same report, and the reason it is a rule rather
+    than more whitespace.
+
+    Above the foot the card has two bands of reserved-and-possibly-empty
+    space within 20px of each other: the pill row, which renders empty on 29
+    of the 49 demo cards, and the seam. Bounded only by the card's own edge
+    they read as the same thing, and on a dark ground that edge is `--line`
+    against `--bg-2` — the contrast that makes a gap read as breathing room
+    on paper is not there to make it read as anything but a hole.
+
+    A hairline gives the footer zone an edge of its own. It is `--line`, the
+    card's own border token, so it needs no separate dark-mode treatment and
+    it was checked in both: identical geometry (179.4 x49 at 1280, 156.2 x49
+    at 375) and the same reading in each. It costs the card 1px.
+
+    `padding-top: var(--s3)` is the other half: 4px of card gap, the rule,
+    then 12px, so the seam is a deliberate 17px against the 4px gaps above
+    it. Before the pass it was 8 + 8 against 8s — the same total, spent
+    where nothing could see it.
+    """
+    foot = _rule(_styles(_page()), ".cc-foot")
+
+    assert "border-top: 1px solid var(--line)" in foot, (
+        "the seam above the foot is drawn in whitespace alone again. In dark "
+        "mode that is indistinguishable from the empty pill band 20px above "
+        "it, which is what got the card reported as having a hole in it."
+    )
+    assert "padding-top: var(--s3)" in foot, (
+        "the foot's own padding is back down level with the 4px gaps above "
+        "it, so the card's one real division reads as a fourth gap."
+    )
+
+
+def test_the_foots_two_axes_are_spaced_apart_from_each_other():
+    """`gap: var(--s3)` set BOTH axes of a row that wraps, and the two axes
+    are not the same problem.
+
+    ACROSS, 12px is the separation between two zones that belong to
+    different owners: a fact on the left, controls on the right.
+
+    DOWN, those same two zones are one footer. The row wraps on every card
+    at four across — `.cc-since`'s 7.5rem floor plus 12px plus the 149.1px
+    button pair wants 281.1px against 253.5px of card — and at 12px the
+    stacked fact and controls read as two loose things rather than one
+    block. 4px is what says they are one.
+
+    Forcing the row not to wrap at all was costed and rejected. It needs
+    27.6px, and the only places it can come from are the floor that keeps
+    the wrap decision uniform across the grid (the widest real string is
+    109px, so the floor cannot go below about 7rem) and the buttons' own
+    horizontal padding (14px -> 8px). That leaves 2.4px of headroom at 1280
+    and still wraps at the grid's 280px `minmax` floor: a layout one glyph
+    from breaking, in exchange for squeezed controls.
+    """
+    foot = _rule(_styles(_page()), ".cc-foot")
+
+    assert "column-gap: var(--s3)" in foot, (
+        "the days-since zone and the controls have lost the separation that "
+        "keeps them from reading as one run of text across the row."
+    )
+    assert "row-gap: var(--s1)" in foot, (
+        "the wrapped foot is back on a 12px row gap, so at four across the "
+        "fact and the controls stack as two loose rows instead of one "
+        "footer block — and the card carries 8px more air for it."
+    )
+    assert not re.search(r"(?<![a-z-])gap: var\(--s3\)", foot), (
+        "the foot is back on the `gap` shorthand, which sets both axes at "
+        "once: whatever is right for the row is then also forced on the "
+        "wrap, and this row wraps on every card at four across."
     )
 
 
@@ -361,14 +496,36 @@ def test_the_pill_row_is_reserved_whether_or_not_it_has_pills():
     `nowrap` is safe rather than hopeful: the widest combination the data can
     produce is Parked + gender + tier + region = 59.6 + 25.5 + 29.2 + 46.8
     plus three 8px gaps = 185px, against 248px in the narrowest card the grid
-    can build (the 280px `minmax` floor less 32px of padding).
+    can build (the 280px `minmax` floor less 32px of padding). Re-checked by
+    forcing all four pills onto all 49 demo cards at both widths: nothing
+    clipped, `.cc-tags` scrollWidth never past its client width.
+
+    RE-MEASURED 2026-09-02 against the current skeleton, when the empty band
+    came back as "a hole" in dark mode. Reserve still wins, and the collapse
+    was measured rather than argued: `min-height: 0` puts `.cc-firm` at 75px
+    on the 20 demo cards that have a pill and 61px on the 29 that do not,
+    and the cards at 177.4px and 163.4px — two firm-line offsets AND two
+    card heights in one grid, which is both defects this row exists to
+    prevent. The band is answered by being smaller instead: the gaps around
+    it are 4px now, so a pill-less card shows 24px of empty band where it
+    used to show 32px, and the seam below it is drawn (see
+    `test_the_foot_is_the_cards_one_seam_and_it_is_drawn`) so the two
+    empties can no longer be mistaken for one hole.
+
+    The 16px reserve stays 16px and is deliberately 2px more than the 14px a
+    pill actually renders. Trimming it to the measured height leaves no
+    headroom, and any face or browser that draws the pill one pixel taller
+    then makes a card WITH pills taller than a card without — the same two
+    offsets, bought back for two pixels.
     """
     css = _styles(_page())
     tags = _rule(css, ".cc-tags")
 
-    assert "min-height" in tags, (
-        "the pill row no longer reserves its line, so a contact with no "
-        "region and no tier pulls the whole card below it up one row."
+    assert "min-height: 16px" in tags, (
+        "the pill row no longer reserves its 16px line, so a contact with no "
+        "region and no tier pulls the whole card below it up one row. "
+        "Measured with the reserve removed: firm line at 61px on 29 cards "
+        "and 75px on 20, cards at 163.4px and 177.4px, in one grid."
     )
     assert "flex-wrap: nowrap" in tags, (
         "the pill row can wrap to a second line again, which is the original "
