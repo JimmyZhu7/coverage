@@ -577,6 +577,211 @@ def test_the_period_title_cannot_shove_the_controls_along_the_bar(client, logged
 
 
 # ---------------------------------------------------------------------------
+# The control line: one height, one hierarchy, four words fewer.
+#
+# Reported live as "refine this part of the calendar, simplify and ensure it
+# is visually harmonious". Measured at 1280px before the pass: six controls
+# in one row at FOUR different heights — arrows 36px, the switcher's track
+# 40.4, Today and Subscribe 37.6, Add 39 — every one of them whatever its own
+# padding happened to compute, and all six drawn as outlined boxes at one
+# weight whether they were pressed every visit (the arrows) or once ever
+# (Subscribe).
+# ---------------------------------------------------------------------------
+
+def _bar_markup(body: str) -> str:
+    """The control line: `.cal-bar`, minus its <style> blocks and minus the
+    add panel's form.
+
+    Two subtractions, each for a reason that has already bitten this file.
+    The <style> blocks, because the bar's rules name its class names and
+    several of its comments SHIP — a `/* */` inside a rendered <style> is
+    page text, so a copy guard reading the raw response reads the
+    explanation of a label as well as the label. The form, because the
+    <details> lives inside `.cal-bar` and its submit button is a second
+    `.btn-primary`: counting filled controls on the ROW has to stop at the
+    disclosure, which is where the row stops.
+
+    Sliced by depth rather than by the first `</div>`, which closes
+    `.cal-nav` and would cut the bar off after its first control.
+    """
+    markup = re.sub(r"<style[^>]*>.*?</style>", "", body, flags=re.DOTALL)
+    start = markup.index('<div class="cal-bar">')
+    depth, i = 0, start
+    for tag in re.finditer(r"<(/?)div\b", markup[start:]):
+        depth += -1 if tag.group(1) else 1
+        if depth == 0:
+            i = start + tag.end()
+            break
+    else:                                     # pragma: no cover - malformed
+        raise AssertionError("the .cal-bar element never closes")
+    bar = markup[start:i]
+    return re.sub(r"<form\b.*?</form>", "", bar, flags=re.DOTALL)
+
+
+def test_every_control_on_the_bar_is_the_same_height(client, logged_in):
+    """Four heights on one row is what "busy" was measuring: 36 / 40.4 / 37.6
+    / 39 at 1280px, so nothing lined up along either edge. `--cal-h` states
+    the row's height once and every control is set to it — which also means a
+    control added later cannot quietly introduce a fifth.
+
+    Asserted on the declarations rather than on rendered pixels, because a
+    template test has no layout engine: the guarantee is that no control on
+    this bar sizes itself, and that is a property of the CSS.
+    """
+    css = _style_block(client.get(reverse("crm:calendar")).content.decode())
+    css_bare = _outside_media(css)
+
+    assert re.search(r"\.cal-bar \{[^}]*--cal-h: 40px", css_bare), (
+        "the control line's height must be declared once, on .cal-bar"
+    )
+    assert "@media (pointer: coarse) { .cal-bar { --cal-h: 44px; } }" in css, (
+        "a finger still owes 44px; the row's own token is where that is said"
+    )
+
+    for selector, expected in (
+        (r"\.cal-nav \.btn \{", "height: var(--cal-h)"),
+        (r"\.cal-nav \.cal-arrow \{", "width: var(--cal-h)"),
+        (r"\.cal-views\.scope-tabs a \{", "height: calc(var(--cal-h) - 10px)"),
+        (r"\.cal-add > summary \{", "height: var(--cal-h)"),
+    ):
+        block = re.search(selector + r"(.*?)\}", css_bare, re.DOTALL)
+        assert block, f"the rule matching {selector} moved; update this guard"
+        assert expected in block.group(1), (
+            f"{selector} must take its size from --cal-h, not from its own "
+            f"padding. Expected {expected!r}."
+        )
+
+
+def test_today_is_joined_to_the_arrows_it_shares_a_job_with(client, logged_in):
+    """Back a period, to today, forward a period: one job, and now one
+    control. Today used to stand four controls away from the arrows, past the
+    view switcher, dressed exactly like Subscribe — which it has nothing in
+    common with.
+
+    Two halves, because either can regress alone: the three links have to sit
+    inside `.cal-nav` in that order, and the group has to be DRAWN as one
+    object (square inner corners, `--r-ctl` on the two outer ones, a shared
+    edge rather than a gap).
+    """
+    body = client.get(reverse("crm:calendar")).content.decode()
+    group = _bar_markup(body).split('<div class="cal-nav">', 1)[1]
+
+    order = re.findall(r'rel="prev"|data-today-link|rel="next"', group)
+    assert order[:3] == ["rel=\"prev\"", "data-today-link", "rel=\"next\""], (
+        "the period group is ‹ / Today / ›, in that order: Today is what the "
+        f"two arrows move away from. Got {order[:3]}."
+    )
+
+    css = _outside_media(_style_block(body))
+    base = re.search(r"\.cal-nav \.btn \{(.*?)\}", css, re.DOTALL).group(1)
+    assert "border-radius: 0" in base and "margin-left: -1px" in base, (
+        "a joined group shares one edge between neighbours and squares the "
+        "corners inside it; gaps and full radii are three boxes again"
+    )
+    first = re.search(r"\.cal-nav \.btn:first-child \{(.*?)\}", css, re.DOTALL)
+    last = re.search(r"\.cal-nav \.btn:last-child \{(.*?)\}", css, re.DOTALL)
+    assert first and "var(--r-ctl) 0 0 var(--r-ctl)" in first.group(1)
+    assert last and "0 var(--r-ctl) var(--r-ctl) 0" in last.group(1)
+    assert re.search(r"\.cal-nav \{[^}]*\}", css).group(0).count("gap") == 0, (
+        "the segments touch; a gap between them is what made them read as "
+        "three separate controls"
+    )
+
+
+def test_the_joined_group_does_not_lift_one_segment_out_of_itself(
+        client, logged_in):
+    """`.btn:hover` translates -1px and casts a shadow, which is right for a
+    free-standing button and wrong inside a group whose outline the other two
+    segments are still drawing: the hovered one tears out of it. Ground and
+    border instead, with the hovered segment raised in the stack so its own
+    edge wins over the neighbour it shares a pixel with."""
+    css = _outside_media(
+        _style_block(client.get(reverse("crm:calendar")).content.decode()))
+    hover = re.search(r"\.cal-nav \.btn:hover \{(.*?)\}", css, re.DOTALL)
+    assert hover, "the group's hover rule moved; update this guard"
+    assert "transform: none" in hover.group(1)
+    assert "box-shadow: none" in hover.group(1)
+    assert "z-index: 1" in hover.group(1)
+
+
+def test_the_bar_names_exactly_one_primary_action(client, logged_in):
+    """Six outlined boxes at one weight said nothing about which of them
+    matters. Adding an entry is the only thing this page lets you DO, so it
+    is the only filled control on the row; everything else moves you around
+    the calendar or reports what is on it.
+
+    "Exactly one" is the assertion, not "at least one": a second primary here
+    would put the hierarchy straight back where it was.
+    """
+    bar = _bar_markup(client.get(reverse("crm:calendar")).content.decode())
+    assert bar.count("btn-primary") == 1, (
+        "one filled control on the control line, and it is Add"
+    )
+    assert '<summary class="btn btn-primary">Add</summary>' in bar
+
+
+def test_subscribe_recedes_to_a_link_without_leaving_the_bar(client, logged_in):
+    """Subscribe is a once-ever action — point Apple or Google Calendar at the
+    feed one time and never touch it again — and it was drawn at exactly the
+    weight of Today, which is pressed several times a session.
+
+    Demoted, NOT deleted and NOT moved off the page: this is the only place
+    in the product that HANDS OUT the feed (Settings' Calendar Link row only
+    resets it), so it stays on the calendar's own bar, at the quiet end
+    beside the counts. The demotion is size only — it keeps the accent ink
+    and hover underline every link in the product has, because a control that
+    matches the static text beside it is not a quieter control, it is one you
+    cannot tell is a control.
+    """
+    body = client.get(reverse("crm:calendar")).content.decode()
+    bar = _bar_markup(body)
+
+    link = re.search(r'<a class="cal-sub"[^>]*>', bar)
+    assert link, "the Subscribe control left the calendar bar"
+    assert "webcal://" in link.group(0) and "calendar/feed/" in link.group(0)
+    assert "btn" not in link.group(0), "it is a link now, not a button"
+
+    css = _outside_media(_style_block(body))
+    rule = re.search(r"\.cal-sub \{(.*?)\}", css, re.DOTALL)
+    assert rule, "the .cal-sub rule moved; update this guard"
+    assert "font-size: var(--fs-xs)" in rule.group(1)
+    assert "color:" not in rule.group(1), (
+        "size is the demotion; overriding the colour costs the link its own "
+        "affordance"
+    )
+
+
+def test_the_bars_labels_say_their_object_without_saying_the_page(
+        client, logged_in):
+    """Two copy changes, opposite directions.
+
+    "Add to the calendar" was four words next to two one-word controls, and
+    the object it named is the page it is printed on. The commit action under
+    the form still reads "Add to calendar", so the object is stated where it
+    is being committed rather than on the disclosure that reveals the form.
+
+    "Subscribe" named no object at all, on a product that sells subscriptions
+    and links Pricing in its own footer: to a student who has read no
+    documentation a lone "Subscribe" can as easily mean "start paying". The
+    destination app settles both questions. The verb itself stays, because it
+    is the word Apple and Google use in the dialog the link opens and the one
+    Settings' Calendar Link row refers back to.
+    """
+    body = client.get(reverse("crm:calendar")).content.decode()
+    bar = _bar_markup(body)
+
+    assert ">Add</summary>" in bar
+    assert "Add to the calendar" not in bar
+    # The commit still names what it commits to.
+    assert ">Add to calendar</button>" in body
+
+    assert "Subscribe in Calendar" in bar
+    assert not re.search(r">\s*Subscribe\s*<", bar), (
+        "the bare verb named no object"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Timezone anchoring: what a reported time MEANS.
 # ---------------------------------------------------------------------------
 

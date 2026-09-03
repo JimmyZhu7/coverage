@@ -290,11 +290,24 @@ def test_the_calendar_bar_has_one_control_shape_plus_the_segment():
     and three squared `.btn`s — the most shape variety in any single row on
     the site. The arrows take `--r-ctl`; the segment keeps its capsule under
     the one exception the control-shape rule allows.
+
+    2026-09-02: the selector this read moved. `.cal-nav a.btn` was the two
+    arrows; `.cal-nav` is now the JOINED period group (‹ / Today / ›), whose
+    segments carry `border-radius: 0` and whose outer two carry `--r-ctl` on
+    the group's outer corners — one button corner drawn once round three
+    controls, which is the same shape and the same radius the rule names.
+    The guarantee is unchanged and is asserted over every `.cal-nav` rule
+    rather than one of them, so a pill reintroduced on any segment fails:
+    `--r-ctl` is present somewhere in the group and 999px is present nowhere
+    in it.
     """
     css = _styles(_get(CALENDAR, "ui-cal@example.com"))
-    nav = re.search(r"\.cal-nav a\.btn \{(.*?)\}", css, re.S).group(1)
+    nav = "\n".join(re.findall(r"\.cal-nav[^{}]*\{(.*?)\}", css, re.S))
+    assert nav, "the .cal-nav rules moved; this guard needs updating"
     assert "border-radius: var(--r-ctl)" in nav
     assert "999px" not in nav
+    # And no segment of the group may round its own inner edge.
+    assert "border-radius: 0;" in nav
 
 
 def test_the_day_view_has_one_add_affordance_and_no_empty_hour_rail():
@@ -305,10 +318,18 @@ def test_the_day_view_has_one_add_affordance_and_no_empty_hour_rail():
 
     The bar's own form posts `d = anchor.day`, so opening it from this view
     already prefills this date; the dropped button was doing nothing else.
+
+    2026-09-02: the surviving affordance is asserted by its class rather than
+    by its label. It read `"Add to the calendar" in html`, which was really
+    two claims in one string — that the bar's add still exists, which is this
+    test's premise, and that it is called that, which is not. The label is now
+    "Add" (see the summary's own comment in calendar.html); the premise is
+    untouched and is checked here on the element, with the copy pinned in
+    test_calendar.py where the rest of this bar's wording lives.
     """
     html = _get(CALENDAR, "ui-calday@example.com", view="day")
     assert "Add on this day" not in html
-    assert "Add to the calendar" in html
+    assert html.count('<details class="cal-add" id="add"') == 1
 
 
 def test_the_grid_settles_when_the_month_or_view_changes():
