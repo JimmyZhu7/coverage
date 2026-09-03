@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from assistant import brief
 from assistant.models import DailyBrief
+from assistant.templatetags.assistant_extras import chat_format
 
 User = get_user_model()
 
@@ -585,7 +586,10 @@ def test_a_cached_brief_survives_when_every_named_contact_is_still_in_the_queue(
     client.messages.requests.clear()
     second = brief.get_or_build(user, _founders_queue_before_parking(), client=client)
 
-    assert second == "Respond to **Anant Taparia** at Citi."
+    # `Citi` is bold because it is a firm on the queue this brief was built
+    # from (`_bold_known_names`); `Anant Taparia` because the model wrote it
+    # that way and the pass leaves an existing span alone.
+    assert second == "Respond to **Anant Taparia** at **Citi**."
     assert client.messages.requests == []
 
 
@@ -606,8 +610,10 @@ def test_get_cached_hides_a_stale_brief_without_spending_a_call():
     assert brief.get_cached(user, still_live) is None
     # Without a fresh queue to check against, the old contract holds — a
     # caller that hasn't been updated to pass `actions` still gets the row
-    # exactly as written, never a surprise None.
-    assert brief.get_cached(user) == "Respond to **Anant Taparia** at Citi."
+    # exactly as written, never a surprise None. "As written" now includes
+    # the bold on `Citi`, which `get_or_build` put in before the cache write
+    # — `get_cached` adds none of its own, see `_bold_known_names`.
+    assert brief.get_cached(user) == "Respond to **Anant Taparia** at **Citi**."
 
 
 def test_is_pending_reopens_once_a_named_contact_is_parked(monkeypatch):
@@ -658,7 +664,7 @@ def test_reply_after_park_is_never_treated_as_stale():
     same_queue = _founders_queue_before_parking()
     second = brief.get_or_build(user, same_queue, client=client)
 
-    assert second == "Respond to **Anant Taparia** at Citi."
+    assert second == "Respond to **Anant Taparia** at **Citi**."
     assert client.messages.requests == []
 
 
@@ -686,7 +692,7 @@ def test_an_empty_queue_does_not_invalidate_a_still_true_brief():
 
     # The student cleared their queue. Nothing was parked or excluded;
     # there is simply no work due today.
-    assert brief.get_cached(user, []) == "Respond to **Anant Taparia** at Citi."
+    assert brief.get_cached(user, []) == "Respond to **Anant Taparia** at **Citi**."
     # And the Today page must not fall back to the lazy-load placeholder,
     # which would POST, generate nothing from an empty queue, and leave a
     # blank where the brief was.
@@ -952,10 +958,10 @@ def test_an_empty_queue_still_does_not_invalidate_a_still_true_brief():
                        client=client)
 
     assert brief.get_cached(user, [], silenced_ids=set()) == (
-        "Confirm the chat with Katy Chen."
+        "Confirm the chat with **Katy Chen**."
     )
     # And a caller with no verdict to offer still gets the permissive answer.
-    assert brief.get_cached(user, []) == "Confirm the chat with Katy Chen."
+    assert brief.get_cached(user, []) == "Confirm the chat with **Katy Chen**."
 
 
 def test_only_the_contacts_the_brief_named_can_make_it_stale():
@@ -967,7 +973,7 @@ def test_only_the_contacts_the_brief_named_can_make_it_stale():
                        client=client)
 
     assert brief.get_cached(user, [], silenced_ids={999, 1000}) == (
-        "Confirm the chat with Katy Chen."
+        "Confirm the chat with **Katy Chen**."
     )
 
 
@@ -1094,6 +1100,12 @@ def test_the_staleness_fingerprint_records_the_plans_order():
 # house style "most of the time" is a defect waiting for someone's Tuesday.
 # ---------------------------------------------------------------------------
 def test_an_em_dash_in_the_models_answer_becomes_a_sentence_break():
+    """Both post-processes run on this one sentence and they compose: the
+    dash becomes a full stop and a capital `She`, and `Goldman Sachs` — the
+    firm on the action that built the brief — comes out bold. `Priya Nair`
+    does not: she is not on this queue, so she is not a known name (see
+    `_known_names`), and nothing here guesses at a capitalised pair of
+    words."""
     user = _user()
     client = FakeClient(_response(
         "Priya Nair is your only advocate at Goldman Sachs—she has written "
@@ -1104,8 +1116,8 @@ def test_an_em_dash_in_the_models_answer_becomes_a_sentence_break():
 
     assert "—" not in text
     assert text == (
-        "Priya Nair is your only advocate at Goldman Sachs. She has written "
-        "to you twice."
+        "Priya Nair is your only advocate at **Goldman Sachs**. She has "
+        "written to you twice."
     )
 
 
@@ -1120,10 +1132,17 @@ def test_a_spaced_em_dash_and_an_en_dash_are_both_rewritten():
     )
 
 
-def test_the_rewrite_keeps_the_one_bold_span_the_prompt_asks_for():
-    """The prompt asks for exactly one `**bold**` span and it can open the
-    clause after the dash. The marker travels through untouched, and the
-    capital lands on the word rather than on the asterisks."""
+def test_the_rewrite_keeps_a_bold_span_the_model_wrote_intact():
+    """RENAMED AND REPREMISED. This used to be "the ONE bold span the prompt
+    asks for", back when the prompt asked the model for exactly one span and
+    a finished brief could never hold more. It can now: `_bold_known_names`
+    adds a span per person and per firm after the fact, and the prompt asks
+    the model for at most one span of its own (a deadline, never a name).
+
+    What the test is actually pinning is unchanged and still load-bearing:
+    a `**` marker sitting at the start of the clause after a dash travels
+    through the dash rewrite untouched, and the capital lands on the word
+    rather than on the asterisks."""
     assert brief._no_em_dashes("Two things today—**Priya Nair** replied.") == (
         "Two things today. **Priya Nair** replied."
     )
@@ -1186,3 +1205,378 @@ def test_a_row_written_before_the_style_rule_is_cleaned_on_the_way_out():
     assert brief.get_cached(user) == (
         "Priya Nair is your advocate at Goldman Sachs. She wrote twice."
     )
+
+
+# ---------------------------------------------------------------------------
+# EVERY PERSON AND EVERY FIRM IS BOLD, AND PYTHON PUTS IT THERE.
+#
+# The founder's own card, live on 2026-09-02 (DailyBrief row for
+# zhujimmy123@gmail.com, contact 401 / Katy Chen at Nomura, one situation
+# event at Bank of America):
+#
+#   "Keep Katy Chen warm at Nomura. You've already connected and the role
+#    closes **Sep 30**. Bank of America just opened Global Capital Markets
+#    Summer Analyst roles including one in Hong Kong ..."
+#
+# One bold span, on the date — which is exactly what the prompt asked for
+# ("exactly ONE short span ... whichever single detail matters most"). Three
+# names, none of them bold, on the one line a student scans in two seconds.
+#
+# The fix is not a better prompt. A model told to bold every name will get
+# four right and the fifth wrong on somebody's Tuesday, with nothing able to
+# notice. The brief is BUILT from typed rows, so the names are known strings
+# before the call is made — see `assistant.brief._known_names` for exactly
+# which fields count, and `_bold_known_names` for the wrapping.
+# ---------------------------------------------------------------------------
+FOUNDERS_QUEUE = [{
+    "contact": {"name": "Katy Chen", "firm_text": ""},  # linked → cleared
+    "firm_name": "Nomura",
+    "label": "Keep warm", "reason": "chatted 3 weeks ago", "closes_on": None,
+}]
+FOUNDERS_SITUATION = [{
+    "kind": "new_role_at_known_firm",
+    "firm": "Bank of America",
+    "title": "Global Capital Markets Summer Analyst",
+}]
+FOUNDERS_SENTENCE = (
+    "Keep Katy Chen warm at Nomura. You've already connected and the role "
+    "closes **Sep 30**. Bank of America just opened Global Capital Markets "
+    "Summer Analyst roles including one in Hong Kong if you want to explore "
+    "there."
+)
+
+
+def test_the_founders_own_card_bolds_both_names_and_the_firms():
+    """THE CASE. The exact sentence off his Today page, run through the exact
+    queue and situation event it was generated from.
+
+    Three spans get added (`Katy Chen`, `Nomura`, `Bank of America`) and one
+    survives untouched (`Sep 30`, the model's own). Nothing else moves.
+    """
+    user = _user()
+    client = FakeClient(_response(FOUNDERS_SENTENCE))
+
+    text = brief.get_or_build(
+        user, FOUNDERS_QUEUE, situation=FOUNDERS_SITUATION, client=client,
+    )
+
+    assert text == (
+        "Keep **Katy Chen** warm at **Nomura**. You've already connected and "
+        "the role closes **Sep 30**. **Bank of America** just opened Global "
+        "Capital Markets Summer Analyst roles including one in Hong Kong if "
+        "you want to explore there."
+    )
+
+
+def test_a_job_title_and_a_place_name_in_that_same_sentence_stay_plain():
+    """The reason this is a known-string match and not "bold the capitalised
+    words". `Global Capital Markets Summer Analyst` is a posting title and
+    `Hong Kong` is a place, and both sit one clause away from the three real
+    names in the founder's own card. A heuristic over capitalisation would be
+    wrong on the very sentence that prompted the fix."""
+    out = brief._bold_known_names(
+        FOUNDERS_SENTENCE, brief._known_names(FOUNDERS_QUEUE, FOUNDERS_SITUATION),
+    )
+
+    assert "**Global Capital Markets**" not in out
+    assert "**Hong Kong**" not in out
+    assert "Global Capital Markets Summer Analyst roles" in out
+    assert "one in Hong Kong" in out
+
+
+def test_the_models_own_deadline_span_is_left_exactly_where_it_was():
+    """`Sep 30` is not a name and this pass never touches it: it is neither
+    added nor removed nor re-wrapped. The prompt still lets the model spend
+    one span on a date, and that span has to survive the names arriving
+    around it."""
+    out = brief._bold_known_names(
+        "Katy Chen has until **Sep 30** at Nomura.", ["Katy Chen", "Nomura"],
+    )
+
+    assert out == "**Katy Chen** has until **Sep 30** at **Nomura**."
+
+
+def test_every_occurrence_of_a_name_is_bolded_not_just_the_first():
+    """DECIDED: every one. "Names are bold" is a property of the string, not
+    of its position — a second mention left plain reads as a different, lesser
+    person than the bold one three words earlier, and picking a first mention
+    would put back exactly the judgement call this pass exists to remove."""
+    out = brief._bold_known_names(
+        "Nomura closes Friday, so write to Katy Chen. Katy Chen is your only "
+        "advocate at Nomura.",
+        ["Katy Chen", "Nomura"],
+    )
+
+    assert out == (
+        "**Nomura** closes Friday, so write to **Katy Chen**. **Katy Chen** "
+        "is your only advocate at **Nomura**."
+    )
+
+
+def test_a_known_name_inside_a_longer_word_is_never_bolded():
+    """A match needs no word character on either side. `Chen` inside
+    `Chenoweth` is a different person and gets nothing; `Chen's` and `Chen,`
+    are the whole name followed by punctuation and do get bolded."""
+    out = brief._bold_known_names(
+        "Chenoweth replied, but Chen's note came first, so answer Chen, then "
+        "Chenoweth.",
+        ["Chen"],
+    )
+
+    assert out == (
+        "Chenoweth replied, but **Chen**'s note came first, so answer "
+        "**Chen**, then Chenoweth."
+    )
+
+
+def test_a_firm_the_model_paraphrases_is_left_plain_rather_than_guessed_at():
+    """NO FUZZY MATCHING, on purpose. `BofA` is obviously Bank of America to
+    a reader and is not the string this student's data holds. Bolding it would
+    be this module asserting which firm the model meant, and a wrong bold is
+    worse than a missing one: it claims the sentence is naming a row the
+    student has. The paraphrase renders plain and the sentence still reads."""
+    out = brief._bold_known_names(
+        "BofA just opened three roles, and the bank closes applications "
+        "Friday.",
+        ["Bank of America"],
+    )
+
+    assert out == (
+        "BofA just opened three roles, and the bank closes applications "
+        "Friday."
+    )
+
+
+def test_a_name_the_model_already_bolded_is_not_bolded_a_second_time():
+    """`****Katy Chen****` is what a naive pass would emit, and
+    `chat_format`'s single non-greedy inline rule renders that as an empty
+    `<strong>` plus literal asterisks. The pass skips every span the model
+    wrote."""
+    out = brief._bold_known_names(
+        "Write to **Katy Chen** at Nomura today.", ["Katy Chen", "Nomura"],
+    )
+
+    assert out == "Write to **Katy Chen** at **Nomura** today."
+    assert "****" not in out
+
+
+def test_a_name_inside_a_longer_span_the_model_bolded_is_left_alone():
+    """Real row, founder's account, 2026-08-31: the model bolded a whole
+    phrase that happens to contain both a name and a firm. Re-wrapping either
+    one would split the model's own span down the middle. The span goes
+    through whole."""
+    out = brief._bold_known_names(
+        "Confirm whether your **chat with Youqi Chen at Morgan Stanley** "
+        "happened, and if it did, log it today.",
+        ["Youqi Chen", "Morgan Stanley"],
+    )
+
+    assert out == (
+        "Confirm whether your **chat with Youqi Chen at Morgan Stanley** "
+        "happened, and if it did, log it today."
+    )
+
+
+def test_a_name_carrying_an_asterisk_is_left_plain_rather_than_rendered_broken():
+    """The one character that means something to `chat_format`. Its rule is
+    `\\*\\*(.+?)\\*\\*` over already-escaped text, so a name holding an
+    asterisk turns the markers into an ambiguous run the non-greedy match
+    closes in the wrong place. Silence beats broken markup."""
+    assert brief._boldable("Ana*sha Rao") is False
+    assert brief._bold_known_names(
+        "Write to Ana*sha Rao at Nomura.", ["Ana*sha Rao", "Nomura"],
+    ) == "Write to Ana*sha Rao at **Nomura**."
+
+
+def test_a_firm_name_with_html_characters_bolds_and_renders_correctly():
+    """Every character EXCEPT the asterisk is inert by the time it renders:
+    `chat_format` escapes first and layers the `<strong>` on afterwards, so
+    an `&` in a firm name comes out as `&amp;` inside the bold rather than
+    breaking out of it."""
+    out = brief._bold_known_names(
+        "Baird & Co. replied about the <analyst> role.", ["Baird & Co."],
+    )
+
+    assert out == "**Baird & Co.** replied about the <analyst> role."
+    assert chat_format(out) == (
+        "<strong>Baird &amp; Co.</strong> replied about the &lt;analyst&gt; "
+        "role."
+    )
+
+
+def test_the_longest_known_name_wins_over_a_shorter_one_inside_it():
+    """A student with contacts at both `Bank of America` and `Bank of America
+    Merrill Lynch` must get the whole longer name bolded, not its first three
+    words plus a plain tail."""
+    out = brief._bold_known_names(
+        "Bank of America Merrill Lynch posted before Bank of America did.",
+        ["Bank of America", "Bank of America Merrill Lynch"],
+    )
+
+    assert out == (
+        "**Bank of America Merrill Lynch** posted before **Bank of America** "
+        "did."
+    )
+
+
+def test_only_the_actions_that_actually_reached_the_prompt_count_as_known():
+    """`_summarize_actions` prints the first `MAX_ACTIONS_SUMMARIZED`; the
+    9th contact was never in front of the model, so their name appearing in
+    the prose is a coincidence and not a citation. Same slice, both places,
+    for the same reason `contact_ids` uses it."""
+    queue = [
+        _action(f"Person {i}", f"Firm {i}") for i in range(brief.MAX_ACTIONS_SUMMARIZED)
+    ] + [_action("Ninth Person", "Ninth Firm")]
+
+    names = brief._known_names(queue)
+
+    assert "Person 0" in names
+    assert "Ninth Person" not in names
+    assert "Ninth Firm" not in names
+
+
+def test_the_spelling_the_page_prints_is_matched_as_well_as_the_stored_one():
+    """Two spellings per name, both derived from the same stored field:
+    what the prompt printed, and what the act card next to the brief prints
+    (`name|smart_person_name|smart_title`, `firm_name|smart_title` — see
+    crm/_act_card.html). A `firm_text` typed as "goldman sachs" reads
+    "Goldman Sachs" on the card, and that is the spelling a model echoes."""
+    queue = [_action("jude.yoon", "goldman sachs")]
+
+    names = brief._known_names(queue)
+
+    assert names == ["jude.yoon", "Jude Yoon", "goldman sachs", "Goldman Sachs"]
+    assert brief._bold_known_names(
+        "Jude Yoon is your way into Goldman Sachs.", names,
+    ) == "**Jude Yoon** is your way into **Goldman Sachs**."
+
+
+def test_a_situation_firm_is_known_even_on_a_day_the_queue_is_empty():
+    """The situation feed is the brief's other input and its firms are
+    `Firm.name` off a tracked posting — the founder's `Bank of America` came
+    from here, not from his queue."""
+    user = _user()
+    client = FakeClient(_response("Bank of America just opened three roles."))
+
+    text = brief.get_or_build(
+        user, [], situation=FOUNDERS_SITUATION, client=client,
+    )
+
+    assert text == "**Bank of America** just opened three roles."
+
+
+def test_the_placeholders_the_prompt_prints_are_never_treated_as_names():
+    """"someone", "no firm on file" and "a firm" are what the summarizers
+    print when a field is EMPTY, and an empty field contributes no name here.
+    Bolding one would be the card asserting a person named "someone"."""
+    bare = [{"contact": {"name": "", "firm_text": ""}, "label": "Follow up"}]
+
+    assert brief._known_names(bare, [{"kind": "new_role_at_known_firm"}]) == []
+    assert brief._bold_known_names(
+        "Chase someone at no firm on file today.", brief._known_names(bare),
+    ) == "Chase someone at no firm on file today."
+
+
+def test_the_prompt_tells_the_model_not_to_bold_names_itself():
+    """RETIRES the old "wrap exactly ONE span ... a person's name" rule.
+
+    Two reasons for the change, both mechanical. The model spending its one
+    span on a name is a span wasted on something Python is about to bold
+    anyway, which cost the founder's card its deadline emphasis; and a span
+    the model opens mid-name (`**Katy** Chen`) is the one shape
+    `_bold_known_names` cannot repair, so the fix is to stop it at the
+    source. The deadline span it may still spend is what the founder's own
+    `**Sep 30**` was."""
+    user = _user()
+    client = FakeClient(_response("Anything."))
+
+    brief.get_or_build(user, FOUNDERS_QUEUE, client=client)
+
+    prompt = client.messages.requests[0]["messages"][0]["content"]
+    assert "Never put **bold** on a person's name or a firm's name" in prompt
+    assert "AT MOST ONE other short span" in prompt
+
+
+def test_the_cap_never_leaves_half_a_bold_marker_on_the_end():
+    """The markers go on BEFORE the length cap, because `DailyBrief.text` is
+    a 600-character column and bolding afterwards could push a row past it.
+    That makes the cut able to land inside a `**`, which would print as
+    literal asterisks. A partial span is dropped whole instead."""
+    long_one = "x" * 590 + " Nomura is the one that matters today."
+
+    capped = brief._capped(brief._bold_known_names(long_one, ["Nomura"]))
+
+    assert len(capped) <= brief.MAX_BRIEF_CHARS
+    assert capped == "x" * 590
+    assert capped.count("**") % 2 == 0
+
+
+def test_a_brief_inside_the_cap_is_not_touched_by_it():
+    """The cap's no-op case has to be a true no-op: no rstrip, no marker
+    surgery, on the ordinary sentence that is every real brief."""
+    ordinary = "Write to **Katy Chen** at **Nomura** today."
+    assert brief._capped(ordinary) == ordinary
+
+
+def test_the_bolded_sentence_is_the_one_that_gets_cached():
+    """Bolding runs before the cache write, so tomorrow's reader of today's
+    row — and `assistant.views._about_prefill`, which quotes it into the
+    composer — sees the sentence this student saw."""
+    user = _user()
+    client = FakeClient(_response(FOUNDERS_SENTENCE))
+
+    brief.get_or_build(
+        user, FOUNDERS_QUEUE, situation=FOUNDERS_SITUATION, client=client,
+    )
+
+    row = DailyBrief.objects.for_user(user).get(date=timezone.localdate())
+    assert row.text.startswith("Keep **Katy Chen** warm at **Nomura**.")
+
+
+def test_get_cached_adds_no_bold_of_its_own():
+    """WRITE-TIME ONLY, unlike the em-dash rewrite `get_cached` also applies.
+
+    The known-name set is the prompt's own input set (queue PLUS situation)
+    and only the generating call holds all of it: `crm.today.week` reads the
+    cache with the queue alone, `get_cached(user)` with neither. Bolding on
+    read would make the same stored sentence render with different names bold
+    depending on which caller asked, so the card would visibly change between
+    the htmx swap that generated it and the next page load. The row expires
+    at midnight; a sentence that changes shape under the reader does not.
+    """
+    user = _user()
+    DailyBrief(
+        user=user, date=timezone.localdate(),
+        text="Keep Katy Chen warm at Nomura.", contact_ids=[401],
+    ).save()
+
+    still_live = [_action("Katy Chen", "Nomura", contact_id=401)]
+    assert brief.get_cached(user, still_live) == "Keep Katy Chen warm at Nomura."
+    assert brief.get_cached(user) == "Keep Katy Chen warm at Nomura."
+
+
+def test_bolding_the_same_sentence_twice_changes_nothing():
+    """Idempotent, like `_no_em_dashes`: a second pass sees the spans the
+    first one wrote and skips them, so no code path can double-wrap by
+    running it again."""
+    names = brief._known_names(FOUNDERS_QUEUE, FOUNDERS_SITUATION)
+    once = brief._bold_known_names(FOUNDERS_SENTENCE, names)
+
+    assert brief._bold_known_names(once, names) == once
+
+
+def test_the_rendered_card_carries_one_strong_tag_per_name():
+    """End to end through the template filter the card actually uses. Four
+    adjacent-but-separate spans, and `chat_format`'s non-greedy rule closes
+    each one where it opened."""
+    names = brief._known_names(FOUNDERS_QUEUE, FOUNDERS_SITUATION)
+
+    html = chat_format(brief._bold_known_names(FOUNDERS_SENTENCE, names))
+
+    assert html.count("<strong>") == 4
+    assert html.count("</strong>") == 4
+    assert "<strong>Katy Chen</strong>" in html
+    assert "<strong>Nomura</strong>" in html
+    assert "<strong>Sep 30</strong>" in html
+    assert "<strong>Bank of America</strong>" in html
+    assert "**" not in html
