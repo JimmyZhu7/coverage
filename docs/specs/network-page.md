@@ -279,25 +279,47 @@ reshuffles.
   keys including the empty ones the template skips, so `forloop.first` would put
   `open` on a bucket that renders nothing and leave the whole page closed.
 
-**Contact card anatomy** (`_contact_card` in `crm/views.py` builds the dict):
+**Contact card anatomy** (`_contact_card` in `crm/views.py` builds the dict).
+Four slots, every one of them a fixed height, so the same fact is at the same
+offset on every card in the grid and a card with fewer facts leaves a gap
+rather than sliding the rest up:
 
 ```
-[x] (GH)  Grace Huang  [PARKED] [F] [T2] [HK]
-          J.P. Morgan · IB Analyst
-          9d since last touch          Log Touch   Edit
+          padding                                            16
+[x] (GH)  Grace Huang                       .cc-head         40   (the avatar)
+[PARKED] [F] [T2] [HK]                      .cc-tags         16   (reserved)
+J.P. Morgan · IB Analyst                    .cc-firm         21   (one line)
+                                            (free space)
+9d since last touch     Log Touch   Edit    .cc-foot   margin-top: auto
+          padding                                            16
 ```
 
 - The checkbox is the explicit target, not a wrapping `<label>`: the card is
-  already full of its own click targets.
+  already full of its own click targets. It is centred by the row, not by a
+  hand-computed margin.
 - The avatar is a staleness ring. `stale_pct` is days since last touch over the
   contact's own cadence window, capped at 1.0, and never-touched reads full.
   `stale_tint` is decided in Python (`due` / `warming` / `fresh`), not by a CSS
   substring hack that cannot tell 8% from 80%.
-- Pills: Parked, gender initial, tier, region. Each renders only when its value
-  exists. Parked is muted rather than coloured, because park is a decision the
-  student made on purpose.
-- Firm and role on one line, role compressed by `smart_role`, the untouched
-  original one hover away in `title=`.
+- **The name has the identity row to itself,** wraps rather than truncating, and
+  the row is pinned at the avatar's 40px with a 20px line-height so a two-line
+  name fills it exactly instead of pushing everything below it down. The two
+  longest names in the data, "Bartholomew Vanderhoeven" (204px) and "Mariela
+  Jimenez-Sanchez" (181px), both wrap against 173px of room.
+- **Pills get their own reserved row,** rendered whether or not the contact has
+  any: Parked, gender initial, tier, region, each still conditional
+  individually. Parked is muted rather than coloured, because park is a decision
+  the student made on purpose. The row never wraps — the widest combination the
+  data can build is 185px against 248px in the narrowest card the grid makes.
+- **Firm and role, exactly one line,** as two spans that truncate
+  independently. The line is a full-width row (253px at 1280, 283px at 375, up
+  from the 173px it had beside the avatar). The ROLE never gives up a pixel and
+  the firm is the half that ellipsises, because two people at the same firm are
+  told apart by the role; the firm is guaranteed a 3.5em floor by a `max-width`
+  on the role rather than a `min-width` on itself, which would pad "BCG" and
+  "USC" out to the floor and hand the pixels to nobody. Role compressed by
+  `smart_role`; the untouched original, full firm and full uncompressed role, is
+  one hover away in `title=`.
 - **No description line and no email address on the card.** 120 of 182 bullets
   on the founder's live board were provenance noise the capture pipeline wrote
   for itself, and the clamp cut the useful ones mid sentence. Both fields render
@@ -394,6 +416,27 @@ in one place while the board named all of them in another, and the reader had to
 hold six names in their head to cross-reference. `test_the_widget_is_gone_and
 _left_nothing_behind` pins the deletion at both the markup and the stylesheet
 level.
+
+**D12. A firm name repeated inside the role is left alone.** "BCG · BCG contact
+via USC" is the student's own text, and suppressing the repeat is a display rule
+that deletes a word a person typed. Counted on the founder's board: 11 of 168
+role-bearing rows repeat the firm's leading token in the visible role, and 9 of
+those 11 are firm "USC" with a role like "USC junior/senior peer" — where the
+strip would turn a claim about a peer AT USC into a claim about a peer. The
+repetition also costs nothing now: with the firm/role line at full card width
+and the role protected from shrinking, none of those 11 rows truncates at any
+width the grid produces. Zero rows on the demo board are affected at all. The
+untouched original stays in `title=` either way.
+
+**D13. The firm line is one line, and the two-line clamp that briefly stood
+there is retired.** The clamp was correct about its own defect — at 173px of
+room the line rendered "Goldman Sachs · Campus R…", cutting one letter into the
+word that carries the meaning — but a clamp that resolves to two lines on some
+cards and one on others is a variable-height fact, and the card is a fixed
+skeleton. The mid-word cut is answered by giving the line the card's full width
+and protecting the role instead. Reversing this needs new evidence, not the old
+argument: the numbers that retired it are 2 two-line firm lines before and 0
+after, against 0 roles truncated on 384 real rows at every width.
 
 ## Part 4. What the 2026-09-01 pass changed
 
@@ -564,6 +607,17 @@ survive.
    strip. Left standing on purpose: what was deleted is a widget, and whether
    contact sourcing deserves a surface elsewhere is a product question (Open
    uncertainties, 5), not a cleanup.
+4. `.cc-school` has a CSS block in `crm/_styles.html` and no markup renders it.
+   The card carries no school chip; `card.school` is still built by
+   `_contact_card` and read by the search index, but nothing draws it.
+5. `.contact-card` sets `contain-intrinsic-size: auto 128px` alongside
+   `content-visibility: auto`, and the card is 171px to 202px tall depending on
+   width. The placeholder is a floor, so the rendered cards still decide the
+   grid's row height, but the number is now well under the real one and no
+   longer means what its comment says it measures. It also makes the card
+   unmeasurable from JavaScript: `getBoundingClientRect` on an offscreen card
+   returns the placeholder, which is how a "before" and an "after" can measure
+   byte-identical. Disable `content-visibility` for the measurement.
 
 ## Open uncertainties
 

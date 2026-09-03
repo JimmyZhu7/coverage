@@ -1905,8 +1905,11 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      tallest row" — see the block below and the template comment above
      `.contact-scroll`. The number and everything it protects are unchanged;
      it is measured on a different element. The card is taller than 128px
-     now, so the cap shows two rows and the top of a third rather than
-     three, which is the same "there is more below" affordance. */
+     now — 171px, or 202px at four across — so the cap shows two rows and a
+     sliver of the third rather than three, which is the same "there is more
+     below" affordance. The card's own height is not the knob here: it is
+     the fixed skeleton's sum, and shortening the cap to hide the sliver
+     would cost a whole row of contacts. */
   .contact-scroll { max-height: 416px; overflow-y: scroll; }
   .contact-scroll { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
   .contact-scroll::-webkit-scrollbar { width: 12px; }
@@ -1954,9 +1957,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   than pinning. Pinning is now done, which turns the stretch from the cause
   of the dead band into the thing that makes the grid a grid. What `start`
   protected against — one tall card inflating the board — is bounded from
-  the other end instead: `.cc-firm` clamps at two lines and `.cc-name` can
-  only wrap as far as its pills, so no single card can run away with the
-  grid's height.
+  the other end instead, and harder than it was: every slot above the foot
+  is a fixed height now (see the skeleton block below), so no card has a
+  taller contribution to make than any other.
+
+  Equal height was never the whole ask, though, and on its own it did not
+  read as a grid. Where each fact sits INSIDE the card is the other half,
+  and that is what the skeleton below fixes.
   ======================================================================
   {% endcomment %}
   .contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1989,11 +1996,18 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        incidental. A skipped card reports this number as its contribution to
        its grid row, and the grid sizes every `1fr` row to the largest
        contribution it sees: a placeholder above the real height would let
-       offscreen cards set the height of the whole board, and the card
-       measures 128px at a 900px viewport, 146 at 1600 and on a phone, and
-       178 at four across. Below every one of those, the rendered cards
-       decide and the placeholder never does. `auto` means each card
-       remembers its own measured size after it has been painted once. */
+       offscreen cards set the height of the whole board. With the fixed
+       skeleton below, the card measures 171px on a phone and at three
+       across, and 202px at four across where the foot wraps. Below both, so
+       the rendered cards decide and the placeholder never does. `auto`
+       means each card remembers its own measured size after it has been
+       painted once.
+
+       It also means this card cannot be measured from JavaScript while the
+       optimisation is on: `getBoundingClientRect` on an offscreen card
+       returns the placeholder, so a before-and-after can come back
+       byte-identical no matter what changed. Set
+       `content-visibility: visible` for the measurement. */
     content-visibility: auto; contain-intrinsic-size: auto 128px; }
   .contact-card:hover { border-color: var(--accent-line); box-shadow: var(--shadow-1); }
   /* Selected, for bulk actions (`crm:contacts_bulk` — see `#cc-bulk-form`
@@ -2002,7 +2016,71 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      dozen cards are picked across a scrolling grid. */
   .contact-card.is-picked { border-color: var(--accent-line);
     background: var(--accent-soft); }
-  .cc-head { display: flex; gap: var(--s3); align-items: flex-start; }
+  {% comment %}
+  ======================================================================
+  ONE SKELETON, SAME SLOT, EVERY CARD (2026-09-02).
+
+  Asked for directly, looking at the board: "standardize where every info
+  is shown ... ensure the cards are visually very harmonious." Cards were
+  already one height WITHIN a warmth section (see `.contact-grid` above).
+  What was not equal was where each fact sat INSIDE the card, and what that
+  in turn did to the sections. Measured at 1280x800 on the demo board, all
+  49 cards across all five warmth grids at once:
+
+      before   firmTop 43 x41, 65 x5, 89 x3            (3 distinct)
+               footTop 72 x16, 94 x9, 118 x24          (3)
+               height  156 x16, 178 x9, 202 x24        (3)
+      after    firmTop 89 x49, footTop 118 x49, height 202 x49   (1, 1, 1)
+
+  Three sources, all of them "a conditional decides how many lines this
+  card spends":
+
+    1. The pills shared the name's line and there are four of them, each
+       conditional. Parked/gender/tier/region wraps to a second row on one
+       card and not the next, so the firm line below started 22px lower.
+    2. A long name wrapped. "Mariela Jimenez-Sanchez" measures 181px in
+       this face and the name had 173px, so it took two lines and pushed
+       everything under it down.
+    3. The firm line clamped at TWO lines, so a long firm · role bought a
+       second line and a short one did not.
+
+  The frame is fixed instead. Every slot below is a constant height, so a
+  card with fewer facts leaves a GAP where the missing fact would have
+  been rather than sliding the rest of the card up:
+
+      padding      16
+      .cc-head     40   the avatar's own height; name centred against it,
+                        one line or two, never truncated
+      gap           8
+      .cc-tags     16   reserved whether or not a pill renders
+      gap           8
+      .cc-firm     21   exactly one line
+      (free space)      all of it here, above the pinned foot
+      .cc-foot          margin-top: auto
+      padding      16
+
+  which, with the card's 1px border, puts `.cc-tags` at 65px and `.cc-firm`
+  at 89px from the top of every card on the board, and the foot at 118px on
+  every one of them.
+
+  The sum is the card: 200.6px at four across where the foot wraps, 169.4px
+  everywhere else, against measured row heights of 202 and 171. So the free
+  space `.cc-foot`'s `margin-top: auto` collects is about a pixel, and that
+  is the point rather than a waste — the foot lands at a fixed offset
+  because everything above it is a fixed height, not because an auto margin
+  is papering over a variable one. The auto margin stays as the guarantee
+  for the case it was written for: a grid row stretched taller than its
+  content by some future sibling.
+  ======================================================================
+  {% endcomment %}
+  /* Exactly the avatar's height, so the head cannot grow: a one-line name
+     is centred against the 40px avatar and a two-line name (20px line-height
+     x 2) fills it exactly. `min-height` and not `height` because the floor
+     is the point — nothing here is allowed to be SHORTER than the avatar
+     either, which is what would let a card with a one-word name sit its
+     pill row 20px higher than its neighbour. */
+  .cc-head { display: flex; gap: var(--s3); align-items: center;
+    min-height: 40px; }
   /* The explicit selection control. NOT a wrapping <label> like
      `.net-mini` — this card already has its own click targets (Log Touch,
      Edit), so the box has to be its own deliberate target rather than
@@ -2022,16 +2100,72 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
      Written as `input.cc-check` and not `.cc-check`: the shared rule sets
      `margin: 0` at (0,1,1), which a bare class at (0,1,0) loses to no
-     matter where it sits in the cascade. */
-  input.cc-check { margin-top: 12px; }
+     matter where it sits in the cascade.
+
+     The 12px nudge that used to be here is gone (2026-09-02) and the
+     centring is real now. It was arithmetic — (40px avatar − 16px box) / 2
+     — standing in for a centre the row could not do while it was on
+     `align-items: flex-start`. `.cc-head` is `align-items: center` against
+     a fixed 40px row, so the box centres itself and stays centred if the
+     avatar or the box is ever resized; a hard-coded 12px would not. */
+  input.cc-check { margin-top: 0; }
   .cc-avatar { width: 40px; height: 40px; border-radius: 50%; flex: none;
     background: var(--accent-soft); color: var(--accent-ink);
     display: inline-flex; align-items: center; justify-content: center;
     font-weight: var(--w-bold); font-size: var(--fs-s); }
-  .cc-id { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .cc-name { font-weight: var(--w-bold); display: flex; gap: var(--s2);
-    align-items: center; flex-wrap: wrap; }
-  .cc-pill { font-size: 10px; padding: 1px 7px; }
+  {% comment %}
+  `.cc-id` is gone. It was a column wrapper holding the name and the firm
+  line beside the avatar, and it did two things this card no longer wants:
+  it sized itself to its CONTENT (a flex item at `auto`, not `1fr`), so the
+  firm line's available width was a different number on every card — 106px
+  on a card with a short name, 173px on a long one, which is half of why
+  the truncation was unpredictable — and it confined the firm line to the
+  253 − 80 = 173px left over beside the avatar. Firm and pills are the
+  card's own full-width rows now and get all 253px of it.
+  {% endcomment %}
+  /* One line normally, two at most in practice, and never truncated —
+     `.net-mini-name` states the same rule and the reason is the same: a
+     name is the one thing on this card a reader is scanning for, and an
+     ellipsis in it costs more characters than it saves. 20px line-height,
+     not the inherited 24px, so that TWO lines land on exactly the 40px the
+     head reserves: the longest name across both live boards, "Bartholomew
+     Vanderhoeven", measures 204px against 173px of room and does wrap. It
+     wraps inside the frame instead of pushing the frame. */
+  .cc-name { font-weight: var(--w-bold); line-height: 20px;
+    flex: 1 1 auto; min-width: 0; }
+  {% comment %}
+  THE PILL ROW, RESERVED WHETHER OR NOT IT HAS PILLS.
+
+  Four independent conditionals — Parked, gender, tier, region — used to
+  ride the name's line. Measured at 1280 on the demo board: 29 cards showed
+  no pill, 19 showed one row and 1 wrapped to two, so the firm line under
+  them started at 43px, 65px or 89px depending on which facts that
+  particular contact happened to have. The founder's own board is the
+  harder case and has the same shape: "Parked HK" on 81 rows, bare "US" on
+  59, nothing at all on 58.
+
+  Reserved vs. wrapped, both measured, reserve wins:
+
+    RESERVE (this rule) — the row is always in the flow, so `.cc-firm` is
+      at 88px on all 49 cards and a pill-less card shows an empty band
+      where its pills would be. Costs 24px of card height when NO card in
+      the grid has a pill; costs nothing at all otherwise, because
+      `grid-auto-rows: 1fr` was already stretching every card to the
+      tallest one in the grid.
+    WRAP/OMIT — render the row only when it has content, and the 29
+      pill-less demo cards pull their firm line up 24px. Two firm-line
+      offsets in one grid, which is the thing being fixed.
+
+  `nowrap`, and it is safe rather than hopeful: the widest combination the
+  data can produce is Parked + gender + tier + region = 59.6 + 25.5 + 29.2
+  + 46.8 + three 8px gaps = 185px, against 248px of room in the narrowest
+  card the grid can build (the 280px `minmax` floor, less 32px of padding).
+  The `overflow: hidden` is a backstop for a region code longer than
+  anything in the data, not a working part of the layout.
+  {% endcomment %}
+  .cc-tags { display: flex; align-items: center; gap: var(--s2);
+    flex-wrap: nowrap; overflow: hidden; min-height: 16px; }
+  .cc-pill { font-size: 10px; padding: 1px 7px; flex: none; }
   {% comment %}
   Muted on purpose. Park is a choice the student made, not a failure state,
   so it takes the neutral confidence tokens rather than the danger or stale
@@ -2041,26 +2175,87 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   .cc-pill.cc-parked { background: var(--conf-unrated-s); color: var(--conf-unrated-t);
     border-color: var(--conf-unrated-l); }
   {% comment %}
-  TWO lines, not one (2026-09-02). The one-line rule was written when a
-  second line cost the whole board height; with the grid on `1fr` rows a
-  second line costs the same nothing on every card, so the budget went to
-  the reader. What one line actually bought was measured: the column is
-  174px wide and "Goldman Sachs · Campus Recruiting Manager" wants 270px,
-  so the board rendered "Goldman Sachs · Campus R…" — an ellipsis one
-  letter into the word that carries the meaning. Flagged in exactly those
-  terms: the cut lands mid-word and too early to read. Two lines is 348px
-  of room, which fits that title, "Bain & Company · Bain Campus Recruiter"
-  and every firm · role string on the demo board outright.
+  ONE line again (2026-09-02, later the same day), and this rule deliberately
+  supersedes the two-line clamp that stood here.
 
-  Wrapping is `normal`, so a line that still overruns breaks at a SPACE and
-  the ellipsis lands at the end of a word rather than inside one. The clamp
-  is the cap, not a target: it stops a 124-character title from becoming
-  three lines. The full string stays one hover away in the `title=` the
-  template carries alongside it.
+  That clamp was the right answer to its own problem and the wrong one for
+  this card. It was written because a single line at 173px rendered "Goldman
+  Sachs · Campus R…" — an ellipsis one letter into the word carrying the
+  meaning — and two lines at 348px fit every string on the board outright.
+  What it cost is what got flagged next, looking at the same board: "the
+  description of their job cannot spill over into the second line." A clamp
+  that is two lines on some cards and one on others is a variable-height
+  fact in a fixed skeleton, and this card is a fixed skeleton now (see the
+  block above `.cc-head`).
+
+  The mid-word cut is answered from the other direction instead — by giving
+  the line 46% more room and then spending it on the right half:
+
+    ROOM. The line is a full-width row of the card now, not a column beside
+    the 40px avatar: 253px at 1280 and 283px at 375, against 173px before.
+    That alone fits "Morgan Stanley · IB Associate Tech East" (233px) and
+    every firm · role string on the demo board but one.
+
+    SPLIT. Firm and role are separate spans that truncate independently, and
+    the firm is the half that gives way. Two people at the same firm are told
+    apart by the ROLE, never by the firm — a board grouped by warmth, with a
+    whole Covered Firms panel above it, does not need this line to carry the
+    firm at full length. Measured against the founder's own 323-contact
+    board, the four longest strings and what has to come off at 1280:
+
+        Standard Chartered · Incoming IB Summer Analyst   298px   -45
+        Bain & Company · Bain Campus Recruiting Lead      281px   -27
+        Goldman Sachs · Campus Recruiting Manager         270px   -17
+        Morgan Stanley · IB Associate Tech East           233px    fits
+
+    `flex-shrink: 0` on the role, so it gives up NOTHING and the firm
+    absorbs the whole deficit. A weighted ratio was tried first and is not
+    good enough: at 100-to-1 the role's share of Rachel Lin's 18.2px deficit
+    was 0.34px — a third of a pixel — and Chrome still rendered "Campus
+    Recruiting Manag…", because `text-overflow: ellipsis` fires on ANY
+    overflow and then eats three more characters to make room for the glyph
+    it is adding. A sub-pixel deficit costs four characters. There is no
+    ratio that is safe; the role's shrink has to be zero.
+
+    FLOOR, and it is on the ROLE, not the firm. The firm must not shrink to
+    "S…" — below about seven characters a firm name has stopped identifying
+    anything — but the obvious way to say that, `min-width: 3.5em` on the
+    firm, is wrong in both directions. Rendered against all 384 real
+    firm/role pairs on both boards at the line widths this grid produces:
+
+        floor written as    248px line    role text lost on
+          min-width 5.5em                 4 of 323, and 1 of 61
+          max-width on the role           0 rows, every width
+
+    A `min-width` is not only a floor, it is also a width: it pads "BCG" and
+    "USC" out to the floor and hands the reserved pixels to nobody, which is
+    what cut those five roles and what put a ragged gap in front of the "·"
+    on every short-firm card. Capping the ROLE at `100% - 3.85em` (the 3.5em
+    floor plus the 0.35em gap) guarantees the firm that same 3.5em in the
+    only case that needs it — a role long enough to eat the whole line —
+    while a short firm keeps its natural width and the separator sits where
+    the name ends. It is also what makes `flex-shrink: 0` safe: the role can
+    never be wider than the line minus the floor, so the firm always has
+    somewhere to shrink to and nothing is ever clipped without an ellipsis.
+
+  `min-height: 1lh` and NOT `align-items: baseline`. Both are about the
+  same trap: a flex item with `overflow: hidden` synthesizes its baseline
+  from its bottom margin edge, so baseline alignment measured this row at
+  11.6px instead of 20.8 and the firm line sat on top of the foot. Default
+  stretch alignment measures it correctly. `1lh` then holds the row open
+  for the contact who has neither firm nor company text — an empty flex
+  container is 0px tall, and that card would pull its foot 21px up.
+
+  The `title=` on the parent carries the whole untouched string — full firm,
+  full uncompressed role — so nothing here is lost, only folded.
   {% endcomment %}
   .cc-firm { font-size: var(--fs-s); color: var(--ink-2);
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
-    overflow: hidden; }
+    display: flex; column-gap: 0.35em; min-width: 0; min-height: 1lh;
+    white-space: nowrap; overflow: hidden; }
+  .cc-firm-name { flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; }
+  .cc-firm-role { flex: 0 0 auto; max-width: calc(100% - 3.85em);
+    overflow: hidden; text-overflow: ellipsis; }
   .cc-school { align-self: flex-start; background: var(--stale-s); color: var(--stale-t);
     border-color: var(--stale-l); }
   {% comment %}

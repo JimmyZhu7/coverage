@@ -710,52 +710,79 @@
                   the stated fact.{% endcomment %}
                   <span class="cc-avatar stale-{{ card.stale_tint }}" style="--stale: {{ card.stale_pct }}"
                         title="{% if card.days_since is not None %}{{ card.days_since }}d of this contact's keep-warm window used{% else %}Never contacted{% endif %}">{{ card.initials }}</span>
-                  <div class="cc-id">
-                    <span class="cc-name">{{ card.c.name|smart_person_name|smart_title }}
-                      {% comment %}
-                      A parked thread is a state the board could not show.
-                      Measured on the CRM side: "Emailed, No Reply" mixes 92
-                      people still in play with 129 the student has stopped
-                      following up, and the Advocate row was two parked
-                      people — a bucket reading as live work when none of it
-                      was. This is a STATUS chip, so it keeps the pill (the
-                      control-shape rule in coverage.css §6 draws exactly
-                      that line), and it is muted rather than coloured: park
-                      is a decision the student made on purpose, not a
-                      warning.
-
-                      Both keys are checked and neither has to exist. The
-                      card context grows a `parked` bool and a `thread_state`
-                      on another branch; Django resolves a missing key to the
-                      empty string rather than raising, so this renders
-                      nothing at all until that branch lands and needs no
-                      coordination to merge in either order.
-                      {% endcomment %}
-                      {% if card.parked or card.thread_state == "parked" or card.c.thread_state == "parked" %}<span class="pill cc-pill cc-parked" title="You stopped following up on this thread. Nothing is scheduled against it.">Parked</span>{% endif %}
-                      {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
-                      {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
-                      {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
-                    </span>
-                    {% comment %}
-                    `title=` carries the whole string for the ellipsis case
-                    below — same "one hover away" doctrine `.net-mini-firm`
-                    states for its own truncation.
-                    {% endcomment %}
-                    {% comment %}
-                    Role is `smart_role`-compressed, not `smart_title`-only
-                    (2026-08-31): it is freeform text a student typed about
-                    a real person, and ranges from "IB Analyst" to a full
-                    sentence with a parenthetical and a quoted aside. The
-                    `title=` attribute keeps the untouched original --
-                    still `smart_title`-cased, never compressed -- one
-                    hover away, same doctrine as the truncation case above.
-                    {% endcomment %}
-                    <span class="cc-firm"
-                          title="{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}">
-                      {% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_role|smart_title }}{% endif %}
-                    </span>
-                  </div>
+                  {% comment %}
+                  The name and NOTHING else on this line (2026-09-02). The
+                  pills used to share it, and that is what made the board
+                  ragged: they are four independent conditionals, so the
+                  line was one row on 41 of 49 demo cards, two on five and
+                  three on three, and every fact below started at whichever
+                  height that card's pills happened to land on. The pills
+                  have their own reserved row below now; see `.cc-tags`.
+                  {% endcomment %}
+                  <span class="cc-name">{{ card.c.name|smart_person_name|smart_title }}</span>
                 </div>
+                {% comment %}
+                THE PILL ROW IS ALWAYS RENDERED, even with nothing in it.
+
+                A parked thread is a state the board could not show.
+                Measured on the CRM side: "Emailed, No Reply" mixes 92
+                people still in play with 129 the student has stopped
+                following up, and the Advocate row was two parked people — a
+                bucket reading as live work when none of it was. This is a
+                STATUS chip, so it keeps the pill (the control-shape rule in
+                coverage.css §6 draws exactly that line), and it is muted
+                rather than coloured: park is a decision the student made on
+                purpose, not a warning.
+
+                The `parked` keys are both checked and neither has to exist.
+                The card context grows a `parked` bool and a `thread_state`
+                on another branch; Django resolves a missing key to the empty
+                string rather than raising, so this renders nothing at all
+                until that branch lands and needs no coordination to merge in
+                either order.
+                {% endcomment %}
+                <span class="cc-tags">
+                  {% if card.parked or card.thread_state == "parked" or card.c.thread_state == "parked" %}<span class="pill cc-pill cc-parked" title="You stopped following up on this thread. Nothing is scheduled against it.">Parked</span>{% endif %}
+                  {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
+                  {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
+                  {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
+                </span>
+                {% comment %}
+                Firm and role, one line, in two spans that truncate
+                independently — and the ROLE is the one that survives.
+
+                They used to be a single text node, so a long firm ate the
+                budget before the role started: at 173px of room "Goldman
+                Sachs · Campus Recruiting Manager" rendered as "Goldman
+                Sachs · Campus R…", cutting one letter into the word that
+                carries the meaning. Two people at the same firm are told
+                apart by the role, never by the firm, so the firm is the half
+                that gives way. See `.cc-firm` in crm/_styles.html for how
+                far it gives way, and for the floor that stops it
+                disappearing entirely.
+
+                The separator is the first character of the ROLE span, not a
+                span of its own and not loose text between them: a contact
+                with no role then renders no dangling "·", and a role cut by
+                the ellipsis still opens with one, so the reader can see
+                there is a role there at all. The space in front of it is a
+                flex `column-gap` rather than a typed space — the two spans
+                are flex items, and a leading space inside a flex item is
+                collapsed away, which rendered "Goldman Sachs· Campus
+                Recruiting".
+
+                `title=` carries the whole untouched string — full firm, full
+                uncompressed role, `smart_title`-cased but never cut. Same
+                "one hover away" doctrine `.net-mini-firm` states for its own
+                truncation. Role is `smart_role`-compressed in the VISIBLE
+                span only (2026-08-31): it is freeform text a student typed
+                about a real person and ranges from "IB Analyst" to a full
+                sentence with a parenthetical and a quoted aside.
+                {% endcomment %}
+                <span class="cc-firm"
+                      title="{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}{% if card.c.role %} · {{ card.c.role|smart_title }}{% endif %}">
+                  <span class="cc-firm-name">{% if card.c.firm %}{{ card.c.firm.name|smart_title }}{% else %}{{ card.c.firm_text|smart_title }}{% endif %}</span>{% if card.c.role %}<span class="cc-firm-role">· {{ card.c.role|smart_role|smart_title }}</span>{% endif %}
+                </span>
                 {% comment %}
                 No description line and no on-card email, on the founder's
                 own call reviewing his live board ("think about if there
