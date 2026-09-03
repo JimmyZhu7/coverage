@@ -88,3 +88,37 @@ def test_the_chat_title_keeps_the_shared_headers_own_spacing(signed_in):
     )
     # The title wears the shared class and nothing else.
     assert 'class="pagehead-title">Talk to Coverage<' in _markup(html)
+
+
+def test_the_composer_textarea_owns_its_own_height(signed_in):
+    """Reported live: "the box does not get bigger when there is more than
+    one line, it should adjust with the word and have a cap".
+
+    The cause was not the auto-grow script, which existed, ran on every
+    value-setting path, and correctly computed 82px for a three-line "Talk
+    about it" opener. It was that `.as-composer-inner` is a COLUMN flex
+    container, so the main axis is vertical, and the textarea carried
+    `flex: 1`. That resolves to `flex-basis: 0%` on the height, and
+    flex-basis beats the `height` property for a flex item's main size, so
+    the inline `height: 82px` sat in the DOM looking right while the used
+    height stayed 36.5px and the sentence was clipped. Measured live, and
+    `!important` did not move it either, because it was never a specificity
+    fight.
+
+    So the rule under test is the flex declaration, not the script: the
+    textarea must not take a flex-basis on the axis it needs to grow along.
+    """
+    body = signed_in.get(reverse("assistant:chat")).content.decode()
+    css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", body, re.S))
+    rule = re.search(r"\.as-composer textarea \{(.*?)\}", css, re.S)
+    assert rule, ".as-composer textarea lost its rule"
+    decls = rule.group(1)
+
+    assert "flex: 0 0 auto" in decls, (
+        "the composer textarea took a flex-basis again. In this column "
+        "container that governs its height and silently overrides the "
+        "auto-grow script, which is the exact bug this pins."
+    )
+    # The cap the founder asked for, and the scroll past it.
+    assert "max-height: 200px" in decls
+    assert "overflow-y: auto" in decls

@@ -578,7 +578,25 @@ materials.
     background: transparent; color: var(--ink-3); cursor: pointer; font-size: 13px; line-height: 1;
     display: flex; align-items: center; justify-content: center; }
   .as-attach-chip-remove:hover { background: var(--surface); color: var(--danger); }
-  .as-composer textarea { flex: 1; resize: none; border: none; background: transparent;
+  /* `flex: 0 0 auto`, NOT `flex: 1`, and the difference is the whole reason
+     the box would not grow. `.as-composer-inner` is a COLUMN flex container,
+     so the main axis is vertical and `flex: 1` resolves to `flex-basis: 0%`
+     on the HEIGHT. Flex-basis beats the `height` property for a flex item's
+     main size, so `autoSize` below could set `style.height = "82px"`, the
+     inline style would sit there in the DOM looking correct, and the used
+     height stayed 36.5px, one row, with the rest of the sentence clipped.
+     Measured on a real "Talk about it" prefill: inline 82px, used 36.5px,
+     and `!important` did not move it either, because this was never a
+     specificity fight.
+
+     The rule predates the container being a column. In a row it was
+     harmless: basis governed the width, which is what `flex: 1` was there
+     to stretch. Now the height is the item's own business, `autoSize` owns
+     it, `max-height` caps it at 200px and `overflow-y` scrolls past that.
+     Verified live: grows to 82px on a three-line opener, stops at 200px on
+     a 2000-word paste and scrolls, returns to 37px when emptied. */
+  .as-composer textarea { flex: 0 0 auto; width: 100%; resize: none; border: none;
+    background: transparent;
     font-family: var(--font-ui); font-size: var(--fs-m); line-height: 1.5;
     max-height: 200px; overflow-y: auto; padding: 7px 0; color: var(--ink); }
   /* The pill's own :focus-within ring above is the composer's ONLY focus
