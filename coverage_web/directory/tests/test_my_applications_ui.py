@@ -27,6 +27,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from analytics.models import UserOpportunity
+from crm.models import Contact
 from directory.models import Firm, Opportunity
 from directory.views import _urgency_band
 
@@ -278,8 +279,16 @@ def test_rolling_lens_only_claims_reviewed_as_they_arrive_where_stated(client, d
 @pytest.mark.django_db
 def test_an_empty_lens_offers_a_way_out(client, db):
     """Empty states get a message AND an action. A student tracking only
-    rolling roles sees an empty Closing Soon, and it must not be a blank
-    region."""
+    undated roles sees an empty Closing Soon, and it must not be a blank
+    region.
+
+    REWRITTEN 2026-09-02: this used to assert "closes in the next" inside the
+    box, which pinned the day count to the empty state itself. The count is
+    now stated once, on the lens's own note directly above the box, so the
+    box's sentence points at it instead of printing the same number a second
+    time. `test_the_closing_window_is_stated_once` below is where that lives;
+    what this test protects — a message and a way out, never a bare region —
+    is unchanged and asserted on the sentence that ships."""
     firm = Firm.objects.create(name="Evercore", slug="evercore")
     o = Opportunity.objects.create(
         firm=firm, url="https://x/1", title="Summer Analyst",
@@ -294,7 +303,7 @@ def test_an_empty_lens_offers_a_way_out(client, db):
     # anchor on the rendered element, not on the first textual match.
     empty = body[body.index('<p class="apps-lens-empty">'):][:600]
 
-    assert "closes in the next" in empty
+    assert "Nothing you're tracking closes" in empty
     assert reverse("opportunities") in empty
 
 
@@ -744,3 +753,266 @@ def test_a_hidden_row_states_no_place_the_posting_did_not(client):
     section = _hidden_section(client)
     assert "Discovery Program: Growth Equity" in section
     assert "apps-loc" not in section
+
+
+# ---------------------------------------------------------------------------
+# THE 2026-09-02 COPY AND WEIGHT PASS.
+#
+# The founder read this page and said two things about it. Of the lens band:
+# "not clean enough, simplify wording, make it straightforward, do not do big
+# changes to layout". Of the stage cards: "so big and fat and ugly, not simple
+# enough, simplify and make visually harmonious".
+#
+# Both complaints are one complaint said twice — the band explained itself in
+# four stacked layers of prose before its first row, and a card printed its
+# firm's name three times before its first control. Nothing below deletes a
+# fact: the band's dropped sentence is said by the eyebrow, the heading and
+# the fractions it used to sit between, and the card's dropped firm names are
+# on the caps line at the top of the same card and on each block's own hover.
+# These tests pin the strings that went AND the ones that had to survive them,
+# which is the half a "make it shorter" pass loses first.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.django_db
+def test_the_band_no_longer_explains_its_own_structure_in_prose(client, pipeline):
+    """The intro sentence is retired, and every clause of it still ships.
+
+    It read "The same N live roles, sorted by deadline instead of stage" — a
+    fourth statement of a claim the band already makes three ways. The eyebrow
+    says the roles are the same roles, the heading says the cut is by
+    deadline, and every lens prints the live total itself as "of N live". A
+    sentence whose every clause is elsewhere on the same screen is the thing
+    the founder was reading past."""
+    body = client.get(reverse("my_applications")).content.decode()
+
+    assert "sorted by deadline instead of stage" not in body
+    assert "apps-lenses-intro" not in body, "the class goes with the sentence"
+    # The three affordances that were always load-bearing are untouched.
+    assert "Cross-section, not extra roles" in body
+    assert "By deadline" in body
+    assert "of 3 live" in body
+    assert 'href="#stage-saved"' in body
+
+
+@pytest.mark.django_db
+def test_a_lens_note_earns_its_line_or_does_not_get_one(client, db):
+    """Every lens carried a heading AND a definition under it, and two of the
+    five definitions were the heading again in other words: "Deadline Passed /
+    The posted date has gone by", "Rolling / No posted deadline". Those two
+    are empty now, and the template renders no note element for them rather
+    than an empty paragraph still carrying a note's margin.
+
+    The three that remain each say something their heading cannot: a window, a
+    boundary, and what happens to a pulled posting next."""
+    firm = Firm.objects.create(name="SIG", slug="sig")
+
+    def opp(n, days, status="open"):
+        return Opportunity.objects.create(
+            firm=firm, url=f"https://x/{n}", title=f"Summer Analyst {n}",
+            bucket="internship", status=status,
+            deadline=None if days is None else TODAY + timedelta(days=days),
+        )
+
+    user = _user()
+    for o in (opp(1, 3), opp(2, 94), opp(3, None), opp(4, -5),
+              opp(5, None, status="closed")):
+        UserOpportunity.all_objects.create(user=user, opportunity=o,
+                                           applied_status="saved")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    notes = {lens["key"]: lens["note"] for lens in resp.context["lenses"]}
+
+    assert notes["closing"] == "Within 10 days."
+    assert notes["later"] == "More than 10 days away."
+    assert notes["posting_closed"] == "Still on your list."
+    assert notes["passed"] == "", "the heading already says the posted date has gone"
+    assert notes["rolling"] == "", "the heading already says there is no deadline"
+
+    body = resp.content.decode()
+    assert "The posted date has gone by" not in body
+    assert "Taken down by the firm" not in body, (
+        '"Posting Closed" says that, and each row says it in full with a time')
+    assert '<p class="apps-lens-note"></p>' not in body
+    # A lens with no note must not lose the gap the note used to hold.
+    assert "margin-top: var(--s3)" in _rule(
+        _page_css(client), ".apps-lens h3 + .apps-lens-list")
+
+
+@pytest.mark.django_db
+def test_the_undated_lens_stops_claiming_rolling_about_every_row(client, db):
+    """The heading was the last place on this surface making the blanket
+    "Rolling" claim that the feed and this band's own rows both retracted (see
+    `test_rolling_lens_only_claims_reviewed_as_they_arrive_where_stated`
+    above, and test_feed_honesty.py). The bucket is built from the ABSENCE of
+    a date — views.py's own comment beside it says exactly that — so it is
+    named for that, and "Rolling" survives only where a posting's own text
+    earns it.
+
+    It also settles what the founder read: under a heading that said
+    "Rolling", one row saying "Rolling" and three saying "No date posted"
+    looked like two spellings of the heading rather than two different
+    facts."""
+    firm = Firm.objects.create(name="Evercore", slug="evercore")
+    silent = Opportunity.objects.create(
+        firm=firm, url="https://x/silent", title="Silent Analyst",
+        bucket="internship", status="open", deadline=None,
+    )
+    stated = Opportunity.objects.create(
+        firm=firm, url="https://x/stated", title="Stated Analyst",
+        bucket="internship", status="open", deadline=None,
+        raw={"facts": {"rolling": {"value": "Rolling",
+                                   "phrase": "reviewed on a rolling basis"}}},
+    )
+    user = _user()
+    for o in (silent, stated):
+        UserOpportunity.all_objects.create(user=user, opportunity=o,
+                                           applied_status="saved")
+    client.force_login(user)
+
+    resp = client.get(reverse("my_applications"))
+    by_key = {lens["key"]: lens for lens in resp.context["lenses"]}
+
+    assert by_key["rolling"]["key"] == "rolling", "the key is a call site, not copy"
+    assert by_key["rolling"]["label"] == "No Deadline"
+
+    body = resp.content.decode()
+    assert "No Deadline" in body
+    # The earned claim and the honest silence both survive, on their own rows.
+    assert "reviewed on a rolling basis" in body
+    assert "No date posted" in body
+
+
+@pytest.mark.django_db
+def test_the_closing_window_is_stated_once(client, db):
+    """"Within 10 days." on the lens, then "Nothing you're tracking closes in
+    the next 10 days." in the box directly beneath it — the same number twice
+    in adjacent sentences. The note keeps it; the empty state points at it.
+
+    REWRITES the number assertion in `test_an_empty_lens_offers_a_way_out`
+    above, whose premise was that the count had to be inside the box. The rule
+    that test protects — a message AND a way out, never a bare region — is
+    asserted here in full."""
+    firm = Firm.objects.create(name="Evercore", slug="evercore")
+    o = Opportunity.objects.create(
+        firm=firm, url="https://x/1", title="Summer Analyst",
+        bucket="internship", status="open", deadline=None,
+    )
+    user = _user()
+    UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+    client.force_login(user)
+
+    body = client.get(reverse("my_applications")).content.decode()
+    empty = body[body.index('<p class="apps-lens-empty">'):][:600]
+
+    # The window, once, on the lens that defines it.
+    assert body.count("Within 10 days.") == 1
+    assert "closes in the next 10 days" not in body
+    # One fact and one action, still.
+    assert "Nothing you're tracking closes that soon" in empty
+    assert reverse("opportunities") in empty
+
+
+@pytest.mark.django_db
+def test_a_stage_card_names_its_firm_once(client, db):
+    """The card's caps line is the firm's name. The people block under it said
+    it again ("You know 7 people at Bank of America") and the overflow link a
+    third time ("5 more at Bank of America") — three prints of one name on a
+    cell 300px wide, both of which the founder read back. Both now point at
+    the card they are on and keep the name on their own hover.
+
+    The COUNT is what could not go with them: "+3 more" under two names is
+    only readable because the head above it says how many there are."""
+    firm = Firm.objects.create(name="Bank of America", slug="bofa")
+    o = Opportunity.objects.create(
+        firm=firm, url="https://x/1", title="Campus Insight Forum",
+        bucket="internship", status="open",
+    )
+    user = _user()
+    UserOpportunity.all_objects.create(user=user, opportunity=o,
+                                       applied_status="submitted")
+    for i in range(5):
+        Contact.all_objects.create(user=user, firm=firm, name=f"Person {i}",
+                                   warmth="replied")
+    client.force_login(user)
+
+    body = client.get(reverse("my_applications")).content.decode()
+    card = body[body.index('<article class="apps-card">'):]
+    card = card[:card.index("</article>")]
+
+    assert "You know 5 people here" in card
+    assert "+3 more" in card, "the plus is this page's own 'and this many beyond' shape"
+    # Visible text only — the firm name is still on both blocks' `title`, and
+    # a raw-markup count would be answered by the hovers this pass created.
+    visible = re.sub(r"<[^>]+>", " ", card)
+    assert visible.count("Bank of America") == 1, (
+        "the caps line at the top of the card is the only place it is printed")
+    assert "Bank of America" in card[card.index("rp-head"):], (
+        "and it is on the head's hover, moved rather than dropped")
+
+
+@pytest.mark.django_db
+def test_the_empty_people_block_occupies_the_space_the_row_gives_it(client, db):
+    """The hollow card. These cards are a stretched grid, so a card that knows
+    nobody at the firm is handed the height of the tallest card in its row and
+    has one grey sentence to fill it with. Measured at 1512 on the founder's
+    own row: 72.2px of nothing between the role and that sentence, on a people
+    block 28.2px tall.
+
+    Moving the sentence does not help — pinning it up under the role puts the
+    same emptiness in one 119px piece at the bottom instead. The fix is the
+    block taking the space rather than sitting in one end of it, which is what
+    these rules do. Anchored on the class names and on the rendered <style>
+    block, so they fail if they migrate to a stylesheet this page does not
+    include — the exact defect recorded on the reversal list above."""
+    firm = Firm.objects.create(name="Point72", slug="point72")
+    o = Opportunity.objects.create(
+        firm=firm, url="https://x/1", title="Academy Case Competition",
+        bucket="internship", status="open",
+    )
+    user = _user()
+    UserOpportunity.all_objects.create(user=user, opportunity=o,
+                                       applied_status="submitted")
+    client.force_login(user)
+
+    body = client.get(reverse("my_applications")).content.decode()
+    assert "rp-empty" in body, "the empty block needs a hook the card can style"
+
+    css = _page_css(client)
+    fill = _rule(css, ".apps-card .rp-compact.rp-empty")
+    assert "flex: 1 1 auto" in fill, "it grows into the slack rather than sitting in it"
+    assert "justify-content: center" in fill
+    # `.apps-foot`'s own auto margin would eat the slack first, so the card
+    # has to release it — otherwise the block above can never grow.
+    assert "margin-top: 0" in _rule(css, ".apps-card:has(.rp-empty) .apps-foot")
+
+
+@pytest.mark.django_db
+def test_the_card_lost_padding_and_kept_its_people(client, db):
+    """"So big and fat", answered without taking a name off a card. Every
+    reduction is one step of the spacing scale — the card's block padding s4
+    to s3, its gaps s2 to 6px, a person row 5px to 3px, the footer's rule s2
+    to s1 — and the people block, which is a third of the card and the most
+    valuable thing on it, keeps every name, role and day-count it had.
+
+    Measured at 1512 across the founder's own row of four: 372.9px to 335.9px,
+    with all four still exactly equal because the grid stretches them."""
+    firm = Firm.objects.create(name="Evercore", slug="evercore")
+    o = Opportunity.objects.create(
+        firm=firm, url="https://x/1", title="Summer Analyst",
+        bucket="internship", status="open",
+    )
+    user = _user()
+    UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
+    client.force_login(user)
+
+    css = _page_css(client)
+    card = _rule(css, ".apps-card")
+    assert "padding: var(--s3) var(--s4)" in card
+    assert "gap: 6px" in card
+    assert "padding: 3px var(--s2)" in _rule(css, ".apps-card .rp-person")
+    assert "padding-top: var(--s1)" in _rule(css, ".apps-foot")
+    # The block itself is untouched below the rhythm: no colour, no size, no
+    # cap on how many names print.
+    from directory.views import APPS_PEOPLE_MAX
+    assert APPS_PEOPLE_MAX == 2

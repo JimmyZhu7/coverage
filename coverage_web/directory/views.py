@@ -5758,16 +5758,24 @@ def _my_applications_context(request):
             "items": shut,
             # Kept short on purpose — see the template's own note on why the
             # lens band cut its prose (2026 redesign: "cleaner, less words").
-            # Each row still carries the fuller sentence itself, via
-            # `_posting_closed_note`, for the student reading that one row.
-            "note": "Taken down by the firm. Stays on your list.",
+            # "Taken down by the firm" went with that cut: it is what the
+            # heading already says, and every row below states it in full,
+            # with a timestamp and a stage-aware second clause, via
+            # `_posting_closed_note`. What the heading does NOT say — and no
+            # row says for a role that was only ever saved — is that a pulled
+            # posting is still tracked, so that is the half the note keeps.
+            "note": "Still on your list.",
             "empty_state": False,
         },
         {
             "key": "passed",
             "label": "Deadline Passed",
             "items": passed,
-            "note": "The posted date has gone by.",
+            # No note. "The posted date has gone by" was the heading again in
+            # different words, which is the one thing a note under a heading
+            # must not be. The other four notes each state something their
+            # heading cannot: a window, a boundary, or what happens next.
+            "note": "",
             "empty_state": False,
         },
         {
@@ -5786,16 +5794,23 @@ def _my_applications_context(request):
         },
         {
             "key": "rolling",
-            "label": "Rolling",
+            # "No Deadline", not "Rolling". The key stays `rolling` (call
+            # sites and tests read it) but the heading no longer does, for
+            # the reason this bucket is built the way it is a few lines up:
+            # it is defined by the ABSENCE of a date, and "Rolling" is a
+            # CLAIM only the posting itself can make. The feed retracted the
+            # blanket version of that claim (see the feed item builder's
+            # `rolling` branch and test_feed_honesty.py), and the rows here
+            # retracted it too — a row says "Rolling" only when its own text
+            # states rolling review, and "No date posted" otherwise. The
+            # heading was the last place on this surface still asserting it
+            # about all of them, which also made the two row markers under it
+            # read as two spellings of the heading rather than as the
+            # different facts they are.
+            "label": "No Deadline",
             "items": rolling,
-            # "Reviewed as they arrive, so apply early" used to be stated for
-            # every row here, the same invented claim the feed retracted
-            # (views.py's feed item builder, ~line 1338: most undated roles
-            # never say how they're reviewed). Rows whose own posting states
-            # rolling review are marked "Rolling" individually below
-            # (r.rolling_stated); this note now only says what is true of
-            # the whole bucket.
-            "note": "No posted deadline.",
+            # No note: "No posted deadline" was the heading in other words.
+            "note": "",
             "empty_state": True,
         },
     ]

@@ -13,13 +13,26 @@ Takes `net` ({firm_name, firm_slug, people, total, more}) and an optional
 `compact` flag for the My Applications card, which is one cell of a grid and
 gets the tighter two-name form. `net` is None — and this partial is never
 included — when there is no firm to join on.
+
+WHY COMPACT DROPS THE FIRM NAME FROM ITS OWN PROSE. On a My Applications card
+the firm is already the first line of the card, in caps, three lines up. The
+full form said it twice more — in the head and again in the "N more at X"
+link — so one 300px card printed "Bank of America" three times. Compact says
+"here" instead and keeps the firm name on the `title` of each, the same
+moved-to-a-hover call this page's location cap and stage pill already make.
+The drawer and the firm page pass no `compact` and are untouched: there the
+block stands alone, with no card around it naming the firm.
 {% endcomment %}
-<div class="rp panel panel--inset panel--flat{% if compact %} rp-compact{% endif %}">
+<div class="rp panel panel--inset panel--flat{% if compact %} rp-compact{% endif %}{% if not net.people %} rp-empty{% endif %}">
   {% if net.people %}
     {% comment %}The sentence the PM review asked for, in the second person
     and with a number in it. "You know 1 person here" is the whole join said
     once; the rows under it are who.{% endcomment %}
-    <p class="rp-head">You know {{ net.total }} {{ net.total|pluralize:"person,people" }} at {{ net.firm_name|smart_title }}</p>
+    {% if compact %}
+      <p class="rp-head" title="At {{ net.firm_name|smart_title }}">You know {{ net.total }} {{ net.total|pluralize:"person,people" }} here</p>
+    {% else %}
+      <p class="rp-head">You know {{ net.total }} {{ net.total|pluralize:"person,people" }} at {{ net.firm_name|smart_title }}</p>
+    {% endif %}
     <div class="rp-people">
       {% for p in net.people %}
         {% comment %}Straight to the contact page — that is where Compose,
@@ -47,15 +60,33 @@ included — when there is no firm to join on.
       {% endfor %}
     </div>
     {% if net.more %}
-      <p class="rp-more"><a href="{% url 'directory:firm_detail' net.firm_slug %}">{{ net.more }} more at {{ net.firm_name|smart_title }}</a></p>
+      <p class="rp-more"><a href="{% url 'directory:firm_detail' net.firm_slug %}"
+        {% if compact %}title="{{ net.more }} more at {{ net.firm_name|smart_title }}"{% endif %}
+        {% comment %}"+5 more", not "5 more": the leading plus is this page's
+        own convention for "and this many beyond what is printed" — the
+        location cap on the card above and on every lens row uses exactly
+        that shape — and it is what keeps a bare number under two names from
+        reading as a third, unnamed person.{% endcomment %}
+        >{% if compact %}+{% endif %}{{ net.more }} more{% if not compact %} at {{ net.firm_name|smart_title }}{% endif %}</a></p>
     {% endif %}
   {% else %}
     {% comment %}Empty is a real answer, not a blank. It names the firm (a
     generic "add a contact" is advice; "add someone at Goldman Sachs" is a
     next action) and the link pre-fills that firm on the add form — the same
     `?firm=<slug>` the firm page's own button uses, handled by
-    crm.views.contact_new.{% endcomment %}
-    <p class="rp-none">Nobody at {{ net.firm_name|smart_title }} yet.
-      <a href="{% url 'crm:contact_new' %}?firm={{ net.firm_slug }}">Add someone</a>.</p>
+    crm.views.contact_new.
+
+    Compact says "here" for the reason at the top of this file: on a My
+    Applications card the firm is the card's own first line, so "here" points
+    at something the reader is already looking at rather than at nothing. The
+    name is still on the hover, and the link still pre-fills the firm.
+    {% endcomment %}
+    {% if compact %}
+      <p class="rp-none" title="At {{ net.firm_name|smart_title }}">Nobody here yet.
+        <a href="{% url 'crm:contact_new' %}?firm={{ net.firm_slug }}">Add someone</a>.</p>
+    {% else %}
+      <p class="rp-none">Nobody at {{ net.firm_name|smart_title }} yet.
+        <a href="{% url 'crm:contact_new' %}?firm={{ net.firm_slug }}">Add someone</a>.</p>
+    {% endif %}
   {% endif %}
 </div>

@@ -257,6 +257,17 @@ def test_drawer_costs_one_query_for_its_people(django_assert_num_queries):
 
 @pytest.mark.django_db
 def test_saved_role_card_names_your_people_at_that_firm(client):
+    """The compact form says "here", not the firm's name.
+
+    REWRITTEN 2026-09-02, and the premise it retires is that this surface
+    should read exactly like the drawer. It cannot: on a My Applications card
+    the firm is already the card's own first line, in caps, so the full
+    sentence printed "Goldman Sachs" a second time — and the overflow link
+    below it a third, on one 300px cell. The founder read the card and named
+    both repeats. What is pinned instead is that the join, the count and the
+    person are all still said, and that the firm name is on the hover rather
+    than deleted. The drawer's own wording is asserted unchanged above.
+    """
     user = _user()
     firm = _firm()
     opp = _role(firm)
@@ -266,13 +277,20 @@ def test_saved_role_card_names_your_people_at_that_firm(client):
 
     body = client.get(reverse("my_applications")).content.decode()
 
-    assert "You know 1 person at Goldman Sachs" in body
+    assert "You know 1 person here" in body
+    assert "You know 1 person at Goldman Sachs" not in body, (
+        "the card already names the firm on its own first line")
+    assert 'title="At Goldman Sachs"' in body, "the name moved to the hover, not away"
     assert "Maya Chen" in body
     assert "24d" in body
 
 
 @pytest.mark.django_db
 def test_saved_role_card_empty_state_prefills_the_firm(client):
+    """Same rewrite as the test above, on the other state. The prompt still
+    names a next action and still pre-fills the firm on the add form; it just
+    points at the firm with "here" instead of spelling it out under a heading
+    that already has."""
     user = _user()
     opp = _role(_firm())
     UserOpportunity.all_objects.create(user=user, opportunity=opp)
@@ -280,7 +298,9 @@ def test_saved_role_card_empty_state_prefills_the_firm(client):
 
     body = client.get(reverse("my_applications")).content.decode()
 
-    assert "Nobody at Goldman Sachs yet" in body
+    assert "Nobody here yet" in body
+    assert "Nobody at Goldman Sachs yet" not in body
+    assert 'title="At Goldman Sachs"' in body
     assert f"{reverse('crm:contact_new')}?firm=goldman-sachs" in body
 
 
@@ -303,6 +323,12 @@ def test_a_done_row_gets_no_networking_prompt_but_keeps_real_names(client):
 
     body = client.get(reverse("my_applications")).content.decode()
 
+    # The card's prompt says "here" now (see the two tests above), so the
+    # absence has to be asserted against the string the card would actually
+    # print — "Nobody at Nomura yet" is a sentence this surface can no longer
+    # produce, and a test asserting its absence would pass on a page that had
+    # gone right back to nagging every finished row.
+    assert "Nobody here yet" not in body
     assert "Nobody at Nomura yet" not in body
     assert "Maya Chen" in body
 
