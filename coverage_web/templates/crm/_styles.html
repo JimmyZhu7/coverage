@@ -1984,7 +1984,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   reader to the detail page to finish reading it.
   {% endcomment %}
   .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 128px;
-    padding: var(--s4); display: flex; flex-direction: column; gap: var(--s2);
+    padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s1);
     overflow: hidden;
     transition: border-color var(--t-fast), box-shadow var(--t-med);
     /* 150+ of these render at once and most are below the fold. This lets
@@ -1997,8 +1997,8 @@ moved-flag all live in static/css/coverage.css (the animation contract for
        its grid row, and the grid sizes every `1fr` row to the largest
        contribution it sees: a placeholder above the real height would let
        offscreen cards set the height of the whole board. With the fixed
-       skeleton below, the card measures 171px on a phone and at three
-       across, and 202px at four across where the foot wraps. Below both, so
+       skeleton below, the card measures 156px on a phone and at three
+       across, and 179px at four across where the foot wraps. Below both, so
        the rendered cards decide and the placeholder never does. `auto`
        means each card remembers its own measured size after it has been
        painted once.
@@ -2048,29 +2048,77 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   card with fewer facts leaves a GAP where the missing fact would have
   been rather than sliding the rest of the card up:
 
-      padding      16
+      padding      12
       .cc-head     40   the avatar's own height; name centred against it,
                         one line or two, never truncated
-      gap           8
+      gap           4
       .cc-tags     16   reserved whether or not a pill renders
-      gap           8
+      gap           4
       .cc-firm     21   exactly one line
       (free space)      all of it here, above the pinned foot
-      .cc-foot          margin-top: auto
-      padding      16
+      gap           4
+      .cc-foot          margin-top: auto, hairline, padding-top 12
+      padding      12
 
-  which, with the card's 1px border, puts `.cc-tags` at 65px and `.cc-firm`
-  at 89px from the top of every card on the board, and the foot at 118px on
+  which, with the card's 1px border, puts `.cc-tags` at 57px and `.cc-firm`
+  at 77px from the top of every card on the board, and the foot at 102px on
   every one of them.
 
-  The sum is the card: 200.6px at four across where the foot wraps, 169.4px
-  everywhere else, against measured row heights of 202 and 171. So the free
-  space `.cc-foot`'s `margin-top: auto` collects is about a pixel, and that
-  is the point rather than a waste — the foot lands at a fixed offset
-  because everything above it is a fixed height, not because an auto margin
-  is papering over a variable one. The auto margin stays as the guarantee
-  for the case it was written for: a grid row stretched taller than its
-  content by some future sibling.
+  ----------------------------------------------------------------------
+  WHERE THE SLACK WAS (2026-09-02, later again).
+
+  "Cards still look a little weird ... ensure space is adequately taken up,
+  visually harmonious", looking at the board in DARK. The skeleton above is
+  not what was wrong and none of it is undone here; what was wrong is what
+  the skeleton was spending. Every slot and every gap, measured on all 49
+  demo cards at 1280 with `content-visibility` off:
+
+      slot/gap        before   after     what it is
+      padding-top       16       12
+      .cc-head          40       40      the avatar; untouched
+      gap                8        4
+      .cc-tags          16       16      reserved; untouched
+      gap                8        4
+      .cc-firm        20.8     20.8      one line; untouched
+      gap                8        4
+      .cc-foot        67.6     64.6      pad-top 12 (was 8) + hairline,
+                                         row-gap 4 between its two rows
+                                         (was 12) where it wraps
+      padding-bottom    16       12
+      CARD           202.4    179.4      at 1280, four across
+                     171.2    156.2      at 375, one across
+
+  Three findings, and the first one retires an assumption:
+
+    1. `margin-top: auto` was NOT hoarding the slack. It collected 0.0px on
+       all 49 cards at both widths — the foot already sat at a fixed offset
+       because everything above it is a fixed height. There was nothing
+       there to redistribute.
+    2. The gaps were flat. Four slots separated by an identical 8px says
+       nothing about which of them belong together, so the card read as
+       five loose rows. They are 4px inside the identity block now (name,
+       its pills, its firm line) and the ONE real division — 4px + hairline
+       + 12px — is the seam above the foot.
+    3. The foot is two rows at four across and one row at 375, because
+       `.cc-since`'s 7.5rem floor + 12px + the 149px button pair wants
+       281px against 253.5px of card. Forcing one row was costed and
+       rejected: it needs 27.6px, and the only places to take it from are
+       the floor that keeps the wrap decision uniform (widest real string
+       109px, so the floor cannot go below ~7rem) and the buttons' own
+       padding (14px -> 8px). That leaves 2.4px of headroom at 1280 and
+       still wraps at the grid's 280px `minmax` floor. A layout one glyph
+       from breaking is worse than a two-row foot.
+
+  The hairline is what answers the dark-mode half of the report. The
+  reserved-and-empty band is a hole when the card's edge is the only thing
+  bounding it, and on a dark ground that edge is `--line` at low contrast
+  against `--bg-2`. A rule at the seam gives the space an edge of its own,
+  so it reads as a footer zone rather than as air. Checked in both schemes:
+  the same rule works in both — it is `--line`, the card's own border
+  token, so it tracks whatever the scheme does to the edge.
+
+  The auto margin stays as the guarantee for the case it was written for: a
+  grid row stretched taller than its content by some future sibling.
   ======================================================================
   {% endcomment %}
   /* Exactly the avatar's height, so the head cannot grow: a one-line name
@@ -2147,7 +2195,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   Reserved vs. wrapped, both measured, reserve wins:
 
     RESERVE (this rule) — the row is always in the flow, so `.cc-firm` is
-      at 88px on all 49 cards and a pill-less card shows an empty band
+      at 77px on all 49 cards and a pill-less card shows an empty band
       where its pills would be. Costs 24px of card height when NO card in
       the grid has a pill; costs nothing at all otherwise, because
       `grid-auto-rows: 1fr` was already stretching every card to the
@@ -2155,6 +2203,23 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     WRAP/OMIT — render the row only when it has content, and the 29
       pill-less demo cards pull their firm line up 24px. Two firm-line
       offsets in one grid, which is the thing being fixed.
+
+  Re-checked 2026-09-02 when the empty band was reported as a hole ("ensure
+  space is adequately taken up"), and reserve still wins — the collapse was
+  measured against the current skeleton, not assumed. `min-height: 0` here
+  puts `.cc-firm` at 75px on the 20 demo cards that have a pill and 61px on
+  the 29 that do not, and the cards themselves at 177.4px and 163.4px: two
+  firm-line offsets and two card heights in one grid, which is the exact
+  pair of defects this row exists to prevent. So the row stays reserved.
+  What the report gets instead is the band being SMALLER: the gaps around it
+  are 4px rather than 8px, so a pill-less card shows 24px of empty band
+  where it used to show 32px.
+
+  The 16px is 2px more than the 14px a pill actually measures, and that is
+  headroom rather than slack. Trimming it to 14 makes the reserve exactly
+  the pill's rendered height, and any face or browser that draws the pill
+  one pixel taller then makes a card WITH pills taller than a card without
+  — two firm-line offsets again, bought for two pixels.
 
   `nowrap`, and it is safe rather than hopeful: the widest combination the
   data can produce is Parked + gender + tier + region = 59.6 + 25.5 + 29.2
@@ -2272,9 +2337,26 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   them at 71px from the top and one at 93px, which is the unevenness that
   got this grid flagged. The slack that used to be dead air under a short
   card's foot is now shared air above it, identical on every card.
+
+  THE HAIRLINE (2026-09-02, later the same day). The seam above this row is
+  the card's only real division — everything above it is one identity block
+  at 4px gaps — and it was drawn in whitespace alone, which on a dark ground
+  is indistinguishable from the reserved-and-empty pill band a few pixels
+  up. Both read as holes. A 1px `--line` rule, the same token the card's own
+  border uses, gives the footer zone an edge instead of a void: measured the
+  same in both schemes, and it costs the card 1px.
+
+  The gap is split, and that is what pays for it. `gap: var(--s3)` set BOTH
+  axes, so the 12px that keeps the days-since zone off the buttons across
+  the row was also the 12px stacking them when the row wraps — and it wraps
+  on every card at four across (`.cc-since`'s 7.5rem floor plus the 149px
+  button pair wants 281px against 253.5px). Across, 12px is the separation
+  between two zones; down, those same two zones are one footer and 4px is
+  what says so.
   {% endcomment %}
   .cc-foot { display: flex; justify-content: space-between; align-items: center;
-    gap: var(--s3); padding-top: var(--s2); flex-wrap: wrap;
+    column-gap: var(--s3); row-gap: var(--s1);
+    border-top: 1px solid var(--line); padding-top: var(--s3); flex-wrap: wrap;
     margin-top: auto; }
   /* Plain body face, not `--font-mono`. The rest of the app reaches for
      mono+tabular-nums on a date/count that sits in a column of OTHER
