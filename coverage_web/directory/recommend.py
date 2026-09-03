@@ -377,11 +377,32 @@ MAX_PER_FIRM = 2
 # EVERY NAME NEEDS BOTH OF ITS SPELLINGS. The table started as abbreviations
 # and brand names only, which quietly assumed students type "USC" rather than
 # what is on their diploma. The founder's own account says "University of
-# Southern California": `usc` does not appear in it as a token, and
-# `normalize_region` knows cities and countries but not US states, so his
+# Southern California": `usc` does not appear in it as a token, and at the
+# time `normalize_region` knew cities and countries but no US state, so his
 # school resolved to "" and the highest-weighted region signal on the board
 # (W_REGION_SCHOOL = 20) scored zero for the only real user of the product.
 # Checked across 52 spelled-out names, 14 missed the same way.
+#
+# `normalize_region` NOW READS THE SPELLED-OUT STATES (`classify.
+# _US_STATE_NAME`, 2026-09-02), which retires the entries that were only ever
+# standing in for one. Measured by deleting each of those 14 keys and asking
+# `school_region` again: six resolve to `us` through the state name alone, for
+# every spelling of their institution — "southern california" and
+# "massachusetts institute of technology" (the state is inside the school's
+# own name), "pennsylvania", "virginia", "michigan" and "washington
+# university". They are gone from the list below; "University of Southern
+# California" still answers `us`, which is the whole point of the story above.
+#
+# EIGHT STAY, AND THE MEASUREMENT SAYS WHY. Six are names no location parser
+# reads at all — "duke", "vanderbilt", "notre dame", "carnegie mellon",
+# "johns hopkins", "rice university" all fall to "" the moment their key goes.
+# The other two are keyed on a CITY rather than a state, and a city can be
+# outranked: `normalize_region` runs its European and Hong Kong tiers BEFORE
+# the American one, so without its key "New York University London" answers
+# `eu` and "University of Chicago Hong Kong Campus" answers `hk`. Whether a
+# student at a portal campus sits in their university's market or their
+# campus's is a real question and not this table's to settle today, so the
+# keys stay and the answer does not move.
 #
 # The additions below are spellings of institutions the table already meant to
 # cover, never new guesses, and a name that is only unambiguous in its long
@@ -414,11 +435,13 @@ SCHOOL_REGION_KEYS: Mapping[str, tuple[str, ...]] = {
         # was simply filed under the wrong country. Removed rather than
         # re-keyed — Canada has no code here to move it to.
         # Spelled-out forms of the same institutions, plus the US schools
-        # whose full names carry no token above at all.
-        "southern california", "massachusetts institute of technology",
-        "pennsylvania", "duke", "vanderbilt", "notre dame", "carnegie mellon",
-        "johns hopkins", "rice university", "virginia", "michigan",
-        "new york university", "university of chicago", "washington university",
+        # whose full names carry no token above at all. Six of the fourteen
+        # names that were here came out on 2026-09-02 once `normalize_region`
+        # learned the spelled-out states — see the note above for which, and
+        # for why these eight are not the same case.
+        "duke", "vanderbilt", "notre dame", "carnegie mellon",
+        "johns hopkins", "rice university",
+        "new york university", "university of chicago",
     ),
     "hk": ("hku", "cuhk", "hkust", "polyu", "cityu", "hkbu", "ust"),
     "sg": (
@@ -1466,7 +1489,110 @@ _NON_TRACK_FUNCTION = re.compile(
     # the same "co-occurring non-track word, decline rather than guess" call
     # this file already makes for "Trading Operations Analyst". No open
     # campus row that states ib, st, am or pe is touched.
-    r"|\bfinancial plan(?:ner|ning)\b",
+    r"|\bfinancial plan(?:ner|ning)\b"
+    # ---- 2026-09-02: the vocabulary read no French ----
+    # This whole list was English, and the board is not. The role
+    # categorization pass (`docs/role-categorization-accuracy-2026-09-02.md`)
+    # made 66 French-titled internships visible at once — titles beginning
+    # "Stage", which is French for internship and which had been sitting in
+    # `other` — and every one of them answered SILENT here, so every one
+    # inherited its firm's ib/st coverage. Eight of them name a function this
+    # list already blocks in English: four "Stage Auditeur Financier", "Stage
+    # fiscalité transactionnelle", "Stage fiscalité immobilière", "Stage -
+    # Contrôleur de Gestion (H/F)" and "Stage H/F - Analyste Contrôleur des
+    # Risques". `\baudit\b` and `\btax\b` exist precisely to stop an audit or
+    # tax seat inheriting a bank's IB coverage; the French spellings walked
+    # past them.
+    #
+    # Each clause was counted over ALL 27,357 stored rows — the number quoted
+    # is rows whose `role_function` answer changes — and each names a live
+    # title it must NOT catch. Together the five clauses move 43 rows (42
+    # distinct titles, 35 open). Five move away from a stated track, and all
+    # five are the co-occurring non-track word this module already declines
+    # on: "Consultant en Opérations Financières & Auditeur Financier Junior",
+    # "Consultant Comptable Junior", "Consultant Junior en Expertise
+    # Comptable", "Stage Consultant Conformité & Contrôle Interne Asset
+    # Management" and "Contrôleur Permanent Asset Management" — the same call
+    # this file makes for "Trading Operations Analyst".
+    #
+    # THE ACCENT IS PART OF THE PATTERN, not decoration. `\b` sits between a
+    # word character and a non-word one, and é/à/ô ARE word characters to
+    # Python's unicode `\w`, so `\bfiscalit\b` does not match "fiscalité" at
+    # all — the boundary would have to fall inside the word. Every clause
+    # below is anchored on the accented letter itself and also spells the
+    # unaccented form, because French boards drop accents in upper case: two
+    # live rows read "CONTROLEUR PERMANENT DE NIVEAU 2 RISQUE OPERATIONNEL".
+    #
+    # French for auditor, which `\baudit(or|ing)?\b` cannot reach because the
+    # boundary falls after "audit" and "eur" follows. 18 rows (17 distinct
+    # titles, 16 open); the one that also states a track is the "Parcours
+    # Croisé" consulting row above. The whole noun and deliberately NOT an
+    # `audit`-prefix: the prefix form also takes "Junior specialista
+    # finančního auditu" (PwC Czech Republic) and the Slovak and Latvian rows
+    # beside it, which are audit rows in languages this pass measured no
+    # reading of. Nothing on the board carries "auditeur" inside a longer
+    # word, and no English title carries the letters at all.
+    r"|\bauditeur(?:s|rice|rices)?\b"
+    # French (and Italian) for taxation, the noun. 3 rows, all open, none
+    # stating a track; the Italian "Fiscalità" spelling is in the character
+    # class for completeness and moves nothing, because those three rows
+    # already answer "none" off the "[TAX]" label their board prints.
+    # Anchored on the noun's own ending and NOT on a `fisc`
+    # prefix, which reads a New Jersey street name as a tax function:
+    # "Associate Banker I- Toms River/Fischer Blvd, NJ" is live. The bare
+    # adjective `\bfiscal\b` is refused too — it is an ordinary English word
+    # ("fiscal year") and no live row proves it safe here. That refusal has a
+    # named cost: of PwC Spain's nine "TLS | Beca Fiscal Murcia"-shaped tax
+    # internships, seven stay silent (the two that say "Legal y Fiscal" are
+    # caught by `\blegal\b`), and so does the Dutch "Fiscalist Real Estate
+    # Advisory & Valuations". Silence is the honest answer for a spelling
+    # this pass has no evidence about.
+    r"|\bfiscalit[éeàa]s?\b"
+    # The control functions under their French noun: contrôleur de gestion is
+    # FP&A, contrôleur des risques is risk control, contrôleur permanent is
+    # internal control, contrôleur dépositaire is fund oversight. The ten live
+    # rows carrying the word are those four and a data-quality control seat
+    # beside them; not one of them is a desk. 9 rows change (8 open); the
+    # one that also states a track is "Contrôleur Permanent Asset Management
+    # (H/F)", a control seat at an asset manager. It must NOT reach the
+    # ENGLISH singular, which `\bcontrollers\b` above refuses on purpose: 59
+    # live rows carry "Controller" on its own — twelve of them "Financial
+    # Controller" titles such as "Senior Manager/Associate Director -
+    # Financial Controller, Singapore" — and not one changes answer.
+    r"|\bcontr[oô]leur(?:s)?\b"
+    # French for compliance, the same function `\bcompliance\b` already
+    # blocks. 3 rows (1 open); the one that also states a track is the
+    # "Contrôle Interne Asset Management" row above. The trailing boundary is
+    # what keeps it out of the Romanian "Analist senior – TIS Trib
+    # Performanta si conformitate", which is live and which this clause has
+    # no Romanian evidence to claim.
+    r"|\bconformit[ée]\b"
+    # French for accounting, the same function `\baccounting\b` already
+    # blocks. 12 rows (8 open); the two that also state a track are the Big 4
+    # "Consultant ... Comptable" rows above, which is what English already
+    # does with "Accounting Advisory Consultant". Anchored on `comptab` and
+    # NOT on `compt`: "comptes" is French for ACCOUNTS in the client sense,
+    # and "Directeur de comptes agricoles" is live and is a relationship
+    # title, not a bookkeeping one.
+    r"|\bcomptab(?:le|les|ilit[ée])\b",
+    # REFUSED, with the live rows that refuse it. `\brecrutement\b` is the
+    # French for recruitment and looks like a free translation of
+    # `\brecruit(ing|ment)\b` above — but on this board it is mostly the
+    # HIRING PROCESS, not the job, which is the trap `_HIRING_PROCESS` was
+    # written for. Of the three live rows, "Recrutement Comptable Senior-1"
+    # is a hiring notice for an ACCOUNTANT and "Recrutement stagiaires
+    # préemplois - RAS" is one for interns; only "Chargé (e) de recrutement -
+    # stage" is an HR job. A rule that is right one time in three is not
+    # written here — and the accountant row answers "none" anyway, off
+    # `comptab`, which is the word that actually names its function.
+    #
+    # The same refusal governs the French vocabulary on the POSITIVE side,
+    # which is not extended here at all: "Stage H/F - Analyste Actions" is an
+    # equities seat, and "actions" is an ordinary English word that would
+    # claim S&T for anything carrying it. Those rows stay silent and keep
+    # inheriting their firm's coverage — visibly, capped at `W_TRACK_CAP` and
+    # chipped as the FIRM's coverage — which is the honest state for a title
+    # this file cannot read yet.
     re.I)
 
 

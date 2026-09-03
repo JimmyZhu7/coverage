@@ -1471,6 +1471,65 @@ def test_columbia_still_resolves_in_the_spellings_that_are_unambiguous():
     assert school_region("Columbia Business School") == "us"
 
 
+@pytest.mark.parametrize("school", [
+    "University of Southern California",       # the founder's own spelling
+    "Massachusetts Institute of Technology",
+    "University of Pennsylvania",
+    "Pennsylvania State University",
+    "University of Virginia",
+    "University of Michigan",
+    "Washington University in St. Louis",
+])
+def test_a_school_the_state_name_now_reaches_needs_no_key_of_its_own(school):
+    """`normalize_region` learned the spelled-out US states on 2026-09-02
+    (`classify._US_STATE_NAME`), which retired six of the fourteen spellings
+    the previous census added to `SCHOOL_REGION_KEYS` — each of them a school
+    whose own name contains its state. The answer must not move, and the
+    table must no longer be what produces it: the location parser now
+    resolves these on its own, which is what the section comment promised
+    would happen "for free" for real school names."""
+    from directory.classify import normalize_region
+    from directory.recommend import SCHOOL_REGION_KEYS
+    assert school_region(school) == "us"
+    assert normalize_region(school) == "us"
+    for retired in ("southern california", "massachusetts institute of technology",
+                    "pennsylvania", "virginia", "michigan", "washington university"):
+        assert retired not in SCHOOL_REGION_KEYS["us"]
+
+
+@pytest.mark.parametrize("school", [
+    # Names of people and of a place no location parser reads: delete the key
+    # and the school resolves to nothing at all.
+    "Duke University", "Vanderbilt University", "University of Notre Dame",
+    "Carnegie Mellon University", "Johns Hopkins University", "Rice University",
+])
+def test_a_school_key_the_location_parser_cannot_replace_stays(school):
+    """The other half of the same measurement. These six are not state names
+    in disguise — `normalize_region` answers "" for every one of them — so
+    the key is the only thing standing between the founder's highest-weighted
+    region signal (W_REGION_SCHOOL = 20) and a silent zero."""
+    from directory.classify import normalize_region
+    assert normalize_region(school) == ""
+    assert school_region(school) == "us"
+
+
+@pytest.mark.parametrize("school,parser_says", [
+    ("New York University London", "eu"),
+    ("University of Chicago Hong Kong Campus", "hk"),
+])
+def test_a_city_keyed_school_still_decides_its_own_portal_campuses(school, parser_says):
+    """"new york university" and "university of chicago" are keyed on a CITY,
+    not a state, and a city can be outranked: `normalize_region` runs its
+    European and Hong Kong tiers BEFORE the American one, so without their
+    keys a portal campus would answer the campus's market instead of the
+    university's. Whether that is the better answer is a real question and
+    not this table's to settle, so the keys stay and the answer does not
+    move — this test pins the fact that they are still deciding it."""
+    from directory.classify import normalize_region
+    assert normalize_region(school) == parser_says
+    assert school_region(school) == "us"
+
+
 @pytest.mark.parametrize("title,expected", [
     # The two live rows that ranked #2 and #3 on the founder's own rail,
     # chipped "matches IB + S&T" off Nomura's firm-level coverage because
@@ -1531,6 +1590,100 @@ def test_a_risk_or_it_req_never_inherits_its_banks_track_coverage():
             JIMMY, _cand(1, title="2027 - Industrial Placement - London",
                          firm_tracks=("ib", "st")))[0]
         assert points < silent, title
+
+
+@pytest.mark.parametrize("title,expected", [
+    # The eight rows the role-categorization pass handed over: French
+    # internships that name a function this list already blocks in English
+    # and that answered SILENT, so every one inherited its firm's ib/st
+    # coverage.
+    ("Stage Auditeur Financier - Lyon - Janvier 2027 - F/H", "none"),
+    ("Stage/Alternance Auditeur Financier - Septembre 2026 - F/H", "none"),
+    ("Stage fiscalité transactionnelle - Janvier 2027 - F/H", "none"),
+    ("Stage fiscalité immobilière - Janvier 2027 - F/H", "none"),
+    ("Stage - Contrôleur de Gestion (H/F)", "none"),
+    ("Stage H/F - Analyste Contrôleur des Risques – Janvier 2027", "none"),
+    # ...and the rest of the same vocabulary, including the upper-case
+    # spelling that drops its accents, which is how French boards write it.
+    ("CONTROLEUR PERMANENT DE NIVEAU 2 RISQUE OPERATIONNEL - Junior", "none"),
+    ("Chargé de conformité - réglementations fiscales H/F", "none"),
+    ("Collaborateur Comptable | German Business Group | CDI | H/F", "none"),
+    # ---- and what each clause must NOT catch, every one of them live ----
+    # `\bcontr[oô]leur\b` must not reach the ENGLISH singular, which
+    # `\bcontrollers\b` refuses on purpose. 59 live rows carry it.
+    ("Senior Manager/Associate Director - Financial Controller, Singapore", ""),
+    # The tax clause is the accented noun, not a `fisc` prefix — which reads
+    # a New Jersey street name as a tax function.
+    ("Associate Banker I- Toms River/Fischer Blvd, NJ", ""),
+    # The accounting clause is anchored on `comptab`, not `compt`: "comptes"
+    # is accounts in the CLIENT sense, and this is a relationship title.
+    ("Directeur de comptes agricoles", ""),
+    # The compliance clause stops at its own word boundary rather than
+    # claiming a language this pass measured nothing in.
+    ("Analist senior – TIS Trib Performanta si conformitate", ""),
+    # The audit clause is the whole French noun and not an `audit`-prefix,
+    # which would sweep in the Czech, Slovak and Latvian rows beside it.
+    ("Junior specialista finančního auditu", ""),
+    # Refused on purpose: `\brecrutement\b` names the HIRING PROCESS on this
+    # board more often than the job — the trap `_HIRING_PROCESS` exists for.
+    ("Recrutement stagiaires préemplois - RAS", ""),
+    # The French track vocabulary on the positive side is refused too:
+    # "actions" is French for equities and an ordinary English word, so this
+    # row keeps inheriting its firm's coverage, visibly, rather than being
+    # guessed into S&T.
+    ("Stage H/F - Analyste Actions – Janvier 2027", ""),
+    # A real French front-office title is untouched by any of it — the desk
+    # words that ARE in the vocabulary still answer for it.
+    ("Stage H/F - Analyste Fixed Income Pôle High Yield – Janvier 2027", "st"),
+    ("Stage d’Analyste en Private Equity Secondaire (FASO) – Juillet 2026", "pe"),
+])
+def test_the_french_blocklist_reads_the_department_not_the_desk(title, expected):
+    """2026-09-02. The whole non-track vocabulary was English and the board is
+    not: the role-categorization pass made 66 French-titled internships
+    visible at once and every one answered "" here. Each clause was counted
+    over all 27,357 stored rows — auditeur 18, contrôleur 9, comptable 12,
+    fiscalité 3, conformité 3, 43 rows together once the overlaps are
+    removed, 35 of them open. Five move away from a stated track and all five
+    are the co-occurring non-track word this module already declines on."""
+    assert role_function(title) == expected
+
+
+def test_a_french_accent_is_part_of_the_pattern_not_decoration():
+    """The trap this vocabulary is written around, asserted rather than
+    assumed. `\\b` sits between a word character and a non-word one, and é and
+    ô ARE word characters to Python's unicode `\\w` — so the obvious spelling
+    of these clauses, a bare stem with a boundary after it, matches NOTHING.
+    A clause that silently never fires is worse than no clause: the count in
+    the comment above it would be a fiction."""
+    assert re.search(r"\bfiscalit\b", "fiscalité") is None
+    assert re.search(r"\bcontr\b", "contrôleur") is None
+    assert role_function("Stage fiscalité transactionnelle") == "none"
+    assert role_function("Contrôleur de gestion Stratégique") == "none"
+    # ...and the same clauses may not fire on an English title that merely
+    # carries the same letters: the bare adjective "fiscal" and the English
+    # singular "Controller" are both refused, and both stay silent rather
+    # than being read as a French noun.
+    assert role_function("Fiscal Year 2027 Summer Analyst Program") == ""
+    assert role_function("Financial Controller Graduate Programme") == ""
+    assert role_function("2027 Global Capital Markets Summer Analyst") == "ib"
+
+
+def test_a_french_support_function_never_inherits_its_banks_track_coverage():
+    """The end-to-end claim, in the shape the English census already pinned
+    for Nomura's risk and IT reqs: a French audit internship at a bank whose
+    `Firm.tracks` are ib and st must not be chipped "matches IB + S&T", and
+    must be worse off for having said what it is than a row that said
+    nothing."""
+    title = "Stage Auditeur Financier - Bordeaux - Septembre 2026 - F/H"
+    points, reasons = score_candidate(
+        JIMMY, _cand(1, title=title, firm_tracks=("ib", "st")))
+    track = [r for r in reasons if r.kind == "track"]
+    assert [r.text for r in track] == ["Not your tracks"]
+    assert not any("matches" in r.text for r in track)
+    silent = score_candidate(
+        JIMMY, _cand(1, title="Stage - Janvier 2027 - F/H",
+                     firm_tracks=("ib", "st")))[0]
+    assert points < silent
 
 
 @pytest.mark.parametrize("track,expected", [
