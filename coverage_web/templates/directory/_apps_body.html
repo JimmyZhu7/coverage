@@ -45,23 +45,25 @@ survives even if it was in the batch.
   one a jump link to its section. Empty stages stay on the rail showing 0 —
   hiding them made a five-stage pipeline look like a three-stage one.
   {% endcomment %}
-  <nav class="apps-funnel" aria-label="Pipeline stages">
+  {% comment %}
+  A READOUT, not a nav. Every segment used to be `<a href="#stage-saved">`
+  jumping to the section holding that stage; those sections are gone, so the
+  links would now be five anchors resolving to nothing — the worst kind of
+  dead control, since it looks live and does nothing. The counts are still
+  worth the band: they are the only place the pipeline is summarised now
+  that each row carries its own stage control, and a stage holding nothing
+  still prints 0 rather than vanishing (hiding empties made a five-stage
+  pipeline look like a three-stage one).
+  {% endcomment %}
+  <div class="apps-funnel" role="group" aria-label="Pipeline stages">
     {% for stage in stages %}
-      {% if stage.count %}
-        <a class="apps-fseg" href="#stage-{{ stage.key }}">
-          <span class="apps-fseg-n">{{ stage.count }}</span>
-          <span class="apps-fseg-l">{{ stage.label }}</span>
-          <span class="apps-fseg-bar"><i style="width: {{ stage.pct }}%"></i></span>
-        </a>
-      {% else %}
-        <span class="apps-fseg is-empty">
-          <span class="apps-fseg-n">0</span>
-          <span class="apps-fseg-l">{{ stage.label }}</span>
-          <span class="apps-fseg-bar"></span>
-        </span>
-      {% endif %}
+      <span class="apps-fseg{% if not stage.count %} is-empty{% endif %}">
+        <span class="apps-fseg-n">{{ stage.count }}</span>
+        <span class="apps-fseg-l">{{ stage.label }}</span>
+        <span class="apps-fseg-bar">{% if stage.count %}<i style="width: {{ stage.pct }}%"></i>{% endif %}</span>
+      </span>
     {% endfor %}
-  </nav>
+  </div>
 
   {% comment %}
   The lens band. It renders the SAME rows as the funnel below, cut by
@@ -74,10 +76,20 @@ survives even if it was in the batch.
   {% endcomment %}
   <section class="apps-lenses" aria-labelledby="lenses-h">
     <p class="apps-lenses-eyebrow">
-      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="6.2" cy="8" r="4.3"/><circle cx="9.8" cy="8" r="4.3"/></svg>
-      Cross-section, not extra roles
+      {% comment %}
+      "Cross-section, not extra roles" stood here, over two overlapping
+      circles, and both were apparatus for a duplication that no longer
+      exists: the band used to show the same rows the stage sections below
+      showed, and the eyebrow's whole job was to promise they were not extra.
+      With the sections gone the sentence is not merely redundant, it is
+      FALSE — there is no second appearance for these rows to be a
+      cross-section of. What the band needs said instead is the one thing its
+      six headings do not say on their own: what the order means.
+      {% endcomment %}
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 4.2v4l2.6 1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="8" r="6.2"/></svg>
+      Soonest first
     </p>
-    <h2 class="apps-lenses-h" id="lenses-h">By deadline</h2>
+    <h2 class="apps-lenses-h" id="lenses-h">Everything you're tracking</h2>
     {% comment %}
     Cut from three sentences to one (2026 redesign, "cleaner, less words"),
     and now to none. The last sentence read "The same N live roles, sorted by
@@ -103,7 +115,7 @@ survives even if it was in the batch.
       {% if lens.items or lens.empty_state %}
       <div class="apps-lens">
         <h3>{{ lens.label }}
-          <span class="apps-lens-frac">{{ lens.items|length }} of {{ live_total }} live</span>
+          {% if lens.counts_live %}<span class="apps-lens-frac">{{ lens.items|length }} of {{ live_total }} live</span>{% else %}<span class="apps-lens-frac">{{ lens.items|length }}</span>{% endif %}
         </h3>
         {% comment %}A note only when it says something the heading cannot —
         a window, a boundary, what happens to the row next. "Deadline Passed"
@@ -182,12 +194,69 @@ survives even if it was in the batch.
                   {% if r.has_text %}<button type="button" class="meta-read lens-read" data-role-read data-role-id="{{ r.id }}"
                           hx-get="{% url 'role_description' r.id %}"
                           hx-target="#role-drawer-body" hx-swap="innerHTML">Read</button>{% endif %}
+                  {% comment %}
+                  WHO YOU ALREADY KNOW THERE. This was the one thing on the
+                  deleted stage cards that the row could not otherwise say,
+                  and it is the reason this page sits beside a CRM: the
+                  useful sentence before you move a role to Applied is "you
+                  know two people at this firm and have not spoken in 24
+                  days". Same builder and same partial the cards used, so
+                  there was never a second version of it to drift.
+                  {% endcomment %}
+                  {% if r.net %}
+                    {% include "directory/_role_people.html" with net=r.net compact=1 %}
+                  {% endif %}
                 </span>
-                <a class="lens-stage" href="#stage-{{ r.stage }}"
-                   title="Counted once, under {{ r.stage_label }} below. This row is that same role.">
-                  <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M8 3v10M4.2 9.2 8 13l3.8-3.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                  {{ r.stage_label }}
-                </a>
+                {% comment %}
+                THE ROW'S OWN STAGE CONTROL. This was an anchor down to the
+                stage section that counted the row; the sections are gone, so
+                the pill that used to say where the row was counted now sets
+                it. Same endpoint, same five values and same wording as the
+                card control it replaces (`_TRACK_STATES`), and the same
+                `data-stage-select` hook — the delegated listener in
+                `my_applications.html` submits on change, because an inline
+                `onchange` is CSP-blocked and a listener bound to this node
+                would not survive the `outerHTML` swap that its own submit
+                triggers.
+
+                A real `<form method="post">` with a real action, so the
+                control still works with JS off: without the listener it is a
+                select the student changes and then submits with the keyboard,
+                which is worse than one click but is not a dead end.
+                {% endcomment %}
+                <form class="lens-act" method="post"
+                      action="{% url 'track_opportunity' r.id %}"
+                      hx-post="{% url 'track_opportunity' r.id %}"
+                      hx-target="#apps-body" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{% url 'my_applications' %}">
+                  <select class="lens-stage" name="status" data-stage-select
+                          aria-label="Stage for {{ r.title }} at {{ r.firm_name }}">
+                    <option value="saved"{% if r.stage == 'saved' %} selected{% endif %}>Saved</option>
+                    <option value="submitted"{% if r.stage == 'submitted' %} selected{% endif %}>Applied</option>
+                    <option value="interview"{% if r.stage == 'interview' %} selected{% endif %}>Interviewing</option>
+                    <option value="offer"{% if r.stage == 'offer' %} selected{% endif %}>Offer</option>
+                    <option value="closed"{% if r.stage == 'closed' %} selected{% endif %}>Done</option>
+                  </select>
+                </form>
+                {% comment %}
+                Untracking was only ever reachable from the stage cards. It
+                is a separate form because it is a separate verb: `clear`
+                removes the row from the list entirely, which is not a stage
+                and must never be an option inside a menu of stages, where a
+                mis-click on the way to "Done" would delete the row.
+                {% endcomment %}
+                <form class="lens-act" method="post"
+                      action="{% url 'track_opportunity' r.id %}"
+                      hx-post="{% url 'track_opportunity' r.id %}"
+                      hx-target="#apps-body" hx-swap="outerHTML">
+                  {% csrf_token %}
+                  <input type="hidden" name="next" value="{% url 'my_applications' %}">
+                  <input type="hidden" name="status" value="clear">
+                  <button type="submit" class="lens-remove"
+                          aria-label="Remove {{ r.title }} at {{ r.firm_name }} from your list"
+                          title="Remove from your list">Remove</button>
+                </form>
               </li>
             {% endfor %}
           </ul>
@@ -214,156 +283,22 @@ survives even if it was in the batch.
     {% endfor %}
   </section>
 
-  {% for stage in stages %}
-    {% if stage.items %}
-      <section class="apps-stage stage-{{ stage.key }}" id="stage-{{ stage.key }}">
-        <h2>{{ stage.label }} <span class="scrub-count">{{ stage.count }}</span>
-          {% comment %}
-          Saved only. A bulk save (or a mis-click) floods THIS stage and
-          nowhere else, so this is the one section that ever needs to empty
-          itself in fewer than N clicks — Applied/Interviewing/Offer/Done
-          are real progress and get no bulk-remove. Same inline-confirm
-          pattern as the bulk-save banner: `<details>` states the count
-          before the real, `confirmed=1`-carrying button ever renders.
-          {% endcomment %}
-          {% if stage.key == "saved" and stage.count %}
-            <details class="apps-clear-confirm">
-              <summary class="btn apps-clear-btn">Clear saved</summary>
-              <form method="post" action="{% url 'clear_saved' %}" class="apps-clear-form">
-                {% csrf_token %}
-                <span>Remove all {{ stage.count }} saved role{{ stage.count|pluralize }}? Applied, interviewing, and offer rows are untouched.</span>
-                <button type="submit" name="confirmed" value="1" class="btn apps-clear-confirm-btn">Yes, clear {{ stage.count }}</button>
-              </form>
-            </details>
-          {% endif %}
-        </h2>
-        <div class="apps-grid">
-          {% for uo in stage.items %}
-            <article class="apps-card">
-              <span class="apps-firm">{{ uo.firm_name|smart_title }}</span>
-              <h3 class="apps-title"><a href="{{ uo.url }}" target="_blank" rel="nofollow noopener">{{ uo.title|smart_title }}</a></h3>
-              {% comment %}City variants share a title; the location is the
-              only thing telling two saves apart.
-              `uo.place`, not `uo.location` — views._place, the same
-              resolver the Opportunities feed card and firm row use. Same
-              defect this closes: a raw postal tail or colon join standing
-              in for a city, on the surface where a student is deciding
-              which of two saved roles to keep.{% endcomment %}
-              {% if uo.place.text %}<span class="apps-loc"{% if uo.place.why %} title="{{ uo.place.why }}"{% endif %}>{{ uo.place.text|smart_location }}{% if uo.place.more %} +{{ uo.place.more }} more{% endif %}</span>{% endif %}
-              {% if stage.key == 'closed' %}<span class="apps-done-mark">Done, no longer live</span>{% endif %}
-              {% comment %}Two different "closed" can be true of one card and
-              they are marked separately on purpose. Above: the student put
-              this in Done themselves. Below: the firm took the posting down,
-              which the scraper saw and no surface here ever said. A row can
-              carry both, one, or neither.{% endcomment %}
-              {% if uo.posting_closed %}<span class="apps-shut-mark">{{ uo.posting_closed.note }}</span>{% endif %}
+  {% comment %}
+  THE FIVE STAGE SECTIONS USED TO PRINT HERE, and they printed the same rows
+  a second time. Every live role appeared twice on this page — once on the
+  band above under when it closes, once in a card under what the student had
+  marked it — and the band carried three separate pieces of apparatus
+  apologising for the duplication: an eyebrow calling itself a cross-section,
+  a fraction on every heading, and a pill on every row linking down to "the
+  section this row is actually counted in".
 
-              {% comment %}
-              When it closes, and what the posting states about applying.
-              These sections knew neither: a role could be sitting in Saved
-              with a deadline nine days out and say nothing about it, while
-              the lens band above showed exactly that for the same row.
-              {% endcomment %}
-              {% comment %}`not uo.posting_closed`: a countdown on a posting
-              the firm has already pulled is a live-sounding number attached
-              to nothing. The closed sentence above replaces it.{% endcomment %}
-              {% if uo.deadline.posted and not uo.posting_closed %}
-                <span class="apps-when{% if uo.deadline.past %} is-past{% endif %}{% if uo.reported %} is-reported{% endif %}"
-                      {% if uo.reported %}title="{{ uo.reported.why }}"{% endif %}>{{ uo.deadline.countdown|capfirst }}{% if uo.reported %}<span class="vh"> ({{ uo.reported.label }})</span>{% endif %}</span>
-              {% endif %}
-              {% if uo.facts %}
-                <div class="apps-facts">
-                  {% for f in uo.facts %}<span class="fact-chip {{ f.css }}" title="{{ f.why }}">{{ f.label }}</span>{% endfor %}
-                </div>
-              {% endif %}
-              {% comment %}Read the posting here, from the copy we hold —
-              the same drawer as the feed and the firm page. This is the
-              page where a student decides what to do this week, and it
-              was the one role-listing surface that could not open the
-              posting behind the decision.{% endcomment %}
-              {% if uo.has_text %}
-                <button type="button" class="meta-read apps-read" data-role-read data-role-id="{{ uo.id }}"
-                        hx-get="{% url 'role_description' uo.id %}"
-                        hx-target="#role-drawer-body" hx-swap="innerHTML">Read the posting</button>
-              {% endif %}
-              {% comment %}
-              YOUR PEOPLE AT THIS FIRM, immediately above the stage control.
-
-              PLACEMENT IS THE DECISION. `.apps-foot` below is where the
-              student acts on this row — moves it Saved → Applied, or removes
-              it. This block is the input to that act: "before you mark this
-              Applied, you know Maya here, and you haven't spoken in 24 days."
-              Anywhere higher and it competes with the role's own identity;
-              anywhere lower and it is a footnote under the button it is
-              supposed to inform.
-
-              Two names, not three (see APPS_PEOPLE_MAX): these cards are one
-              cell of a 300px-minimum grid. `uo.net` is None — and nothing is
-              drawn — for a role with no firm to join on, and for a Done row
-              that would only have shown the empty prompt (see `_stage_net`).
-              Every card's people come from ONE page-wide query; see
-              `_people_at_firms`.
-              {% endcomment %}
-              {% if uo.net %}
-                {% include "directory/_role_people.html" with net=uo.net compact=1 %}
-              {% endif %}
-              <div class="apps-foot">
-                {% comment %}
-                Both forms below post to `track_opportunity` exactly as
-                before (method/action stay, so a no-JS load still works) but
-                now also carry `hx-post`/`hx-target="#apps-body"`
-                `hx-swap="outerHTML"` — htmx intercepts the form's native
-                `submit` event and swaps this whole partial in place instead
-                of letting the browser navigate. The one thing that made
-                that not just work already: `this.form.submit()` calls the
-                DOM method directly, which does NOT fire a `submit` event
-                (a real, long-standing browser quirk), so htmx never saw it
-                and the browser fell through to a full navigation —
-                `requestSubmit()` is the form-submission call that DOES
-                fire the event.
-                {% endcomment %}
-                <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}"
-                      hx-post="{% url 'track_opportunity' uo.opportunity_id %}"
-                      hx-target="#apps-body" hx-swap="outerHTML">
-                  {% csrf_token %}
-                  <input type="hidden" name="next" value="{% url 'my_applications' %}">
-                  {% comment %}
-                  `onchange="this.form.requestSubmit()"` is CSP-blocked: script-src
-                  is `'self' 'nonce-...'`, which covers a real <script> tag, not an
-                  inline handler attribute. `data-stage-select` is wired from the
-                  page-level script in my_applications.html instead -- delegated
-                  from `document`, not this element, because `hx-swap="outerHTML"`
-                  replaces this whole partial (including this <select>) on every
-                  stage change, and a listener bound to the swapped-out node would
-                  not survive its own first use.
-                  {% endcomment %}
-                  <select name="status" data-stage-select aria-label="Stage">
-                    <option value="saved"{% if stage.key == 'saved' %} selected{% endif %}>Saved</option>
-                    <option value="submitted"{% if stage.key == 'submitted' %} selected{% endif %}>Applied</option>
-                    <option value="interview"{% if stage.key == 'interview' %} selected{% endif %}>Interviewing</option>
-                    <option value="offer"{% if stage.key == 'offer' %} selected{% endif %}>Offer</option>
-                    {% comment %}"Done" = the terminal state: withdrawn,
-                    rejected, accepted elsewhere, or the posting closed. It
-                    is not "Offer" — see _TRACK_STATES in directory/views.py
-                    for why the two can't be the same value.{% endcomment %}
-                    <option value="closed"{% if stage.key == 'closed' %} selected{% endif %}>Done</option>
-                  </select>
-                </form>
-                <form method="post" action="{% url 'track_opportunity' uo.opportunity_id %}"
-                      hx-post="{% url 'track_opportunity' uo.opportunity_id %}"
-                      hx-target="#apps-body" hx-swap="outerHTML">
-                  {% csrf_token %}
-                  <input type="hidden" name="next" value="{% url 'my_applications' %}">
-                  <input type="hidden" name="status" value="clear">
-                  <button type="submit" class="btn apps-remove">Remove</button>
-                </form>
-              </div>
-            </article>
-          {% endfor %}
-        </div>
-      </section>
-    {% endif %}
-  {% endfor %}
+  Removed on the founder's own call (2026-09-03). One row, one place. The
+  apparatus goes with them, and the pill stops pointing at a stage and starts
+  BEING the control that sets it. Two things the sections were the only home
+  for had to be rehoused rather than dropped: Done rows, which are not in
+  `live` and so appeared in no lens (there is a sixth group for them now),
+  and Remove, which is the only way to untrack a role at all.
+  {% endcomment %}
 {% else %}
   <div class="empty">
     <h2>No roles saved yet.</h2>

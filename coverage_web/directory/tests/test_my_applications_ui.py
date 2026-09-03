@@ -162,14 +162,22 @@ def test_an_empty_pipeline_does_not_divide_by_zero(client, db):
 
 
 @pytest.mark.django_db
-def test_each_lens_row_links_to_the_stage_it_is_counted_in(client, pipeline):
-    """The load-bearing overlap affordance. Prose can claim a row appears
-    twice; a link that jumps to the other appearance settles it — so the
-    anchor and its target must both exist."""
+def test_each_lens_row_carries_the_control_that_sets_its_stage(client, pipeline):
+    """This asserted an anchor from each row down to the stage section that
+    counted it — the affordance that made the duplication legible. The
+    sections went on 2026-09-03 and the duplication with them, so the pill
+    that pointed at a stage now SETS one, and what has to be true is that it
+    posts to the tracker preset to the row's own stage.
+
+    The anchors are asserted gone in the same breath: five `href="#stage-*"`
+    resolving to nothing is worse than no control at all."""
     body = client.get(reverse("my_applications")).content.decode()
 
-    assert 'href="#stage-saved"' in body
-    assert 'id="stage-saved"' in body
+    assert 'href="#stage-saved"' not in body, "a link to a section that is gone"
+    assert 'id="stage-saved"' not in body
+    assert 'name="status" data-stage-select' in body
+    assert '<option value="saved" selected>Saved</option>' in body
+    assert '<option value="submitted">Applied</option>' in body
 
 
 @pytest.mark.django_db
@@ -211,7 +219,13 @@ def test_the_lens_fractions_account_for_every_live_row(client, db):
     by_key = {lens["key"]: lens for lens in lenses}
 
     assert resp.context["live_total"] == 4
-    assert sum(len(lens["items"]) for lens in lenses) == 4, "no live row falls through"
+    # Summed over the five lenses cut out of `live`. The sixth (Done) holds
+    # rows that are by definition not live, which is exactly why it prints a
+    # bare count and not a fraction over this denominator.
+    assert sum(len(l["items"]) for l in lenses if l["counts_live"]) == 4, \
+        "no live row falls through"
+    assert [i["title"] for i in by_key["done"]["items"]] == ["Summer Analyst 5"]
+    assert by_key["done"]["counts_live"] is False
     assert [i["title"] for i in by_key["closing"]["items"]] == ["Summer Analyst 1"]
     assert [i["title"] for i in by_key["later"]["items"]] == ["Summer Analyst 2"]
     assert [i["title"] for i in by_key["rolling"]["items"]] == ["Summer Analyst 3"]
@@ -323,10 +337,15 @@ def test_urgency_reaches_the_row_that_renders_it(client, pipeline):
 
 @pytest.mark.django_db
 def test_a_done_row_states_that_it_is_done(client, pipeline):
-    """Terminal cards recede visually, but "finished" must not rest on the
-    background tint alone."""
+    """"Finished" must not rest on a background tint alone. It used to be a
+    per-card mark reading "Done, no longer live"; the cards are gone and the
+    rows now sit under their own named group on the band, which says it once
+    for all of them instead of once per card."""
     body = client.get(reverse("my_applications")).content.decode()
-    assert "Done, no longer live" in body
+    assert "Withdrawn, rejected, or finished with." in body
+    lenses = {l["key"]: l for l in
+              client.get(reverse("my_applications")).context["lenses"]}
+    assert lenses["done"]["items"], "a Done row reaches no group at all"
 
 
 # ---------------------------------------------------------------------------
@@ -571,7 +590,7 @@ def test_the_two_closed_meanings_are_never_merged(client):
     client.force_login(user)
 
     body = _rendered(client)
-    assert "Done, no longer live" in body
+    assert "Withdrawn, rejected, or finished with." in body
     assert "This posting is closed" not in body
     lenses = {l["key"]: l for l in client.get(reverse("my_applications")).context["lenses"]}
     assert lenses["posting_closed"]["items"] == []
@@ -787,11 +806,20 @@ def test_the_band_no_longer_explains_its_own_structure_in_prose(client, pipeline
 
     assert "sorted by deadline instead of stage" not in body
     assert "apps-lenses-intro" not in body, "the class goes with the sentence"
-    # The three affordances that were always load-bearing are untouched.
-    assert "Cross-section, not extra roles" in body
-    assert "By deadline" in body
+    # "Cross-section, not extra roles" went on 2026-09-03 with the stage
+    # sections. It promised that the band's rows were not EXTRA roles on top
+    # of the ones below; with nothing below, the promise has no referent and
+    # the sentence is simply false. The eyebrow now states the one thing the
+    # six headings cannot state for themselves — the order.
+    assert "Cross-section, not extra roles" not in body
+    assert "Soonest first" in body
+    assert "Everything you're tracking" in body
     assert "of 3 live" in body
-    assert 'href="#stage-saved"' in body
+    # The third affordance was the row's link down to its stage section. That
+    # section no longer exists, so the pill is a control rather than a
+    # pointer — the row still declares its stage, it just does it by being
+    # set to it.
+    assert 'name="status" data-stage-select' in body
 
 
 @pytest.mark.django_db
@@ -936,18 +964,20 @@ def test_a_stage_card_names_its_firm_once(client, db):
                                    warmth="replied")
     client.force_login(user)
 
+    # The card this measured is gone (2026-09-03); the people block moved to
+    # the band's own row, which is now the only place it renders. The rule it
+    # protects is unchanged and reads the same: one visible print of the firm
+    # name per row, with the name kept on the block's hover.
     body = client.get(reverse("my_applications")).content.decode()
-    card = body[body.index('<article class="apps-card">'):]
-    card = card[:card.index("</article>")]
+    row = body[body.index('class="apps-lens-row'):]
+    row = row[:row.index("</li>")]
 
-    assert "You know 5 people here" in card
-    assert "+3 more" in card, "the plus is this page's own 'and this many beyond' shape"
-    # Visible text only — the firm name is still on both blocks' `title`, and
-    # a raw-markup count would be answered by the hovers this pass created.
-    visible = re.sub(r"<[^>]+>", " ", card)
+    assert "You know 5 people here" in row
+    assert "+3 more" in row, "the plus is this page's own 'and this many beyond' shape"
+    visible = re.sub(r"<[^>]+>", " ", row)
     assert visible.count("Bank of America") == 1, (
-        "the caps line at the top of the card is the only place it is printed")
-    assert "Bank of America" in card[card.index("rp-head"):], (
+        "the row's own firm line is the only place it is printed")
+    assert "Bank of America" in row[row.index("rp-head"):], (
         "and it is on the head's hover, moved rather than dropped")
 
 
@@ -976,15 +1006,25 @@ def test_the_empty_people_block_occupies_the_space_the_row_gives_it(client, db):
     client.force_login(user)
 
     body = client.get(reverse("my_applications")).content.decode()
-    assert "rp-empty" in body, "the empty block needs a hook the card can style"
+    assert "rp-empty" in body, "the empty block still needs its hook"
 
-    css = _page_css(client)
-    fill = _rule(css, ".apps-card .rp-compact.rp-empty")
-    assert "flex: 1 1 auto" in fill, "it grows into the slack rather than sitting in it"
-    assert "justify-content: center" in fill
-    # `.apps-foot`'s own auto margin would eat the slack first, so the card
-    # has to release it — otherwise the block above can never grow.
-    assert "margin-top: 0" in _rule(css, ".apps-card:has(.rp-empty) .apps-foot")
+    # THE HOLLOW CARD WAS A PROPERTY OF THE CARD GRID, and the grid is gone
+    # (2026-09-03). Those cards stretched to the tallest in their row, so one
+    # that knew nobody was handed 72px of slack and one grey sentence to fill
+    # it with — hence the `flex: 1 1 auto` / `justify-content: center` rules
+    # and the `:has(.rp-empty)` margin release that let the block claim it.
+    # A band row is sized by its own content: there is no slack to distribute
+    # and nothing to centre in. Those three rules went with the cards they
+    # were written for, and re-adding them here would be styling against a
+    # problem the layout no longer has.
+    #
+    # What still has to be true is that the block renders at all on a row
+    # whose firm the student knows nobody at — that is the prompt to go add
+    # someone, and it is the whole reason this page sits beside a CRM.
+    assert "Nobody here yet" in body
+    row = body[body.index('class="apps-lens-row'):]
+    assert "rp-empty" in row[:row.index("</li>")], (
+        "the empty people block does not reach the row it belongs to")
 
 
 @pytest.mark.django_db
@@ -1006,13 +1046,15 @@ def test_the_card_lost_padding_and_kept_its_people(client, db):
     UserOpportunity.all_objects.create(user=user, opportunity=o, applied_status="saved")
     client.force_login(user)
 
-    css = _page_css(client)
-    card = _rule(css, ".apps-card")
-    assert "padding: var(--s3) var(--s4)" in card
-    assert "gap: 6px" in card
-    assert "padding: 3px var(--s2)" in _rule(css, ".apps-card .rp-person")
-    assert "padding-top: var(--s1)" in _rule(css, ".apps-foot")
-    # The block itself is untouched below the rhythm: no colour, no size, no
-    # cap on how many names print.
+    # The card's own padding/gap rhythm went with the card. What this test
+    # was really holding down is the part that outlived it: the people block
+    # is carried by the shared `_role_people.html` partial at its own
+    # compact size, and the page never quietly widened the cap on how many
+    # names print to fill space. Both still assertable, on the row.
+    body = client.get(reverse("my_applications")).content.decode()
+    row = body[body.index('class="apps-lens-row'):]
+    row = row[:row.index("</li>")]
+    assert "rp-compact" in row, "the row uses the shared compact people block"
+
     from directory.views import APPS_PEOPLE_MAX
     assert APPS_PEOPLE_MAX == 2

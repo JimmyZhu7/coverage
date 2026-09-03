@@ -117,8 +117,24 @@
     font-variant-numeric: tabular-nums; color: var(--ink-3); font-weight: var(--w-reg); }
   .apps-lens-note { margin: 0 0 var(--s3); font-size: var(--fs-xs); color: var(--ink-3); }
   .apps-lens-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
-  .apps-lens-row { display: flex; align-items: center; gap: var(--s3);
-    flex-wrap: wrap; padding: var(--s2) var(--s3); border-radius: 10px;
+  /* A GRID, NOT A FLEX ROW, and that is the whole presentation fix on this
+     band. Read as a table — same four facts in the same order on every row —
+     it was laid out as flex, so each column was sized by its own content and
+     nothing lined up down the page. Measured on the demo board at 1280px
+     before the change: the stage pill's left edge landed on FIVE different x
+     positions across eight rows (1105, 1138, 1138, 1138, 1138, 1148, 1148,
+     1149) because the pill was sized by its label — "Interviewing" is 113px
+     against "Done" at 69 — and the countdown column came out 136px or 139px
+     depending on its own text, so the role column started at 212 on some
+     rows and 215 on others.
+     Four tracks fix all of it at once: a fixed countdown column wide enough
+     for the longest real string, the role taking the slack, and the two
+     controls at their natural widths. Every row now starts its role at the
+     same x and hangs its controls off the same right edge, which is what
+     lets the eye run down one column instead of re-finding it each row. */
+  .apps-lens-row { display: grid; align-items: center; gap: var(--s3);
+    grid-template-columns: 9.5rem minmax(0, 1fr) 8.75rem auto;
+    padding: var(--s2) var(--s3); border-radius: 10px;
     background: var(--paper); border: 1px solid var(--line);
     border-left: 3px solid var(--line-strong);
     transition: border-color var(--t-med), background-color var(--t-med),
@@ -186,18 +202,89 @@
   /* The stage pill, and the load-bearing bit of the whole overlap story: it is
      an anchor down to the one section this row is actually counted in. Prose
      can claim the row appears twice; a link that jumps you there settles it. */
-  .lens-stage { flex: none; display: inline-flex; align-items: center; gap: 4px;
+  /* The pill is a control now, not a link. Same size, weight and casing it
+     had as an anchor — it should still read as the row's little stage tag —
+     but it is a real <select>, so it carries a caret and it is what the
+     student changes the stage with. `-webkit-appearance: none` because the
+     native control paints an OS chrome that fights every other pill on the
+     page; the caret below is drawn back in as a background image so the
+     thing still announces itself as a menu rather than a text badge.
+     8.75rem, not 8: at 8rem the widest of the five values rendered as
+     "Interview…" — a control that ellipsises its own current state is worse
+     than one that is 12px wider.
+     `text-transform` on a <select> styles the closed value only — the open
+     option list is OS-rendered — which is exactly the split this page
+     already lives with elsewhere (see base.html's `.csel` enhancer). */
+  .lens-act { display: contents; }
+  /* `display: block` and a track of its own, NOT `inline-flex` in an `auto`
+     track. A <select> laid out as a flex box stops reporting its own text in
+     its intrinsic width: measured at 1280px, every control on the band came
+     out 33px wide — its padding and border and nothing else — and because an
+     `auto` track sizes to that phantom width the pills landed on five
+     different x positions (1009 to 1058) across ten rows while all measuring
+     the same 33px. A fixed track plus `width: 100%` makes the control the
+     same size and the same place on every row, which is the point of a
+     column, and 8rem is sized for "Interviewing" plus its caret. */
+  .lens-stage { display: block; width: 100%;
     font-size: 10px; font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.05em; padding: 3px 9px;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 4px 22px 4px 9px;
+    -webkit-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23666a5e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 6px center;
+    background-size: 11px 11px;
     border-radius: 999px; border: 1px solid var(--line-strong);
-    background: var(--surface); color: var(--ink-2); white-space: nowrap;
+    color: var(--ink-2); white-space: nowrap;
     cursor: pointer; text-decoration: none;
     transition: border-color var(--t-med), color var(--t-med),
       background-color var(--t-med); }
-  .lens-stage:hover { border-color: var(--accent-line); background: var(--accent-soft);
+  .lens-stage:hover { border-color: var(--accent-line); background-color: var(--accent-soft);
     color: var(--accent-ink); text-decoration: none; }
   .lens-stage:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .lens-stage svg { opacity: 0.75; }
+  /* A background image cannot take `currentColor`, so the caret above is
+     stroked with a literal light-palette grey and would stay that grey on a
+     dark ground. Declared for both of the ways this app can be dark — the
+     stamped choice and the un-stamped system default — because a token
+     defined in only one of them is this stylesheet's classic bug. */
+  :root[data-theme="dark"] .lens-stage {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239c9f92' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5'/%3E%3C/svg%3E");
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .lens-stage {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239c9f92' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5'/%3E%3C/svg%3E");
+    }
+  }
+  /* `background-color`, never the `background` shorthand: the shorthand
+     resets `background-image` and would silently wipe the caret drawn above,
+     which is the one thing telling a reader this pill opens. */
+  .lens-stage { background-color: var(--surface); }
+  /* Remove is the destructive verb on this row, so it is the quietest thing
+     on it until you go looking: `--ink-3` on no ground at all, taking the
+     danger colour only on hover and focus. It is always in the DOM and
+     always tabbable rather than hover-revealed — a control that only exists
+     under a mouse is a control a phone cannot reach. */
+  .lens-remove { flex: none; border: 1px solid transparent; background: transparent;
+    padding: 4px 6px; border-radius: var(--r-ctl, 8px);
+    font-size: var(--fs-xs); color: var(--ink-3); cursor: pointer;
+    white-space: nowrap; transition: color var(--t-med), border-color var(--t-med); }
+  .lens-remove:hover { color: var(--danger); border-color: var(--danger-line); }
+  .lens-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* At phone width four tracks cannot hold: the countdown and the role stack,
+     and the two controls sit together on a line of their own under them. */
+  /* At phone width four tracks cannot hold. The countdown and the role each
+     take the full width, and the two controls share a line under them — but
+     the status control KEEPS A FIXED TRACK, which the first version of this
+     rule forgot: dropping it into an `auto` column put the control straight
+     back to being sized by its own label, and measured at 375px it came out
+     five different widths (88 to 137px) at five different left edges, which
+     is the exact raggedness the desktop grid was added to remove. Same 8rem
+     here, so the control is the same object on both layouts. */
+  @media (max-width: 640px) {
+    .apps-lens-row { grid-template-columns: 8.75rem minmax(0, 1fr); }
+    .apps-lens-row .lens-when,
+    .apps-lens-row .lens-role { grid-column: 1 / -1; }
+    .lens-remove { justify-self: start; }
+  }
 
   /* Empty lens: a sentence AND a way out, never a bare region
      (ux: empty-states). */
@@ -207,152 +294,23 @@
     flex-wrap: wrap; }
   .apps-lens-empty svg { flex: none; color: var(--ink-3); }
 
-  /* ---- Stage sections --------------------------------------------------- */
-  .apps-stage { margin-top: var(--s6); scroll-margin-top: var(--s5); }
-  .apps-stage > h2 { font-size: var(--fs-l); margin: 0 0 var(--s3);
-    display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
-  .apps-stage > h2 .scrub-count { font-family: var(--font-mono); font-size: var(--fs-s);
-    font-variant-numeric: tabular-nums; color: var(--ink-3); }
-  .apps-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-    gap: var(--s3); }
-  /* ---- The card's weight ------------------------------------------------
-     These cards are a grid, so every card in a row stretches to the TALLEST
-     card in that row — which means the slack inside the sparse ones is not
-     their own doing, it is the tall card's height handed to them. A card
-     with two names and a "1 more" link measured 427.1px at 1280 and the
-     empty-network card beside it inherited every pixel, so the way to close
-     a hole in one card is to take height out of the other.
+  {% comment %}
+  THE STAGE-SECTION STYLESHEET STOOD HERE — 146 lines for the five card
+  grids, their heads, their feet, the per-card stage select, the Clear-saved
+  disclosure and the closed-stage dashed treatment. The sections themselves
+  went on 2026-09-03 (see `_apps_body.html`), and every selector in this
+  block addressed something inside them: `.apps-stage`, `.apps-grid`,
+  `.apps-card`, `.apps-title`, `.apps-when`, `.apps-facts`, `.apps-foot`,
+  `.apps-read`, `.apps-remove`, `.apps-done-mark`, `.apps-shut-mark`, the
+  four `.apps-clear-*` rules and `.stage-closed`. Checked one at a time
+  against both templates before deleting: none of them has a home in the
+  markup any more.
 
-     Nothing below removes a fact. It takes the padding, the gaps and the
-     person rows down one step each — s4 to s3 on the block, s2 to 6px
-     between children, 5px to 3px inside a person row — which is the
-     difference between a card that reads dense and one that reads inflated,
-     and costs no line of copy. The touch targets stay above 44px: a person
-     row is the two stacked text lines plus its padding, not the padding
-     alone, and the footer's own control keeps its size below.
-     ---------------------------------------------------------------------- */
-  .apps-card { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface);
-    box-shadow: var(--shadow-1); padding: var(--s3) var(--s4); display: flex; flex-direction: column;
-    gap: 6px; min-width: 0;
-    transition: border-color var(--t-med), box-shadow var(--t-med); }
-  .apps-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-2); }
-  /* The people block, at card scale. The component itself lives in
-     coverage.css §14c and is drawn at three sizes; this is the third one
-     tightened for a 300px grid cell, and only the rhythm is touched — no
-     colour, no size, no name and no day-count is changed here. */
-  .apps-card .rp-compact { padding-top: var(--s2); }
-  .apps-card .rp-compact .rp-head { margin-bottom: 4px; }
-  .apps-card .rp-people { gap: 0; }
-  .apps-card .rp-person { padding: 3px var(--s2); }
-  .apps-card .rp-more { margin-top: 3px; }
-  /* The hollow card. A card that knows nobody at the firm carries one grey
-     sentence where its neighbour carries two names, and these cards are a
-     stretched grid — so that card is handed its neighbour's height and the
-     difference opens as a hole. Measured at 1512 on the founder's own row:
-     72.2px of nothing between the role and the prompt, on a card whose whole
-     people block was 28.2px.
-
-     Moving the prompt does not help; the hole only moves with it (tried:
-     pinning the prompt up under the role put all 119px in one piece at the
-     bottom instead, which reads worse than the same emptiness split in two).
-     What fixes it is the block OCCUPYING the space it is given rather than
-     sitting in one end of it: the empty prompt grows to fill whatever the
-     row's tallest card left over, and centres its sentence in that. The hole
-     stops existing because the region it was in now belongs to something.
-
-     `:has()` because the rule has to reach the card from a state only its
-     child knows, and `@supports` around it because coverage.css §5b already
-     treats `:has()` that way. Without it the block keeps the pinned-to-the-
-     bottom behaviour it has always had, which is a slightly emptier card and
-     nothing worse. */
-  @supports selector(:has(*)) {
-    .apps-card:has(.rp-empty) .apps-foot { margin-top: 0; }
-    .apps-card .rp-compact.rp-empty { margin-top: 0; flex: 1 1 auto;
-      display: flex; flex-direction: column; justify-content: center; }
-  }
-  .apps-firm { font-size: var(--fs-xs); color: var(--ink-2); font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.04em; }
-  .apps-title { font-size: var(--fs-m); font-weight: var(--w-med); line-height: 1.3; margin: 0; }
-  .apps-title a { color: var(--ink); }
-  .apps-title a:hover { color: var(--accent-ink); }
-  .apps-loc { font-size: var(--fs-xs); color: var(--ink-3); }
-  .apps-foot { display: flex; align-items: center; gap: var(--s2); margin-top: auto;
-    padding-top: var(--s1); flex-wrap: wrap; }
-  .apps-foot form { margin: 0; display: inline-flex; gap: var(--s2); align-items: center; }
-  .apps-foot select { width: auto; min-width: 8.5rem; font-size: var(--fs-s);
-    padding: 6px 30px 6px 12px; border-radius: 999px; cursor: pointer; }
-  .apps-remove { background: transparent; border-color: transparent; color: var(--ink-3);
-    padding: 4px 8px; font-size: var(--fs-xs); cursor: pointer;
-    transition: color var(--t-med), border-color var(--t-med),
-      background-color var(--t-med); }
-  .apps-remove:hover { color: var(--danger); border-color: var(--danger-line);
-    background: var(--danger-soft); }
-
-  /* The bulk-save undo strip. Shown exactly once — see _apps_body.html's
-     own comment on why `recent_bulk_save` is popped, not just read — so it
-     behaves like every other flash message on the product: one appearance,
-     then gone. Styled like one (accent-tinted, role="status") rather than
-     the danger tone below; undoing a save you just asked for is not itself
-     a warning. */
-  .apps-undo { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
-    margin-top: var(--s5); padding: 8px var(--s4) 8px var(--s3);
-    background: var(--accent-soft); border: 1px solid var(--accent-line);
-    border-left: 3px solid var(--accent); border-radius: 10px;
-    color: var(--ink-2); font-size: var(--fs-s); }
-  .apps-undo form { margin: 0; }
-  .apps-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
-    color: var(--accent-ink); border-radius: 999px; padding: 4px 14px;
-    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
-    transition: background var(--t-fast), border-color var(--t-fast); }
-  .apps-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
-
-  /* "Clear saved" — Saved only, see the template's own note on why no other
-     stage gets one. A `<details>` whose visible control only opens a stated
-     count and a second, explicit button. The feed's bulk save used the same
-     mechanism until 2026-09-02 and now uses `hx-confirm` and the site's
-     styled dialog instead (see `_pickcol.html`); this one keeps the
-     disclosure, because it must also work for a reader with JS off.
-     Danger-toned like `.apps-remove` above, because unlike the undo strip
-     this one IS a warning — it is about to delete rows. The stage heading
-     wraps (see `.apps-stage > h2` above) so this control can drop to its own
-     line rather than squeeze the label beside it. */
-  .apps-clear-confirm { display: inline-flex; margin-left: auto; }
-  .apps-clear-confirm > summary { list-style: none; }
-  .apps-clear-confirm > summary::-webkit-details-marker { display: none; }
-  .apps-clear-btn { background: transparent; border: 1px solid transparent; color: var(--ink-3);
-    padding: 4px 10px; font-size: var(--fs-xs); font-weight: var(--w-reg);
-    border-radius: 999px; cursor: pointer;
-    transition: color var(--t-fast), border-color var(--t-fast), background-color var(--t-fast); }
-  .apps-clear-btn:hover, .apps-clear-confirm[open] .apps-clear-btn
-    { color: var(--danger); border-color: var(--danger-line); background: var(--danger-soft); }
-  .apps-clear-form { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap;
-    margin-top: var(--s2); font-size: var(--fs-xs); font-weight: var(--w-reg);
-    text-transform: none; letter-spacing: 0; color: var(--ink-2); max-width: 32rem; }
-  .apps-clear-confirm-btn { border: 1px solid var(--danger-line); background: var(--danger-soft);
-    color: var(--danger); border-radius: 999px; padding: 4px 14px;
-    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer; flex: none;
-    transition: background var(--t-fast), border-color var(--t-fast); }
-  .apps-clear-confirm-btn:hover { border-color: var(--danger); }
-  /* Done is terminal, so its cards recede rather than compete with live ones —
-     but the recession is a dashed border and a stated word as well as a flatter
-     background, so "finished" never rests on the tint alone. */
-  .apps-stage.stage-closed .apps-card { background: var(--paper); border-style: dashed; }
-  .apps-stage.stage-closed .apps-title a { color: var(--ink-2); }
-  .apps-done-mark { font-size: var(--fs-micro); text-transform: uppercase;
-    letter-spacing: 0.06em; font-weight: var(--w-med); color: var(--ink-3); }
-  /* The firm pulled the posting. A full sentence rather than a pill like
-     `.apps-done-mark` above, because the two marks say genuinely different
-     things and this one's wording changes with the funnel stage (see
-     `_posting_closed_note` in views.py) — a three-word chip can't carry that,
-     and a student reading a bare CLOSED beside an application they submitted
-     would reasonably think they had lost it.
-
-     The copy itself is deliberately NOT quoted in this comment: the page
-     inlines its stylesheet, so a comment repeating a user-facing string makes
-     that string impossible to assert the absence of. */
-  .apps-shut-mark { display: block; margin-top: var(--s1); font-size: var(--fs-xs);
-    color: var(--ink-2); }
-
+  ONE FEATURE WENT WITH THEM, on purpose and worth naming: "Clear saved",
+  the bulk drop of every saved role, lived in the Saved section's own
+  heading. Per-row Remove below covers the same ground one row at a time,
+  which is the safer shape for a destructive control anyway.
+  {% endcomment %}
   /* ---- The reversal list, as a ledger row -------------------------------
      Thirteen bordered boxes, each holding one short line of text with its
      control stacked on a second line underneath, each running the full width

@@ -100,8 +100,10 @@ def test_my_applications_status_change_swaps_in_place_instead_of_redirecting(cli
     assert "<html" not in body.lower(), "a partial, not the full page"
     # The row actually moved stage — the reason a single-row swap can't work
     # here, and the reason this test posts a real status change rather than
-    # asserting on markup alone.
-    assert 'id="stage-submitted"' in body
+    # asserting on markup alone. It used to look for the stage SECTION the row
+    # had moved into; those went on 2026-09-03, so the proof is now the row's
+    # own control coming back preselected to the new stage.
+    assert '<option value="submitted" selected>Applied</option>' in body
     uo = UserOpportunity.objects.for_user(user).get(opportunity=o)
     assert uo.applied_status == "submitted"
 

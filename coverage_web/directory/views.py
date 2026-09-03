@@ -5312,13 +5312,23 @@ def _posting_closed_note(uo) -> dict | None:
     }
 
 
-def _lens_item(uo, *, today):
+def _lens_item(uo, *, today, people_by_firm=None):
     """One row as it appears in a deadline lens (Closing Soon / Rolling).
 
-    Carries its funnel stage with it — that label is what stops the lens from
-    reading as a separate pile of roles."""
+    Carries its funnel stage with it — that stage is what the row's own
+    control is set to, and changing it is how the student moves the role.
+
+    `net` is the people you already know at the firm. It used to live only on
+    the stage cards; when those were removed (2026-09-03) it was the one thing
+    on them that this row could not already say, and it is the whole reason
+    this page sits next to a CRM — "before you mark this Applied, you know
+    two people here" is the sentence the product exists to put in front of
+    someone. Same builder the cards used, so the two never disagreed and now
+    there is only one of them.
+    """
     o = uo.opportunity
     stage = uo.applied_status or "saved"
+    net = _stage_net(uo, o, people_by_firm) if people_by_firm is not None else None
     days_left = (o.deadline - today).days if o.deadline else None
     # Same split the feed's item builder uses above (see the "Rolling is a
     # CLAIM" comment ~line 1338): "Rolling" is only earned for postings whose
@@ -5340,6 +5350,7 @@ def _lens_item(uo, *, today):
         "place": _place(o),
         "stage": stage,
         "stage_label": _STAGE_LABELS.get(stage, stage.title()),
+        "net": net,
         "deadline": deadline_marker(o.deadline, o.deadline_precision, today=today),
         "reported": deadline_provenance(o),
         "days_left": days_left,
@@ -5553,7 +5564,7 @@ def _my_applications_context(request):
     shut_rows = [uo for uo in live if is_posting_closed(uo.opportunity)]
     dated = [uo for uo in live if not is_posting_closed(uo.opportunity)]
     closing = [
-        _lens_item(uo, today=today) for uo in dated
+        _lens_item(uo, today=today, people_by_firm=people_by_firm) for uo in dated
         if is_closing_soon(uo.opportunity.deadline, today=today)
     ]
     closing.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
@@ -5562,7 +5573,7 @@ def _my_applications_context(request):
     # calling it rolling would be a small lie about the posting. Rolling roles
     # carry no countdown and are never styled as overdue.
     rolling = [
-        _lens_item(uo, today=today) for uo in dated
+        _lens_item(uo, today=today, people_by_firm=people_by_firm) for uo in dated
         if uo.opportunity.deadline is None
     ]
     # The two lenses above leave a hole, and the fractions printed beside them
@@ -5572,13 +5583,13 @@ def _my_applications_context(request):
     # Both get a lens, so every live row is accounted for on this band.
     window_first, window_last = closing_soon_window(today)
     later = [
-        _lens_item(uo, today=today) for uo in dated
+        _lens_item(uo, today=today, people_by_firm=people_by_firm) for uo in dated
         if uo.opportunity.deadline is not None
         and uo.opportunity.deadline > window_last
     ]
     later.sort(key=lambda i: (i["days_left"], i["firm_name"].lower()))
     passed = [
-        _lens_item(uo, today=today) for uo in dated
+        _lens_item(uo, today=today, people_by_firm=people_by_firm) for uo in dated
         if uo.opportunity.deadline is not None
         and uo.opportunity.deadline < window_first
     ]
@@ -5587,8 +5598,19 @@ def _my_applications_context(request):
     # one number on the row that means nothing any more, and half of these
     # rows carry no deadline at all (a rolling role can be pulled too), so
     # `days_left` is None for them and would not sort against an int.
-    shut = [_lens_item(uo, today=today) for uo in shut_rows]
+    shut = [_lens_item(uo, today=today, people_by_firm=people_by_firm) for uo in shut_rows]
     shut.sort(key=lambda i: (i["firm_name"].lower(), i["title"].lower()))
+
+    # Everything the student has finished with. These rows are NOT in `live`
+    # (it is defined as "not Done" a few lines up), so before 2026-09-03 they
+    # appeared in no lens at all and existed only in the stage sections at the
+    # foot of the page. Those sections are gone, and a tracked row that no
+    # surface renders is a row the student cannot reach, reopen, or delete.
+    # Sorted by firm like `shut`, and for the same reason: a finished row's
+    # countdown is the one number on it that no longer means anything.
+    done = [_lens_item(uo, today=today, people_by_firm=people_by_firm) for uo in rows
+            if (uo.applied_status or "saved") == TRACK_CLOSED]
+    done.sort(key=lambda i: (i["firm_name"].lower(), i["title"].lower()))
 
     # Read down the band and you read down the calendar: what has gone, what
     # is going, what is coming, what never had a date. `empty_state` is what
@@ -5615,6 +5637,7 @@ def _my_applications_context(request):
             # posting is still tracked, so that is the half the note keeps.
             "note": "Still on your list.",
             "empty_state": False,
+            "counts_live": True,
         },
         {
             "key": "passed",
@@ -5626,6 +5649,7 @@ def _my_applications_context(request):
             # heading cannot: a window, a boundary, or what happens next.
             "note": "",
             "empty_state": False,
+            "counts_live": True,
         },
         {
             "key": "closing",
@@ -5633,6 +5657,7 @@ def _my_applications_context(request):
             "items": closing,
             "note": f"Within {CLOSING_SOON_DAYS} days.",
             "empty_state": True,
+            "counts_live": True,
         },
         {
             "key": "later",
@@ -5640,6 +5665,7 @@ def _my_applications_context(request):
             "items": later,
             "note": f"More than {CLOSING_SOON_DAYS} days away.",
             "empty_state": False,
+            "counts_live": True,
         },
         {
             "key": "rolling",
@@ -5661,6 +5687,20 @@ def _my_applications_context(request):
             # No note: "No posted deadline" was the heading in other words.
             "note": "",
             "empty_state": True,
+            "counts_live": True,
+        },
+        # Last, because it is the only group on the band that is not about
+        # when something closes — it is about the student having stopped.
+        # `counts_live` is False: every other group prints "N of M live", and
+        # these rows are by definition not live, so the fraction would be a
+        # subtraction that never comes out.
+        {
+            "key": "done",
+            "label": "Done",
+            "items": done,
+            "note": "Withdrawn, rejected, or finished with.",
+            "empty_state": False,
+            "counts_live": False,
         },
     ]
     # Roles the student marked "not for me". They live here rather than in

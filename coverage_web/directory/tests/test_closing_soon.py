@@ -287,9 +287,11 @@ def test_done_can_be_reopened(client, board):
 
 @pytest.mark.django_db
 def test_the_funnel_is_the_partition_and_sums_to_the_total(client, board, tracked):
-    """Roles appear twice by design (once in a lens, once in their stage). The
-    guarantee is that exactly ONE of those is the count: the funnel stages
-    partition the tracked set, so their lengths sum to `total`."""
+    """The funnel stages partition the tracked set, so their lengths sum to
+    `total`. They no longer partition anything the reader can SEE — the stage
+    sections went on 2026-09-03 and the funnel is a summary readout now — but
+    the arithmetic behind it is what every count on the page is drawn from,
+    so it still has to hold."""
     resp = client.get(reverse("my_applications"))
     stage_sum = sum(len(s["items"]) for s in resp.context["stages"])
     assert stage_sum == resp.context["total"] == 6
@@ -302,10 +304,18 @@ def test_the_funnel_is_the_partition_and_sums_to_the_total(client, board, tracke
     # and is asserted at 0 rather than dropped from the dict — an empty lens
     # still has to be part of the partition for the sum below to mean anything.
     by_key = {lens["key"]: len(lens["items"]) for lens in resp.context["lenses"]}
+    # `done` joined the band on 2026-09-03. It is the one group NOT cut out of
+    # `live` — those rows were previously rendered only by the stage sections,
+    # so when those went the rows would have reached no surface at all. It is
+    # excluded from the sum below for the same reason it prints a bare count
+    # rather than a fraction: it is not part of the live partition.
     assert by_key == {
         "posting_closed": 0, "passed": 1, "closing": 2, "later": 2, "rolling": 1,
+        "done": 0,
     }
-    assert sum(by_key.values()) == resp.context["live_total"] == 6
+    live_keys = {l["key"] for l in resp.context["lenses"] if l["counts_live"]}
+    assert sum(v for k, v in by_key.items() if k in live_keys) \
+        == resp.context["live_total"] == 6
     # Before the residue lenses existed this sum was 3 — the day-10 and
     # day-90 rows were in no lens at all while still being counted in the
     # "of N live" denominator printed beside every lens.
@@ -328,7 +338,9 @@ def test_lens_rows_show_the_stage_they_are_counted_in(client, board, tracked):
     # because the eyebrow above it had been making the same claim in four
     # words the whole time. The eyebrow is now where the claim lives, and the
     # fraction below is the arithmetic that backs it up.
-    assert "Cross-section, not extra roles" in body
+    # "Cross-section, not extra roles" retired with the duplication it
+    # apologised for; the eyebrow now states the band's order instead.
+    assert "Soonest first" in body
     assert "sorted by deadline instead of stage" not in body
     assert f"of {resp.context['live_total']} live" in body
 
