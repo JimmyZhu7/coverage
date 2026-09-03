@@ -624,6 +624,15 @@ def _build_actions(user, *, pace: bool = True):
         # rather than letting the click discover it (D).
         a["has_draft"] = bool((c.get("opener") or "").strip())
 
+        # THE WARMTH CHIP'S OWN SENTENCE (2026-09-02). The chip beside the
+        # contact's name prints the stored value bare — "chatted", "advocate"
+        # — and the keep-warm sentence underneath used to gloss it in nine
+        # words. The gloss is a fact about what a label MEANS, so it is a
+        # `title` now, exactly like the rail's send-window explanations. Blank
+        # for any warmth `crm.relevance.WARMTH_NOTE` has no sentence for, and
+        # the template draws no empty attribute for a blank.
+        a["warmth_note"] = rel.WARMTH_NOTE.get(c.get("warmth"), "")
+
         last = last_real.get(c["id"])
         a["last_kind"] = kind_labels.get(last.kind, last.kind) if last else None
         # THE LEDGER LINE AND THE ENGINE'S SENTENCE NOW COUNT THE SAME DAYS.
@@ -1482,6 +1491,18 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
     out: list[dict] = []
     for a in kept:
         a["opening"] = openings.get(a["contact"].get("firm_id"))
+        # `_mark_undeliverable` has already run and may have replaced this
+        # card's ask with "find a new address" (see that function). Every
+        # branch below writes `a["reason"]`, and a `keep_warm` or `follow_up`
+        # at a firm whose address bounced went through one of them and lost
+        # the bounce sentence — the card then asked for an email to an address
+        # the mail system has already rejected, which is the whole defect
+        # `_mark_undeliverable` shipped to end. Held here and restored after
+        # the chain, but only while the card still WEARS the undeliverable
+        # label: a branch that legitimately relabels the card (Reply, Apply,
+        # Check in) is asking for something else, and its own sentence is the
+        # right one for the thing it is now asking.
+        dead_reason = a["reason"] if a.get("undeliverable") else None
 
         if a["contact"].get("campaign_excluded"):
             # A campaign-excluded contact is only ever here because they wrote
@@ -1544,6 +1565,14 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
                 a["reason"] = rel.keep_warm_reason(a)
         elif a["action"] in ("keep_warm", "maintain"):
             a["reason"] = rel.keep_warm_reason(a)
+        else:
+            # Every remaining branch's card sentence (2026-09-02). Same
+            # division of labour the four branches above already use: the
+            # engine says who is due and why in its own fragment, and
+            # `crm.relevance` decides what the CARD says, reading the engine's
+            # `ctx` rather than re-parsing its prose. Unrecognised actions come
+            # back unchanged, so a new cadence branch renders as it always did.
+            a["reason"] = rel.card_reason(a)
 
         # APPLY-ONLY AT AN ASSESSMENT FIRM. Marked, never dropped (P4): the
         # card stays, the person stays, and the ask changes to the one the
@@ -1568,6 +1597,14 @@ def _gate_and_rank(actions: list[dict], tiers: dict, openings: dict,
             a["verdict"] = rel.REL_APPLY_ONLY
             a["label"] = rel.APPLY_ONLY_LABEL
             a["reason"] = rel.APPLY_ONLY_REASON
+
+        # See `dead_reason` at the top of this loop. AFTER the apply-only
+        # block on purpose: apply-only replaces a cold networking ask with an
+        # ask that needs no address at all, so it is one of the relabels that
+        # legitimately wins — and it is the more useful card of the two for
+        # somebody whose only address bounced.
+        if dead_reason is not None and a["label"] == UNDELIVERABLE_LABEL:
+            a["reason"] = dead_reason
 
         a["ev"] = rel.expected_value(a, affiliations=affiliations)
         # The season the student's own board is in, applied here rather than

@@ -50,8 +50,15 @@ as the row's left edge, every control and hx contract byte-identical.
   The warmth chip is a sibling of the whole text block, not a passenger on
   the firm line. Inside .act-top it centred against that one line, which put
   it 10px above the middle of a two-line identity.
+
+  The chip EXPLAINS ITSELF from 2026-09-02 (`crm.relevance.WARMTH_NOTE`). It
+  had printed a stored value bare — "chatted", "advocate" — and the sentence
+  below it carried the gloss instead ("and you have already had the
+  conversation", nine words, above a footer already reading "Chat happened").
+  The gloss is a fact about what a label means, which on this page is a
+  `title`; the chip is the label, so the title belongs to the chip.
   {% endcomment %}
-  <span class="chip warmth-{{ a.contact.warmth }}">{{ a.contact.warmth }}</span>
+  <span class="chip warmth-{{ a.contact.warmth }}"{% if a.warmth_note %} title="{{ a.warmth_note }}"{% endif %}>{{ a.contact.warmth }}</span>
   </div>
 
   <div class="act-context">
@@ -71,9 +78,32 @@ as the row's left edge, every control and hx contract byte-identical.
   audience that trusts its own spreadsheet more than any pitch.
   {% endcomment %}
   {% if a.reason %}<p class="act-reason">{{ a.reason }}</p>{% endif %}
-  <p class="act-last">
-    {% if a.moved %}<span class="act-moved" title="They replied or a chat happened within the last week"><i></i>Moving</span> · {% endif %}{% if a.last_kind %}Last: {{ a.last_kind }} · {{ a.last_business_days }} business day{{ a.last_business_days|pluralize }} ago
-    {% else %}No touches on record{% endif %}
+  {% comment %}
+  THE LEDGER ROW, on a diet the same night as the sentence above it
+  (2026-09-02, "short, concise, clean and informative"). It read
+
+      Last: Chat happened · 24 business days ago
+
+  which is a label, a kind, a count, a unit and a suffix for two facts.
+
+  "Last:" went to this row's `title`. It is not the kind of thing the row
+  states, it is a claim ABOUT what the row states — that this is the most
+  recent touch and not merely a touch — which is a `title` on this page, and
+  the title now carries the clock as well, which nothing on the card had ever
+  said out loud.
+
+  "ago" went because the rail settled the page's one reading rule the same
+  night: a bare count is time already spent and a future distance says "in"
+  (see `crm/tests/test_rail_copy_2026_09_02.py`, both directions). Recent
+  Activity dropped the identical word for the identical reason.
+
+  "business day(s)" STAYS, spelled out. The cadence counts business days and
+  the sentence above this row counts them too; shortening the unit to "24d"
+  would be the one edit here that changes a number rather than a word.
+  {% endcomment %}
+  <p class="act-last" title="The most recent touch on record, counted in business days like the queue's own clocks">
+    {% if a.moved %}<span class="act-moved" title="They replied or a chat happened within the last week"><i></i>Moving</span> · {% endif %}{% if a.last_kind %}{{ a.last_kind }} · {{ a.last_business_days }} business day{{ a.last_business_days|pluralize }}
+    {% else %}No touches yet{% endif %}
   </p>
   {% if a.pairs_with_debrief %}
     <p class="act-pair">Debrief this one first.</p>

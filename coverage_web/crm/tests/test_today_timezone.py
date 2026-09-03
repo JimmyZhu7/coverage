@@ -268,15 +268,31 @@ def test_the_confirm_chat_card_never_states_a_scheduling_date_it_lacks():
     learns a chat's time from an .ics DTSTART — so the card must not name a
     day. It used to say "chat was scheduled 6 business days ago", rendering
     business days since the LAST TOUCH as if it were the day a booking was
-    made, about a booking that never existed."""
+    made, about a booking that never existed.
+
+    REWRITTEN 2026-09-02. The sentence used to carry the six days itself
+    ("nothing logged in 6 business days") and no longer carries any count: the
+    ledger row directly under it prints the same silence in the same unit, and
+    the copy pass that night cut every clause a card said twice.
+
+    THE FACT DID NOT MOVE OFF THE CARD AND NEITHER DID THIS FILE'S CLAIM. Six
+    is the student's own count and seven is the UTC one, which is the whole
+    subject of this module; it is now asserted where the student reads it,
+    on `last_business_days`, computed from `local_date` in the same dressing
+    loop. The card naming no day it does not hold is asserted twice over, on
+    the face and on `ctx`.
+    """
     card = _la_confirm_chat_card()
     reason = card["reason"]
     assert "scheduled for" not in reason, "no chat time is on record"
     assert "was scheduled 6 business days ago" not in reason
-    assert "nothing logged in 6 business days" in reason, (
+    assert reason == "A chat was being arranged.", (
         f"the card should say what it knows, and only that: {reason!r}"
     )
     assert card["ctx"]["scheduled_on"] is None
+    assert card["last_business_days"] == 6, (
+        "the silence is counted on the student's clock, not on UTC's"
+    )
 
 
 def test_a_real_calendar_event_lets_the_card_name_the_day():
@@ -351,8 +367,16 @@ def test_a_cancelled_chat_contributes_no_date_to_the_card():
     """`thread_state` stays "chat_scheduled" through a cancellation, so naming
     the called-off time would print "chat was scheduled for Aug 23, did it
     happen?" about a meeting nobody attended. The card falls back to the
-    no-day sentence, whose "log the chat or reschedule" is exactly right, and
-    the contact does NOT get suppressed as a future chat either."""
+    no-day sentence, and the contact does NOT get suppressed as a future chat
+    either.
+
+    REWRITTEN 2026-09-02 for the same reason as
+    `test_the_confirm_chat_card_never_states_a_scheduling_date_it_lacks`
+    above: the sentence stopped counting the silence, because the ledger row
+    under it already counts it, so the six days are asserted where the student
+    reads them. The card's "log the chat or reschedule" went the same night —
+    those are the names of its own two buttons, printed an inch below.
+    """
     user = get_user_model().objects.create_user(
         email="tz-cancelled@example.com", password="pw12345!",
         timezone="America/Los_Angeles",
@@ -379,7 +403,10 @@ def test_a_cancelled_chat_contributes_no_date_to_the_card():
 
     card = [a for a in actions if a["action"] == "confirm_chat"][0]
     assert card["ctx"]["scheduled_on"] is None
-    assert "nothing logged in 6 business days" in card["reason"]
+    assert card["reason"] == "A chat was being arranged."
+    assert card["last_business_days"] == 6, (
+        "the silence is counted on the student's clock, not on UTC's"
+    )
 
 
 # ---------------------------------------------------------------------------
