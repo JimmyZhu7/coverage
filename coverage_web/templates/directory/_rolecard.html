@@ -152,7 +152,7 @@ only reintroduce the clipping bug this file's history is full of.
     `.rr-title a` is `-webkit-line-clamp: 2`. Measured on the founder's own
     board with `content-visibility` forced off so off-screen rows reported
     real geometry: 25 of 311 rows overflow that clamp at 1280px and 64 of
-    311 at 375px, and every one of them but one had NO `title` at all — the
+    311 at 375px, and every one of them but one had NO `title` at all. The
     attribute was emitted only on the ~3% of rows carrying an `unconfirmed`
     note. So a student met "Central Relationship Management Corporate and
     Institutional Banking Interns…" and the only way to see the end was to
@@ -166,7 +166,7 @@ only reintroduce the clipping bug this file's history is full of.
 
     ON EVERY ROW, not only the clipped ones. Whether the clamp bites depends
     on the rendered width, the viewport and the reader's font, none of which
-    the template can know — the same argument `.rr-loc` makes for always
+    the template can know, the same argument `.rr-loc` makes for always
     carrying its own text. Repeating a short title in its tooltip adds no
     claim: it is the same string the anchor already holds.
 
