@@ -488,6 +488,27 @@ The rules it suppresses live in coverage.css beside the gate's own comment.
        Danger Zone's Delete Account, and true of every stacked row's button).
        Buttons only: a select or toggle at full width reads as a text field. */
     .set-row-control .btn { flex: 1 1 auto; text-align: center; justify-content: center; }
+    /* ...AND THE RULE ABOVE COULD NOT SEE HALF OF THEM. `flex` only means
+       anything to a flex item, i.e. to a direct child of a flex box. A row
+       whose action POSTs wraps its button in a <form>, so the button's flex
+       container is that form and not `.set-row-control` — the declaration
+       computed on every button (`flex: 1 1 auto` on all eleven this deploy
+       renders, measured) and did nothing on the wrapped ones, because the
+       form itself was the unstretched item.
+
+       Measured at 375px in a 301px control track: Manage, Change, Sign Out
+       and Delete Account filled it at 301px, while Reset (Calendar Link)
+       sat at 77px and the Decisions Yes/No pair at 64px and 59px — the same
+       "floated in dead space" defect the comment above says was reported
+       against Delete Account and fixed, still live in the three rows the
+       selector could not reach. Whether an action needs a POST is invisible
+       to the reader, so it must not be what decides how the button looks.
+
+       The form becomes the stretching item and a flex box itself, which
+       hands the stretch straight through to the button already asking for
+       it. Two forms in one row (Decisions' Yes/No) split the track evenly,
+       exactly as the two plain buttons of Import/Export already do. */
+    .set-row-control > form { flex: 1 1 auto; display: flex; }
     .set-row-value { align-self: flex-start; }
   }
   @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
@@ -2238,6 +2259,43 @@ that don't already declare explicit htmx behaviour.
           <h2 id="security-h">Sign-In &amp; Security</h2>
         </div>
         <div class="set-body">
+          {% comment %}
+          THE BUTTONS CARRY THE VERB, THE LABEL CARRIES THE NOUN.
+
+          Measured on this card at 1280px: one row anatomy, two different
+          naming conventions running at once. All four buttons that render on
+          an unconfigured deploy repeated a noun their own row label had
+          already stated 465-602px to their left — "Email"/"Manage Email",
+          "Password"/"Change Password", "Sign Out Other Devices"/"Sign Out
+          Others", "Calendar Link"/"Reset Calendar Link" — while the fifth,
+          the conditional "Connected Accounts"/"Manage", did not. The
+          conditional one is the one that reads right, and it is the pattern
+          Your Data two cards down already uses ("Import & Export" over
+          Import and Export, "Privacy & Terms" over Privacy and Terms).
+
+          This is the 2026-08-29 subtitle sweep's own rule, applied to the
+          half of the row it never reached. That sweep deleted a subtitle
+          here for exactly this reason ("the label and the Change Password
+          button beside it already say everything that sentence did") and
+          another under Contacts ("the label and the total beside it already
+          say that") — then left the buttons repeating the labels.
+
+          The ragged edge was the visible cost: right-aligned buttons whose
+          widths ran 128/152/140/164px started at four different x (1067,
+          1043, 1055, 1031) down one column of four controls that all do the
+          same kind of thing. Verbs alone halve that spread, 36px to 18px
+          (x now 1104/1105/1100/1118), with the right edge still 1195 on all
+          four and every button still 44px tall.
+
+          Every button in this card now carries an explicit `aria-label` with
+          the full action, so the shorter visible text costs a screen reader
+          nothing. That INCLUDES the existing "Manage" on Connected Accounts,
+          which had no accessible name of its own and would otherwise have
+          been the one bare verb in the card that a screen reader could not
+          resolve.
+
+          Danger Zone is deliberately NOT part of this: see its own note.
+          {% endcomment %}
           <div class="set-row">
             <div class="set-row-main">
               <span class="set-row-label">Email</span>
@@ -2245,7 +2303,8 @@ that don't already declare explicit htmx behaviour.
                 {% if email_verified %}· Verified{% else %}· Not yet verified{% endif %}</div>
             </div>
             <div class="set-row-control">
-              <a class="btn" href="{% url 'account_email' %}">Manage Email</a>
+              <a class="btn" href="{% url 'account_email' %}"
+                 aria-label="Manage your email address">Manage</a>
             </div>
           </div>
 
@@ -2265,11 +2324,17 @@ that don't already declare explicit htmx behaviour.
               <span class="set-row-label">Password</span>
               {% comment %}
               2026-08-29 subtitle sweep: "Used with your email to sign in."
-              cleared no bar — the label and the Change Password button
-              beside it already say everything that sentence did. The other
-              branch stays: a social-only account having no password at all
-              is a real, non-obvious fact, and it's why the button on this
-              row reads "Set a Password" instead of "Change Password".
+              cleared no bar — the label and the Change button beside it
+              already say everything that sentence did. The other branch
+              stays: a social-only account having no password at all is a
+              real, non-obvious fact.
+
+              CHANGE vs SET is still the whole point of this row, and it
+              survives the trim: the verb is the half that was ever doing
+              the work ("Set" means there isn't one yet), and the noun it
+              used to trail is the label directly to its left. The
+              social-only branch keeps its full sentence as well, so that
+              account learns the fact twice over.
               {% endcomment %}
               {% if not has_usable_password %}
                 <div class="set-row-desc">You don't have a password. You sign in with a connected account.</div>
@@ -2277,9 +2342,11 @@ that don't already declare explicit htmx behaviour.
             </div>
             <div class="set-row-control">
               {% if has_usable_password %}
-                <a class="btn" href="{% url 'account_change_password' %}">Change Password</a>
+                <a class="btn" href="{% url 'account_change_password' %}"
+                   aria-label="Change your password">Change</a>
               {% else %}
-                <a class="btn" href="{% url 'account_set_password' %}">Set a Password</a>
+                <a class="btn" href="{% url 'account_set_password' %}"
+                   aria-label="Set a password">Set</a>
               {% endif %}
             </div>
           </div>
@@ -2297,7 +2364,8 @@ that don't already declare explicit htmx behaviour.
                 </div>
               </div>
               <div class="set-row-control">
-                <a class="btn" href="{% url 'socialaccount_connections' %}">Manage</a>
+                <a class="btn" href="{% url 'socialaccount_connections' %}"
+                   aria-label="Manage your connected accounts">Manage</a>
               </div>
             </div>
           {% endif %}
@@ -2306,14 +2374,23 @@ that don't already declare explicit htmx behaviour.
             <div class="set-row-main">
               {% comment %}
               2026-08-29 subtitle sweep: deleted outright. "Other" is
-              already in the label and the button ("Sign Out Others"); the
-              sentence restated it in longer form and added nothing.
+              already in the label and the button; the sentence restated it
+              in longer form and added nothing.
+
+              The label is the NOUN now ("Other Devices"), not a second copy
+              of the verb. It was "Sign Out Other Devices" over a button
+              reading "Sign Out Others" — the same instruction twice, 517px
+              apart, and the two halves did not even agree on the wording
+              ("Other Devices" against "Others"). This was the worst of the
+              four repetitions on the card and the only one where the label
+              was itself a verb phrase, which is why it is the only one whose
+              label moves as well as its button.
               {% endcomment %}
-              <span class="set-row-label">Sign Out Other Devices</span>
+              <span class="set-row-label">Other Devices</span>
             </div>
             <div class="set-row-control">
               <a class="btn" href="{% url 'accounts:signout_all' %}"
-                 aria-label="Sign out on all other devices">Sign Out Others</a>
+                 aria-label="Sign out on all other devices">Sign Out</a>
             </div>
           </div>
 
@@ -2341,7 +2418,8 @@ that don't already declare explicit htmx behaviour.
             <div class="set-row-control">
               <form method="post" action="{% url 'crm:calendar_token_reset' %}">
                 {% csrf_token %}
-                <button type="submit" class="btn">Reset Calendar Link</button>
+                <button type="submit" class="btn"
+                        aria-label="Reset your calendar link">Reset</button>
               </form>
             </div>
           </div>
@@ -2462,6 +2540,20 @@ that don't already declare explicit htmx behaviour.
               <div class="set-row-desc">Deletes your account and everything in it, permanently.
                 <a href="{% url 'accounts:export' %}">Export your data</a> first if you want it.</div>
             </div>
+            {% comment %}
+            THE ONE BUTTON THAT KEEPS ITS NOUN. Sign-In & Security above
+            trims every button to its verb because the label beside it
+            already carries the noun, and by that rule this red button would
+            read "Delete" — its label says "Delete Account" 150px to its
+            left, the closest label-to-button pairing on the page.
+
+            It does not, and the exception is the point: everything else on
+            this page is reversible by doing it again, and this is the only
+            control that is not. A destructive button should name what it
+            destroys at the moment of the click, without the reader having
+            to look left to find out. Concision is worth a repeated word
+            everywhere on this page except here.
+            {% endcomment %}
             <div class="set-row-control">
               <a class="btn btn-danger" href="{% url 'accounts:delete' %}"
                  aria-label="Delete account permanently">Delete Account</a>

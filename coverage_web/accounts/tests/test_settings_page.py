@@ -184,6 +184,74 @@ def test_the_danger_zone_is_last_and_holds_exactly_one_action(body):
     assert danger.count("set-row-label") == 1
 
 
+# ---------------------------------------------------------------------------
+# The label carries the noun, the button carries the verb
+# ---------------------------------------------------------------------------
+def _security_rows(body: str) -> list[tuple[str, str, str | None]]:
+    """(row label, button text, button aria-label) for each Sign-In & Security
+    row that has a button. Both <a class="btn"> and <button class="btn">."""
+    card = body.split('id="security"', 1)[1].split("</section>", 1)[0]
+    rows = []
+    for chunk in card.split('<div class="set-row">')[1:]:
+        label = re.search(r'<span class="set-row-label">(.*?)</span>', chunk, re.S)
+        btn = re.search(
+            r"<(?:a|button)[^>]*\bclass=\"btn\"(?P<attrs>[^>]*)>(?P<txt>.*?)</(?:a|button)>",
+            chunk,
+            re.S,
+        )
+        if not (label and btn):
+            continue
+        aria = re.search(r'aria-label="([^"]*)"', btn.group("attrs"))
+        rows.append(
+            (
+                re.sub(r"\s+", " ", label.group(1)).strip(),
+                re.sub(r"\s+", " ", btn.group("txt")).strip(),
+                aria.group(1) if aria else None,
+            )
+        )
+    return rows
+
+
+def test_a_security_button_never_repeats_its_own_row_label(body):
+    """Measured at 1280px: four of this card's five buttons restated a noun
+    their own label had already said 465-602px to their left ("Email" over
+    "Manage Email", "Sign Out Other Devices" over "Sign Out Others"), while
+    "Connected Accounts" over "Manage" did not. One card, one row anatomy,
+    two naming conventions — and the fifth is the one that reads right. It
+    is also the rule the 2026-08-29 subtitle sweep applied to the other half
+    of these same rows and never carried across to the buttons."""
+    rows = _security_rows(body)
+    assert rows, "the Sign-In & Security card rendered no action rows"
+    for label, text, _ in rows:
+        shared = set(re.findall(r"[a-z]+", label.lower())) & set(
+            re.findall(r"[a-z]+", text.lower())
+        )
+        assert not shared, f"{label!r} button repeats {sorted(shared)}: {text!r}"
+
+
+def test_every_security_button_still_says_the_whole_action_out_loud(body):
+    """The visible text is a bare verb now, so the accessible name has to
+    carry the rest — otherwise a screen reader gets a column of "Manage",
+    "Change", "Reset" with nothing saying what they act on. This covers the
+    pre-existing "Manage" on Connected Accounts too, which had no accessible
+    name of its own before the trim."""
+    for label, text, aria in _security_rows(body):
+        assert aria, f"{label!r} button {text!r} has no aria-label"
+        assert len(aria.split()) > len(text.split()), (
+            f"{label!r} aria-label {aria!r} adds nothing to {text!r}"
+        )
+
+
+def test_the_delete_button_keeps_the_noun_the_others_dropped(body):
+    """The one exception, and the reason for it: every other control on this
+    page is undone by doing it again, and this one is not. A destructive
+    button names what it destroys at the point of the click rather than
+    making the reader look left for it."""
+    danger = body.split('id="danger"', 1)[1].split("</section>", 1)[0]
+    assert ">Delete Account</a>" in danger
+    assert 'aria-label="Delete account permanently"' in danger
+
+
 def test_the_language_section_is_gone(body):
     """It saved `User.language` and nothing ever read it — no LocaleMiddleware,
     no catalogs, no {% trans %}. A control that does nothing is the same defect
@@ -328,6 +396,25 @@ def test_the_rows_stack_on_a_narrow_screen(body):
     css = "\n".join(re.findall(r"<style>(.*?)</style>", body, re.S))
     narrow = css.split("@media (max-width: 560px)", 1)[1]
     assert "flex-direction: column" in narrow
+
+
+def test_a_stacked_rows_button_stretches_even_when_the_action_posts(body):
+    """`flex` binds a child to its own flex container, so `.set-row-control
+    .btn { flex: 1 1 auto }` was inert for every row that wraps its button in
+    a <form> — the form was the unstretched item, not the button. Measured at
+    375px in a 301px track: Manage/Change/Sign Out/Delete Account filled it,
+    while Reset sat at 77px and Decisions' Yes/No at 64px and 59px, the same
+    "floated in dead space" defect that rule was written to remove. Whether an
+    action needs a POST is invisible to the reader and must not decide how the
+    button looks, so the form has to stretch and pass it through."""
+    css = "\n".join(re.findall(r"<style>(.*?)</style>", body, re.S))
+    narrow = css.split("@media (max-width: 560px)", 1)[1]
+    rule = re.search(r"\.set-row-control > form \{([^}]*)\}", narrow)
+    assert rule, "no stacked-row rule for a form-wrapped button"
+    # Stretching alone is not enough: without `display: flex` the form grows
+    # and the button inside it still sits at content width.
+    assert "flex: 1 1 auto" in rule.group(1)
+    assert "display: flex" in rule.group(1)
 
 
 
