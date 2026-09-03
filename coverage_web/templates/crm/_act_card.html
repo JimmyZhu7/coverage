@@ -188,8 +188,24 @@ as the row's left edge, every control and hx contract byte-identical.
                 hx-post="{% url 'crm:today_act' a.contact.id 'reply' %}">They replied</button>
       {% endif %}
       {% if a.contact.email %}
-        <a class="btn act-btn" href="{{ a.mailto }}"
-           aria-label="Compose an email to {{ a.contact.name }}{% if a.has_draft %}, a draft is ready{% endif %}">Compose{% if a.has_draft %} <span class="act-draft">Draft ready</span>{% endif %}</a>
+        {% comment %}
+        THE DRAFT MARK CANNOT COST WIDTH. It used to be the words "Draft
+        ready" inside this button, and `.act-primary` is right-aligned with
+        `flex: 1 1 auto` buttons, so the one card in a lane that had a draft
+        pushed its whole group left: measured on the founder's own queue at
+        1440px, 294px against 234px on every other card, which put that
+        card's Done button 60px out of the column its four neighbours drew.
+        A lane reads as a table; the first thing a table owes is that its
+        columns line up.
+
+        So the state moves onto the control it is about, as a corner mark
+        that is drawn outside the flow and costs nothing. The words are not
+        lost: they are the button's `title`, and the accessible name has
+        said "a draft is ready" all along.
+        {% endcomment %}
+        <a class="btn act-btn{% if a.has_draft %} has-draft{% endif %}" href="{{ a.mailto }}"
+           {% if a.has_draft %}title="Draft ready"
+           {% endif %}aria-label="Compose an email to {{ a.contact.name }}{% if a.has_draft %}, a draft is ready{% endif %}">Compose</a>
       {% else %}
         <a class="btn act-btn" href="{% url 'crm:contact_detail' a.contact.id %}"
            aria-label="Add an email address for {{ a.contact.name }}">Email</a>

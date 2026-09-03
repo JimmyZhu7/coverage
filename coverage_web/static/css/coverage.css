@@ -1635,8 +1635,24 @@ a.pill:hover { text-decoration: underline; }
 .chip.warmth-advocate { background: var(--w-advocate-s); color: var(--w-advocate-t); border-color: var(--w-advocate-l); }
 
 .prio { border: 0; }
-.prio.prio-0 { background: var(--w-advocate-s); color: var(--w-advocate-t); }
-.prio.prio-1 { background: var(--w-replied-s);  color: var(--w-replied-t); }
+/* TWO CHIPS, TWO MEANINGS, AND THEY USED TO BE THE SAME COLOUR. `_act_card`
+   renders the warmth chip and this one side by side: warmth is a state that
+   belongs to the relationship ("replied", "chatted"), this one is the action
+   the queue wants from you today ("Reply", "Propose a chat"). Until
+   2026-09-03 `.prio-1` was declared with `--w-replied-s/t` and `.prio-0`
+   with `--w-advocate-s/t` — not similar to the warmth chips, the SAME two
+   tokens, so a contact whose warmth was "replied" carrying a priority-1
+   "Reply" drew two pixel-identical chips an inch apart saying entirely
+   different things.
+   The accent is already this file's answer for "addressed to you":
+   `.prio-debrief` and `.prio-proposal` (crm/_styles) have both been drawn
+   with it since they were written, and these numeric ones were the
+   stragglers. Rank now reads as depth in one hue — solid for an overdue
+   action, soft for a due one — instead of borrowing a second vocabulary.
+   `.prio-2`/`.prio-3` are left alone: `--band-cold-*` is not a warmth chip
+   token, so nothing collides there. */
+.prio.prio-0 { background: var(--accent); color: var(--surface); }
+.prio.prio-1 { background: var(--accent-soft); color: var(--accent-ink); }
 .prio.prio-2, .prio.prio-3 { background: var(--band-cold-s); color: var(--band-cold-t); }
 /* A stated deadline on an application card. Warm, not hot: the date is a
    thing to do, not a thing that has gone wrong, and hot is spoken for by the

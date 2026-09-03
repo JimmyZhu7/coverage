@@ -912,7 +912,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      the old phrase is gone greps the whole response — quoting it here would
      fail that test from a stylesheet comment. Same trap the feed's honesty
      tests hit. */
-  .act-draft { color: var(--ok); font-size: var(--fs-micro); font-weight: var(--w-med); }
+  /* A notification mark, straddling the corner so it reads as something
+     waiting ON the button rather than a decoration inside it. Absolutely
+     positioned and therefore free: the button measures exactly what it
+     measures without a draft, which is the whole point (see `_act_card`).
+     The ring is the card's own surface, so the dot stays a dot against
+     both the button and whatever it overhangs. */
+  .act-btn.has-draft { position: relative; }
+  .act-btn.has-draft::after { content: ""; position: absolute;
+    top: -3px; right: -3px; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--ok); border: 2px solid var(--surface); }
 
   /* Debrief lane: a chat that already happened and hasn't been written
      down. Toned as a capture prompt, not an alarm — it's a five-minute job,
