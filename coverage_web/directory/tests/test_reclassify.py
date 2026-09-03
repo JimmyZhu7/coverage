@@ -121,3 +121,54 @@ def test_reclassify_never_downgrades_a_senior_title_regardless_of_hint(monkeypat
 
     senior.refresh_from_db()
     assert senior.bucket == "other"
+
+
+# ---------------------------------------------------------------------------
+# The catch-up half of the Workday `bulletFields` read. Ingest fills the
+# location on the way in, but 429 open rows are already stored blank beside a
+# payload that names their office, and they should not have to wait for their
+# board's next scrape to answer a Region filter.
+# ---------------------------------------------------------------------------
+
+def test_reclassify_fills_a_blank_location_from_the_stored_payload():
+    firm = _firm("raymondjames", "Raymond James")
+    row = _opp(firm, "2027 Equity Research Associate", source="workday",
+               location="", region="",
+               raw={"bulletFields": ["Saint Petersburg, Florida - "
+                                     "United States", "R-0012398"]})
+
+    call_command("reclassify")
+
+    row.refresh_from_db()
+    assert row.location == "Saint Petersburg, Florida - United States"
+    assert row.region == "us"
+
+
+def test_reclassify_never_overwrites_a_location_the_connector_reported():
+    """Fill-only, the same contract ingest keeps. A tenant that states its
+    place and also lists a different one in its display bullets keeps the
+    stated one."""
+    firm = _firm("raymondjames", "Raymond James")
+    row = _opp(firm, "2027 Equity Research Associate", source="workday",
+               location="Chicago, Illinois", region="",
+               raw={"bulletFields": ["London - United Kingdom"]})
+
+    call_command("reclassify")
+
+    row.refresh_from_db()
+    assert row.location == "Chicago, Illinois"
+    assert row.region == "us"
+
+
+def test_reclassify_leaves_a_bullet_list_of_codes_alone():
+    """The negative: nothing in these bullets names a place, so the row stays
+    honestly blank rather than showing a requisition number as an office."""
+    firm = _firm("pwc", "PwC")
+    row = _opp(firm, "Assurance Associate", source="workday",
+               location="", region="", raw={"bulletFields": ["566817WD"]})
+
+    call_command("reclassify")
+
+    row.refresh_from_db()
+    assert row.location == ""
+    assert row.region == ""

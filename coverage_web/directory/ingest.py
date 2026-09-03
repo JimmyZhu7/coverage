@@ -55,9 +55,11 @@ from coverage_connectors import BoardConfig, FetchResult, Opportunity as ConnOpp
 
 from .boards import board_key
 from .classify import (
-    board_is_campus, bucket_from_contract, classify_role, clean_title, cohort_from_provider_title,
+    board_is_campus, bucket_from_contract, bucket_from_event_filing,
+    classify_role, clean_title, cohort_from_provider_title,
     derive_class_year, extract_class_year, extract_cohort,
-    extract_deadline_from_text, extract_sponsorship, normalize_region, posting_text,
+    extract_deadline_from_text, extract_sponsorship, location_from_bullets,
+    normalize_region, posting_text,
 )
 from .dupes import identity_fragment, provider_identity
 from .models import Firm, Opportunity, OpportunityChange, ScrapeRun
@@ -297,6 +299,11 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     # where it is silent.
     bucket = (bucket_from_contract((opp.raw or {}).get("contract_type"),
                                    opp.title or "")
+              # The board's own label table, same posture as the contract
+              # type above: tal.net files an event with an "Event Date"
+              # column and a role with an "Application Deadline", never
+              # both. See classify.bucket_from_event_filing.
+              or bucket_from_event_filing(opp.raw, opp.title or "")
               or classify_role(opp.title or "", campus_hint=campus_hint))
     cohort = (opp.cohort or extract_cohort(opp.title or "")
               or cohort_from_provider_title(opp.raw))
@@ -316,7 +323,15 @@ def _apply_opportunity(firm: Firm, opp: ConnOpportunity, now, stats: dict, *,
     # The full value still feeds `content_hash`, so change-detection is
     # unaffected. `[:255]` is safe on "" (opp.title/location are never None).
     title = clean_title(opp.title)[:255]
-    location = (opp.location or "")[:255]
+    # A Workday tenant that omits `locationsText` altogether still names the
+    # office — in `bulletFields`, beside the requisition code. 429 open rows
+    # sat at `location=""` on 2026-09-02 while the payload we had already
+    # stored said "Pittsburgh, Pennsylvania - United States". Read only when
+    # the connector reported nothing (the connector's own field always wins),
+    # and only for an entry `normalize_region` recognises as a place, so a
+    # requisition code can never be shown as an office. See
+    # `classify.location_from_bullets`.
+    location = ((opp.location or "") or location_from_bullets(opp.raw))[:255]
     # Canonical market (hk/us/sg/eu or "") derived from the location — a
     # connector never sets region, so the location text is the only signal.
     region = (opp.region or "").strip() or normalize_region(location)

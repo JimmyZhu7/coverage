@@ -361,6 +361,11 @@ _OTHER_MARKET_KEYS: tuple[str, ...] = (
     # Campus tail: cities in markets already keyed only by country name
     # (Kazakhstan, Ecuador) plus two more Southeast Asian offices.
     "astana", "almaty", "atyrau", "guayaquil", "cebu", "melaka", "surabaya",
+    # 2026-09-02: spelled-out Canadian provinces the ", canada" family
+    # misses. "Regina, Saskatchewan" is the shape; the bare code ", SK" is
+    # refused above because Slovakia writes it too.
+    ", saskatchewan", ", nova scotia", ", new brunswick", ", newfoundland",
+    ", prince edward island",
 )
 
 # Placeless by design. Checked LAST, after every real market: "Virtual —
@@ -442,6 +447,74 @@ _US_STATE_KEYS = frozenset({", ny", ", il", ", ma", ", ca", ", wa", ", tx",
                             ", ga", ", nc", ", fl", ", tn", ", pa", ", co",
                             ", md", ", ct", ", nj"})
 
+# THE SPELLED-OUT STATE. The suffix rule above reads ", OH" and cannot read
+# ", Ohio", so a board that writes its states out in full was invisible to
+# it — and TD's American branch network writes nothing else. Measured
+# 2026-09-02 on the live board: 238 open rows sat at region="" whose own
+# location field named a US state in as many words ("Waterville, Maine",
+# "Stratham, New Hampshire", "Asheville, North Carolina", "Bethlehem,
+# Pennsylvania"), which put every one of them outside the `us` facet, the
+# hk/us tabs and the supply counts built on them.
+#
+# Nine of these names were already single keys in the tier above (texas,
+# florida, minnesota, washington, new jersey, new mexico, michigan, nevada,
+# utah, idaho, oregon, iowa, delaware, indiana, south carolina), each added
+# one at a time as a census turned it up. This is the whole set, once,
+# instead of the next fifteen census rounds.
+#
+# THE BOUNDARY IS WHAT MAKES IT SAFE, and it has to refuse a hyphen as well
+# as a letter: `(?![a-z])` alone would let "Maine" fire inside the French
+# "Maine-et-Loire", and `(?<![a-z])` keeps "Ohio" out of "Ohrid" the same way
+# the ", oh" suffix rule does. Checked in the `us` tier, so the European
+# tier still runs first — which is deliberate and is why "Vienna, Virginia"
+# and "Berlin, Connecticut" still answer `eu` (see the known-limits note on
+# `normalize_region`).
+_US_STATE_NAME = re.compile(
+    r"(?<![a-z])(?:alabama|alaska|arizona|arkansas|california|colorado"
+    r"|connecticut|delaware|florida|hawaii|idaho|illinois|indiana|iowa"
+    r"|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan"
+    r"|minnesota|mississippi|missouri|montana|nebraska|nevada"
+    r"|new hampshire|new jersey|new mexico|new york|north carolina"
+    r"|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island"
+    r"|south carolina|south dakota|tennessee|texas|utah|vermont|virginia"
+    r"|washington|west virginia|wisconsin|wyoming|district of columbia)"
+    r"(?![a-z\-])",
+    re.IGNORECASE)
+# "georgia" is DELIBERATELY ABSENT from the list above. It is a US state and
+# a country, and nothing in a location string separates the two — Tbilisi
+# would become American on the strength of the word. The ", ga" suffix rule
+# already reads the state's own abbreviation, which the country never
+# carries, so the state loses nothing and the country cannot be taken.
+
+# The same state, written as a PREFIX. PNC and CIBC file by Workday slot
+# rather than by address: "PA - Pittsburgh (15222)", "KS - Overland Park",
+# "TX - 2121 N. Pearl Street". The code leads, so neither the ", XX" suffix
+# rule nor the spelled-out names above can see it. 15 open rows, all of them
+# American, all of them at region="" before this. Anchored to the start of
+# the field or to a "; " list separator so a code can never be read out of
+# the middle of a street name.
+_WD_STATE_PREFIX = re.compile(
+    r"(?:^|;\s*)(?:al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me"
+    r"|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn"
+    r"|tx|ut|vt|va|wa|wv|wi|wy)\s+-\s+",
+    re.IGNORECASE)
+
+# Canadian province codes, read in the "other markets" pass — Canada is a
+# market Coverage does not track, so the honest answer is `other`, not blank.
+# CIBC's branch network writes "Edmonton, AB", "Halifax, NS", "Richmond, BC",
+# and the ", canada"/", ontario"/", alberta" keys already in
+# `_OTHER_MARKET_KEYS` cannot see a bare code. 17 open rows.
+#
+# FOUR CODES ARE MISSING ON PURPOSE, each because it is also an ISO country
+# code and the collision is live: SK is Saskatchewan and Slovakia
+# ("Bratislava, SK, 811 02" is a real row), PE is Prince Edward Island and
+# Peru ("Lima, PE, 15073", six live rows), NL is Newfoundland and the
+# Netherlands, YT is Yukon and Mayotte. Regina and Saskatoon stay blank
+# rather than be guessed at; ", saskatchewan" spelled out is safe and is a
+# key below.
+_CA_PROVINCE = re.compile(
+    r",\s*(?:ab|bc|mb|nb|ns|nt|nu|on|qc)(?![a-z])", re.IGNORECASE)
+
 
 # Cities whose names are REAL PLACES IN AMERICA when read as substrings, and
 # which this table therefore matches only as the entire location field. The
@@ -492,13 +565,17 @@ def normalize_region(location: str | None, *, fallback: str = "") -> str:
             # described above.
             if k not in _US_STATE_KEYS and k in text:
                 return code
-        if code == "us" and _STATE_SUFFIX.search(text):
+        if code == "us" and (_STATE_SUFFIX.search(text)
+                             or _US_STATE_NAME.search(text)
+                             or _WD_STATE_PREFIX.search(text)):
             return code
     # Only after every tracked market has declined: a stated location in a
     # market Coverage does not track files under "other" instead of blank.
     for k in _OTHER_MARKET_KEYS:
         if k in text:
             return "other"
+    if _CA_PROVINCE.search(text):
+        return "other"
     # Last: the posting states that it has no single place. The exact test
     # first, because its vocabulary ("global") is only safe when it stands
     # alone as the entire field.
@@ -605,7 +682,50 @@ def _stated_locations(raw: dict | None) -> list[str]:
     detail = raw.get("detail_location") or ""       # enrich_postings' read of
     if isinstance(detail, str) and detail:          # the page's structured data
         out.extend(p.strip() for p in detail.split(";") if p.strip())
+    out.extend(workday_bullet_locations(raw))
     return out
+
+
+# Workday's per-tenant display list. Most tenants fill `locationsText` and the
+# connector reads it; a minority leave that field out entirely and put the
+# office into `bulletFields` instead, next to the requisition code. Measured
+# 2026-09-02: 1,417 of 19,315 stored Workday rows carry no `locationsText` at
+# all, and 429 OPEN rows sat at `location=""` while their own payload named
+# the office — Raymond James 210 ("Pittsburgh, Pennsylvania - United States"),
+# Accenture 162 ("Amsterdam", at index 1 behind "R00353933"), Fidelity
+# International 57 ("Gurgaon Office"). The provider sent it; we stored it and
+# never read it. That is our bug, not theirs.
+#
+# THE LIST IS NOT A LOCATION FIELD, so nothing here assumes a position. It is
+# a mixed bag of requisition codes ("R-0012827", "59628WD", "REQ100020"),
+# posting dates ("Posting End Date: 09/30/2026") and, sometimes, the office.
+# Every entry is offered to `normalize_region` and the ones that name no
+# recognisable place resolve to "" and drop out of `region_from_fields`'s
+# `if code` filter — so a requisition code can never be read as a place, and
+# a tenant whose bullets hold only codes contributes nothing rather than
+# something wrong.
+#
+# The safety evidence is the disagreement count: across the 17,898 stored
+# Workday rows that DO carry `locationsText`, there is not one row where a
+# bulletField resolves to a different market than the location field does.
+def workday_bullet_locations(raw: dict | None) -> list[str]:
+    """Workday `bulletFields` entries, for callers that will vet them."""
+    bullets = (raw or {}).get("bulletFields")
+    if not isinstance(bullets, (list, tuple)):
+        return []
+    return [b.strip() for b in bullets if isinstance(b, str) and b.strip()]
+
+
+def location_from_bullets(raw: dict | None) -> str:
+    """The first `bulletFields` entry that names a place, else "".
+
+    For the DISPLAY column, where `region_from_fields` covers the facet. Same
+    vetting: an entry only counts once `normalize_region` has recognised it,
+    so "R-0012827" is never shown to a student as an office."""
+    for b in workday_bullet_locations(raw):
+        if normalize_region(b):
+            return b
+    return ""
 
 
 def region_from_fields(raw: dict | None) -> str:
@@ -786,7 +906,16 @@ _INSIGHT = _rx(
 
 # Explicit internship signals. \b keeps "intern" off "Internal"/"International".
 _INTERNSHIP = _rx(
-    r"\bintern(?:ship)?s?\b",
+    # THE BOUNDARY IS A LETTER TEST, NOT `\b`. `\b` treats the underscore as
+    # a word character, so "2027 Summer Intern_Bachelor or Master with NO
+    # full-time work experience" (BCG Japan, live) and "Finance & AI
+    # Intern_ML13" (Accenture, live) both failed the internship rule and fell
+    # through — the BCG row all the way to `entry_level`, i.e. a full-time
+    # graduate hire, which is the worst possible answer for a summer intern
+    # posting. A letter lookaround reads `_` and a digit as boundaries and
+    # still refuses what `\b` refused: "Internal Audit" and "International
+    # Markets" cannot match, because a letter follows.
+    r"(?<![A-Za-z])intern(?:ship)?s?(?![A-Za-z])",
     r"\bsummer\s+analyst\b",
     # THE YEAR IN THE MIDDLE. `summer\s+analyst` is adjacency-only, and Bank
     # of America writes the same programme with its intake year between the
@@ -819,7 +948,33 @@ _INTERNSHIP = _rx(
     r"\bpraktikum\b",              # German for internship (UBS/DB/European boards)
     r"\bwerkstudent\b",           # German working-student
     r"\bworking\s+student\b",
-    "实习",                        # Chinese "internship/intern" (CICC/Beisen boards):
+    # The same thing under the name a Nordic and Benelux board gives it.
+    # Without this, `_NEUTRAL_JUNIOR`'s bare "student" promoted PwC's
+    # "Student job - HR Content & SharePoint Migration Support" to
+    # `entry_level` — a part-time term-time job read as a graduate hire.
+    r"\bstudent\s+job\b",
+    # "STAGE" — French and Italian for an internship, and the single largest
+    # miss the classifier had. Measured 2026-09-02 across all 27,357 stored
+    # rows: 79 titles lead with it, 66 of them open, 65 of those filed
+    # `other` — PwC France and PwC Italy ("Stage Audit - Milano [ADT]",
+    # "Stage en Audit Financier"), Lazard ("Stage H/F - Analyste Actions –
+    # Janvier 2027"), Rothschild ("Stage Analyste Banquier Conseil"), UBS.
+    # Every one is a student internship, and every one was invisible to a
+    # student filtering the board for internships.
+    #
+    # ANCHORED, and the anchor is the whole rule. "Stage" is also an ordinary
+    # English noun for a phase, and the live boards carry the counter-example:
+    # Stifel's "Managing Director, Venture & Growth Stage Lending" must stay
+    # in `other`, and does, because its "Stage" is mid-title. What counts is
+    # the word standing at the head of the title or of a pipe-delimited
+    # segment ("Assistant(e) chef de projet en édition | Stage | H/F"), or
+    # closing it after a dash ("Chargé (e) de recrutement - stage") — the
+    # three shapes a European board uses to say what KIND of posting this is.
+    # A "Stage" in the middle of an English job title is a growth stage, a
+    # deal stage or a career stage, and none of those is a posting type.
+    r"(?:^|\|)\s*stages?\b",
+    r"[-–—]\s*stages?\s*$",
+    "实习",                      # Chinese "internship/intern" (CICC/Beisen boards):
                                    # catches 实习生, 项目实习, 暑期实习. No \b — CJK has
                                    # no word boundaries; the term only appears in an
                                    # actual intern title, so precision holds.
@@ -853,11 +1008,91 @@ _SENIOR = _rx(
     r"\bchief\b",
     r"\bmanager\b",
     r"\bexperienced\b",
+    # "NEW ASSOCIATE" IS NOT "NEW ANALYST", and Goldman's own programme page
+    # is what settles it: "Our New Associate Program is a full-time program
+    # for individuals who have 2-5 years of experience and an advanced
+    # degree." 21 open rows — every Private Wealth Management New Associate
+    # posting — were sitting in `entry_level` because the campus board's hint
+    # promotes a neutral "Associate", so the recommender was offering a job
+    # with a two-year experience floor to a sophomore.
+    #
+    # The negative is the sibling term and it is 50 rows wide: "New Analyst"
+    # is Goldman's word for the full-time new-grad hire and stays
+    # `entry_level`, because it is an explicit `_ENTRY` pattern and this veto
+    # does not match it. The firm draws the line itself; we were reading past
+    # it.
+    r"\bnew\s+associates?\b",
     r"\bmid[\s-]?level\b",
     r"\blateral\b",
     r"\brecruit(?:er|ing|ment)\b",
     r"\btalent\s+acquisition\b",
 )
+
+# NOT AN OPENING AT ALL. A talent community is a mailing list: it takes your
+# details and tells you when something opens. It is not a role, it has no
+# cohort, no deadline and nothing to apply to, and putting one in a campus
+# bucket offers a student something they cannot act on — which P4's
+# "mark, never drop" cannot help with, because there is no card to mark.
+#
+# Measured 2026-09-02: 13 stored rows say "talent community" or "talent
+# network" (Moelis, KKR ×4, IMC ×2, General Atlantic, EQT, Akuna, Point72
+# ×2, PwC). Twelve already sat in `other`; one, KKR's "Early Careers Talent
+# Community", was in `entry_level` on the strength of "Early Careers" and
+# was therefore counted in the founder's Entry-Level segment as a job.
+#
+# "TALENT POOL" IS DELIBERATELY NOT HERE, and the counter-example is PwC's
+# whole Asian graduate funnel: "FY27 - Intern - Assurance (Talent Pool)",
+# "Internship - Digital, Cloud, Data - Talent Pool", "Associate - Consulting
+# - SAP (Talent Pool)". PwC calls its ordinary application a talent pool, so
+# a rule that read the phrase as "not a job" would empty nine live
+# internships and five entry-level rows out of the buckets they belong in.
+# Community and network are the words that mean the list; pool is the word
+# that means the queue.
+_NOT_AN_OPENING = _rx(r"\btalent\s+(?:community|network)\b")
+
+# CAMPUS EVENTS THAT NAME A UNIVERSITY. A firm posting under the name of one
+# named university is running an event there — a presentation, a dinner, a
+# case study, a "Find Your Fit". It is never a job: a job is posted to a
+# city, not to a campus.
+#
+# The whole safety of the rule is the second half. "University" is also an
+# ordinary address word and an ordinary department word, and the live boards
+# carry every trap: "Customer Experience Associate - University Ave",
+# "Branch Manager University Mall", "Relationship Banker I/University City",
+# "Deputy Head of University Talent Acquisition, EMEA & APAC", "University
+# Talent Acquisition Specialist". Every one of those names a ROLE, so the
+# rule refuses any title that carries a role noun — and it is checked after
+# the seniority veto and after the internship rule, so "Head of ..." and
+# "Technology Co-op with Drexel University" are both already answered before
+# it runs.
+#
+# "COLLEGE" IS NOT A KEY, for one measured reason: Vanguard names its whole
+# internship family "College to Corporate" and one of them, "College to
+# Corporate - Advice", drops the word "Internship" from its title and
+# carries no stored description. Reading that as an event would be a
+# confident guess about a row that says nothing; it stays in `other`, which
+# is the honest answer. 10 open rows move on the university key alone.
+_ROLE_NOUN = _rx(
+    r"\b(?:analysts?|associates?|managers?|bankers?|specialists?"
+    r"|engineers?|advis[eo]rs?|officers?|consultants?|leads?"
+    r"|directors?|interns?|internships?|co[\s-]?ops?|placements?"
+    r"|trainees?|apprentices?|recruiters?|sourcers?|assistants?"
+    r"|representatives?|developers?|researchers?|traders?"
+    r"|scientists?|accountants?|auditors?|controllers?|architects?"
+    r"|designers?|heads?|partners?|clerks?|technicians?)\b")
+_UNIVERSITY = _rx(r"\buniversity\b")
+
+# "<Subject> 101" is a teaching session, and no board titles a job that way:
+# "2026 Wealth Management 101 with Morgan Stanley at NYU" (3 live rows, all
+# in `other`) sits beside Moelis' "Moelis Virtual Discovery Series: Moelis
+# 101", which the Discovery-Series rule already reads as an event. The word
+# before the number is what keeps it off an address — "Suite 101", "Room
+# 101" and "Route 101" are refused by name, which is the shape a bare
+# `\b101\b` would have taken.
+_ONE_OH_ONE = re.compile(
+    r"\b(?!(?:suite|room|floor|route|highway|unit|apt|apartment|box)\b)"
+    r"\w+\s+101\b", re.IGNORECASE)
+
 
 # Full-time campus signals.
 _ENTRY = _rx(
@@ -882,7 +1117,28 @@ _ENTRY = _rx(
     r"\bearly\s+careers?\b",
     r"\bnew\s+analyst\b",          # Goldman Sachs' term for a full-time new-grad hire
     r"\bwmp\s+analyst\b",          # GS Wealth Management Program analyst (new grad)
+    # THE DEGREE COHORT. SIG names its graduate hires by the degree and the
+    # year they finish it rather than by the word "graduate": "Quantitative
+    # Researcher – Master's: 2027", "Quantitative Systematic Trader - PhD:
+    # 2026", "Quantitative Researcher – Honours and Master's: 2026". 13 open
+    # rows sat in `other` in that spelling while their siblings, spelled
+    # "Quantitative Trader - Graduate: 2027", sat in `entry_level` — the same
+    # programme, split across two buckets by a synonym.
+    #
+    # The colon-or-dash plus a plausible year is what makes it a cohort
+    # rather than a requirement: "PhD in Statistics preferred" carries no
+    # year and cannot match. Checked after the internship rule like every
+    # `_ENTRY` pattern, which is what keeps SIG's own "Machine Learning
+    # Internship - PhD: 2027" an internship.
+    r"\b(?:master'?s|phd|ph\.d\.?|bachelor'?s|honours)\s*[:\-–—]\s*20\d\d\b",
     "校园招聘", "校招",             # Chinese campus recruitment (CICC/Beisen boards)
+    # The same words in traditional characters, which the simplified keys
+    # cannot see: PwC Taiwan writes "校園招募" and "校園徵才". 3 open rows,
+    # all `other` before this. The negative example is on the same board:
+    # "2026 資誠秋季校園徵才 Open Day 活動" stays `insight`, because step 1's
+    # "open day" outranks this rule — a campus recruitment EVENT is not a
+    # campus hire.
+    "校園招募", "校園徵才",
     "应届",                        # fresh graduate
     "管培生", "管理培训生",         # management trainee
 )
@@ -997,6 +1253,14 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
     1. insight events            ("Pre-Internship" must beat the intern rule)
     2. explicit internships
     3. experienced/HR veto       -> other
+    3b. not-an-opening veto      -> other (a talent community is a mailing
+        list, not a role; see `_NOT_AN_OPENING`)
+    3c. campus events a role-noun test can clear -> insight (a title naming
+        one university, or a "<subject> 101" session, with no role noun in
+        it anywhere). Behind the two vetoes and behind the internship rule
+        on purpose, which is what keeps "Head of University Talent
+        Acquisition" an HR job and "Technology Co-op with Drexel University"
+        an internship.
     4. full-time campus signals  -> entry_level, including "campus" only
        where it co-occurs with a role or level word (see `_ENTRY_CAMPUS`)
     5. US early-ID programmes    -> insight
@@ -1030,6 +1294,11 @@ def classify_role(title: str, *, campus_hint: bool = False) -> str:
         return INTERNSHIP
     if _SENIOR.search(t):
         return OTHER
+    if _NOT_AN_OPENING.search(t):
+        return OTHER
+    if not _ROLE_NOUN.search(t) and (_UNIVERSITY.search(t)
+                                     or _ONE_OH_ONE.search(t)):
+        return INSIGHT
     if _ENTRY.search(t) or _ENTRY_CAMPUS.search(t):
         return ENTRY_LEVEL
     if _EARLY_ID.search(t):
@@ -1277,6 +1546,49 @@ def bucket_from_contract(contract_type: str | None, title: str = "") -> str:
     if _TITLE_GRADUATE.search(title or "") and not _INTERNSHIP.search(title or ""):
         return "entry_level"
     return "internship"
+
+
+# tal.net's own label table, stored verbatim in `raw["cols"]` and never read
+# for this. A posting on these boards carries EITHER an "Application
+# Deadline" (65 rows) or an "Event Date" (112 rows) — measured 2026-09-02,
+# and not one row in the whole stored set carries both. That is the board
+# telling us, in its own field names, which of the two kinds of thing a row
+# is, and it is a stronger signal than any reading of the title.
+#
+# 69 open rows carry an event marker. 58 were already `insight` on their
+# title words; 11 were not, and they are exactly the rows a title-only
+# classifier cannot reach: "Build Your Future at Morgan Stanley Budapest",
+# "Morgan Stanley Asia 2026/27 Recruiting News", "Morgan Stanley Singapore
+# Technology Career Interest List", "Honouring Black History Month:
+# Empowering Early Careers in Banking" (which was in `entry_level`, i.e.
+# offered as a graduate job). Their titles say nothing an event vocabulary
+# could catch; their payloads say "Event Date: 8 October 2026, 03:00:00pm
+# CEST".
+#
+# "Registration Deadline" is the same statement in the other tense and adds
+# two rows that carry no Event Date.
+_EVENT_COLS = ("event date", "registration deadline")
+
+
+def bucket_from_event_filing(raw: dict | None, title: str = "") -> str:
+    """`insight` when the board files this row as an event, else "".
+
+    THE TITLE BREAKS THE TIE THE FILING CANNOT, exactly as in
+    `bucket_from_contract` above, and the live counter-example is Morgan
+    Stanley's "Register Your Interest: Morgan Stanley Internships 2027" —
+    filed with an Event Date whose own venue field reads "this is not a live
+    event. This is a registration opportunity for those who wish to show
+    interest in our 2027 Summer Analyst Programmes." An explicit internship
+    title outranks the filing, so that row stays an internship.
+    """
+    cols = (raw or {}).get("cols")
+    if not isinstance(cols, dict):
+        return ""
+    if not any(k.strip().lower() in _EVENT_COLS for k in cols):
+        return ""
+    if _INTERNSHIP.search(title or ""):
+        return ""
+    return INSIGHT
 
 
 def board_is_campus(board) -> bool:

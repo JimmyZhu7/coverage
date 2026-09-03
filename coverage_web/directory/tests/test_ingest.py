@@ -846,3 +846,62 @@ def test_a_silent_payload_records_no_move_at_all(monkeypatch):
 
     assert not OpportunityChange.objects.filter(
         field__in=("region", "location")).exists()
+
+
+# ---------------------------------------------------------------------------
+# The office the provider sent and we never read. Measured 2026-09-02: 1,417
+# of 19,315 stored Workday rows carry no `locationsText` key at all, and 429
+# OPEN rows sat at `location=""` beside a `bulletFields` list that named the
+# office — Raymond James 210, Accenture 162, Fidelity International 57. The
+# fill is vetted by `normalize_region`, so a requisition code can never be
+# stored as an office.
+# ---------------------------------------------------------------------------
+
+#: The same tenant, on a posting whose bullets DO name the office. This is
+#: the majority shape at Raymond James: place first, requisition second.
+_RJ_JOB_BULLETS = {
+    **_RJ_JOB,
+    "bulletFields": ["Saint Petersburg, Florida - United States", "R-0012398"],
+}
+
+
+@pytest.mark.django_db
+def test_a_workday_bullet_field_fills_a_location_the_tenant_left_out(monkeypatch):
+    """No `locationsText` anywhere in the payload, but the office is right
+    there beside the requisition code. Before this the row stored a blank
+    location and answered no Region filter at all."""
+    _patch(monkeypatch,
+           [_result([_workday_opp(_RJ_JOB_BULLETS)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    assert o.location == "Saint Petersburg, Florida - United States"
+    assert o.region == "us"
+
+
+@pytest.mark.django_db
+def test_a_requisition_code_is_never_stored_as_an_office(monkeypatch):
+    """The negative, and it is what makes reading a display list safe at all.
+    `_RJ_JOB`'s bullets hold nothing but "R-0012398". A rule that took the
+    first entry would have printed a requisition number on the card where the
+    city goes; the vetting means the row stays honestly blank."""
+    _patch(monkeypatch, [_result([_workday_opp(_RJ_JOB)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    assert o.location == ""
+
+
+@pytest.mark.django_db
+def test_the_tenants_own_location_field_still_wins(monkeypatch):
+    """Fill-only, in the same posture as the no-downgrade rules above: the
+    bullets are read where the connector reported nothing, never over the top
+    of what it did report."""
+    stated = {**_RJ_JOB_STATED,
+              "bulletFields": ["London - United Kingdom", "R-0012398"]}
+    _patch(monkeypatch, [_result([_workday_opp(stated)], board=RJ_BOARD)])
+    ingest.ingest_boards([RJ_BOARD], label="workday")
+
+    o = Opportunity.objects.get(url__contains="R-0012398")
+    assert o.location == _RJ_STATED_LOCATION
+    assert o.region == "us"
