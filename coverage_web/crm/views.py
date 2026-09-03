@@ -1025,22 +1025,43 @@ def _stale_window_days(c, params) -> int:
 # four-digit count planted on every fifth card the board measures 156.2 x49
 # and foot 101.8 x49, which is what it measures with no long counts at all.
 #
-# It also reads better. Nobody counts to 1234 days; "3y since last touch" is
-# the sentence a person actually says about a contact they have lost.
+# It also reads better. Nobody counts to 1234 days; "3y ago" is the sentence a
+# person actually says about a contact they have lost.
+#
+# THE SENTENCE ITSELF SHORTENED ON 2026-09-03, and it retires the wrap this
+# whole block was written around. "43d since last touch" measures 109-120px
+# and the button pair 149.1px, so the footer wanted 281.1px inside a card that
+# has 253.5px at four across and 246px at the grid's own `minmax(280px)`
+# floor. It therefore wrapped on every card at those widths — which the
+# previous pass measured, accepted, and tuned a 4px row-gap for.
+#
+# What that pass could not see is what the wrap then cost. A grid row sizes
+# itself from the card's intrinsic height, and intrinsic height is resolved at
+# the card's max-content WIDTH, where the footer still fits on one line. So
+# the row came out 154px, the wrapped footer needed 177px, and
+# `.contact-card`'s own `overflow: hidden` silently cut the difference:
+# measured on the demo board at 1280, scrollHeight 177 against clientHeight
+# 152 on every card in the band, with the buttons the card exists to offer
+# sitting in the 25px that was being clipped.
+#
+# "43d ago" is 46px. The footer now wants ~211px, fits on one line at every
+# width the grid can produce, and the card measures exactly what it measured
+# before (154px) with nothing outside it. The words that went are the ones
+# every card repeated 49 times; the full sentence is on the span's `title`.
 def _since_label(days_since: int | None) -> str:
     """The staleness line in the card's foot, as words.
 
     `None` is never-touched, which is a different claim from "0 days ago"
     and gets its own sentence rather than a zero."""
     if days_since is None:
-        return "Never contacted"
+        return "No touches"
     # `< 365` and not `abs(...) < 365`: a future-dated touch yields a
     # negative count, and "-3y since last touch" would be a worse thing to
     # render than the "-3d" this has always rendered. Days is where that
     # case already lives; this branch does not move it.
     if days_since < 365:
-        return f"{days_since}d since last touch"
-    return f"{days_since // 365}y since last touch"
+        return f"{days_since}d ago"
+    return f"{days_since // 365}y ago"
 
 
 def _contact_card(c, *, tier, today, cadence=None, as_of=None):
@@ -1099,6 +1120,13 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
         # attribute wants the precise number, and because it is the value
         # the staleness ring divides.
         "since_label": _since_label(days_since),
+        # The words the short label dropped, kept on the hover it makes
+        # necessary — same "truncate and title" pattern `.cc-firm` and the
+        # feed's `.rr-loc` already use.
+        "since_title": (
+            "No touches logged yet" if days_since is None
+            else f"{days_since} day{'' if days_since == 1 else 's'} since your last touch"
+        ),
         "stale_pct": round(stale * 100),
         # The tint threshold decided here, where the arithmetic lives, not by
         # a CSS substring hack that cannot tell 8% from 80%.

@@ -114,9 +114,15 @@ def test_the_header_puts_the_name_in_a_row_nothing_below_it_can_move():
     css = _feed_css()
     rule = _rule(css, ".firmcol-head")
     assert "display: grid" in rule, rule
-    assert "grid-template-rows: minmax(38px, auto) auto" in rule, (
-        "two rows, and row one floored at the tile's own height: identity "
-        "first, everything else second")
+    # THE FLOOR MOVED, THE INVARIANT DID NOT (2026-09-03). Row one was
+    # floored at 38px, the tile's own height, so the header could never be
+    # shorter than the mark. But the tile spans BOTH rows, so it was already
+    # holding the header open by itself; all the floor did was inflate the row
+    # the NAME sits in — an 18px title in a 38px row, putting 14px between the
+    # name and the stats line that belongs to it against a declared 4px
+    # row-gap. The equal-height guarantee now rests on `min-height` alone.
+    # Measured after: all 13 headers 76px, name-to-stats 8.9px.
+    assert "grid-template-rows: auto auto" in rule, rule
     assert "min-height: 76px" in rule, "the fixed header height is still half of it"
     name = _rule(css, ".firmcol-h")
     assert "grid-row: 1" in name, name
@@ -151,7 +157,15 @@ def test_the_logo_spans_the_header_and_stays_in_its_own_column():
     # Two rows, so "both of them" and "all of them" are the same span. A third
     # row would silently change what `-1` means, and the header must not grow
     # one — see `test_the_picked_columns_header_spends_the_same_two_rows_a_firms_does`.
-    assert "grid-template-rows: minmax(38px, auto) auto" in _rule(css, ".firmcol-head")
+    # `auto auto` since 2026-09-03. The 38px floor was the logo's own height
+    # and the logo spans both rows, so it held the header open without help —
+    # all the floor did was inflate the title's row, opening 14px between the
+    # name and the stats line under it against a declared 4px row-gap. The
+    # header now rests on its `min-height: 76px` instead, which is the number
+    # the Picked column's own comment calls the one that lands it level with
+    # its neighbours; measured, all 13 headers are 76px and the title/stats
+    # pair closed to 8.9px.
+    assert "grid-template-rows: auto auto" in _rule(css, ".firmcol-head")
 
 
 def test_the_logo_tile_keeps_its_own_centring():

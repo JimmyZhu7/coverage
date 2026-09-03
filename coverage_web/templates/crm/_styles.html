@@ -2406,10 +2406,23 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   between two zones; down, those same two zones are one footer and 4px is
   what says so.
   {% endcomment %}
+  /* ONE HIERARCHY, NOT ONE GAP, and not one pixel taller. The previous pass
+     took the card's four identical 8px gaps down to a flat 4px so the name,
+     its pills and its firm line would read as one identity block; reviewing
+     it the founder's answer was that the words are now "cramped together".
+     Both reports are right about their own half — four EQUAL gaps say
+     nothing about what belongs together, and four equally TIGHT ones leave
+     nothing room to breathe.
+     So the gaps differ now instead of all being small: name to pills stays
+     at the card's 4px (they are one unit), pills to firm doubles to 8px (a
+     different kind of fact), and this seam gives back the 4px that pays for
+     it. The card measures what it measured — 154px at 1280 — and the founder's
+     "without enlarging it" is met by moving space rather than adding it. */
   .cc-foot { display: flex; justify-content: space-between; align-items: center;
     column-gap: var(--s3); row-gap: var(--s1);
-    border-top: 1px solid var(--line); padding-top: var(--s3); flex-wrap: wrap;
+    border-top: 1px solid var(--line); padding-top: var(--s2); flex-wrap: wrap;
     margin-top: auto; }
+  .cc-firm { margin-top: var(--s1); }
   /* Plain body face, not `--font-mono`. The rest of the app reaches for
      mono+tabular-nums on a date/count that sits in a column of OTHER
      numbers it needs to line up against (`.arch-when`, `.play-when`,
@@ -2467,8 +2480,16 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   other. `nowrap` keeps the fact on one line inside its own zone; it is
   never cut.
   {% endcomment %}
+  /* The 7.5rem floor is gone with the wrap it existed to regulate. Its job
+     was to make `.cc-foot`'s wrap decision a property of the CARD's width
+     rather than of this string's length, so every card in a grid answered it
+     the same way. Since 2026-09-03 the string is short enough that the footer
+     fits on one line at every width the grid can produce, so there is no
+     decision left to keep uniform — and holding a 120px floor under a 46px
+     word would only push the row back toward the wrap that was clipping
+     25px off the bottom of every card. */
   .cc-since { font-size: var(--fs-xs); color: var(--ink-3);
-    flex: 0 0 auto; min-width: 7.5rem; white-space: nowrap; }
+    flex: 0 1 auto; min-width: 0; white-space: nowrap; }
   .cc-btns { display: flex; gap: var(--s2); }
   .cc-btns .btn { padding: 6px 14px; font-size: var(--fs-xs); }
 

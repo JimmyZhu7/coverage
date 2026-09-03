@@ -314,9 +314,15 @@ def test_the_foot_is_the_cards_one_seam_and_it_is_drawn():
         "mode that is indistinguishable from the empty pill band 20px above "
         "it, which is what got the card reported as having a hole in it."
     )
-    assert "padding-top: var(--s3)" in foot, (
-        "the foot's own padding is back down level with the 4px gaps above "
-        "it, so the card's one real division reads as a fourth gap."
+    # `--s2` since 2026-09-03, not `--s3`. The seam's job is to be BIGGER
+    # than the gaps above it, and it still is — those are 4px (name to pills)
+    # and 8px (pills to firm), against this 8px plus a drawn hairline, which
+    # no gap above it has. The 4px it gave up is exactly what paid for the
+    # pills-to-firm gap, so the card kept its height while gaining a
+    # hierarchy; see `.cc-foot`'s own comment for the founder's two reports.
+    assert "padding-top: var(--s2)" in foot, (
+        "the foot's own padding is back level with the gaps above it, so the "
+        "card's one real division reads as just another gap."
     )
 
 
@@ -444,10 +450,25 @@ def test_the_foot_wraps_on_the_card_width_not_on_the_day_count():
     foot a phone card has to fit all three into.
     """
     since = _rule(_styles(_page()), ".cc-since")
-    assert "min-width: 7.5rem" in since, (
-        "the days-since zone sizes itself to its text again, so two cards in "
-        "one row can disagree about whether the foot wraps."
+    # THE FLOOR IS GONE WITH THE WRAP IT REGULATED (2026-09-03). It made the
+    # wrap decision a property of the card's width rather than this string's
+    # length, so a grid answered it uniformly. `_since_label` now renders
+    # "43d ago" (46px) instead of "43d since last touch" (109px), the footer
+    # wants ~211px against 246px at the grid's own `minmax(280px)` floor, and
+    # there is no wrap left for a floor to keep uniform.
+    #
+    # What the wrap was costing is why it went rather than being tuned again:
+    # a grid row sizes from the card's intrinsic height, resolved at its
+    # max-content WIDTH where the footer fits on one line, so the row came out
+    # 154px while the wrapped footer needed 177px and `overflow: hidden` cut
+    # the difference — measured at 1280, scrollHeight 177 vs clientHeight 152
+    # on every card in the band, with Log Touch and Edit inside the 25px being
+    # clipped.
+    assert "min-width: 0" in since, (
+        "the days-since zone has a floor again, which pushes the footer back "
+        "toward the wrap that was clipping 25px off every card."
     )
+    assert "white-space: nowrap" in since, "the short label must not itself wrap"
     assert "white-space: nowrap" in since, (
         "the fact can wrap inside its own zone now, which is the same "
         "variance by another route."
@@ -455,20 +476,24 @@ def test_the_foot_wraps_on_the_card_width_not_on_the_day_count():
 
     # The other half: the string the floor has to hold is bounded, so the
     # floor is a cap by construction rather than by how young the board is.
-    assert _since_label(None) == "Never contacted"
-    assert _since_label(0) == "0d since last touch"
-    assert _since_label(41) == "41d since last touch"
-    assert _since_label(364) == "364d since last touch", (
-        "the last day before the switch is still counted in days; moving "
-        "this boundary moves the widest string the 7.5rem floor must hold."
+    # Shortened 2026-09-03. The words that went ("since last touch") were on
+    # all 49 cards and are what made the footer want 281.1px inside a 246px
+    # card; they now live on the span's `title`. The COUNTING is untouched —
+    # the day/year switch, the flooring, and the never-touched case all still
+    # answer exactly as they did.
+    assert _since_label(None) == "No touches"
+    assert _since_label(0) == "0d ago"
+    assert _since_label(41) == "41d ago"
+    assert _since_label(364) == "364d ago", (
+        "the last day before the switch is still counted in days"
     )
-    assert _since_label(365) == "1y since last touch"
-    assert _since_label(729) == "1y since last touch", (
+    assert _since_label(365) == "1y ago"
+    assert _since_label(729) == "1y ago", (
         "the year count floors rather than rounds: 729 days is one full year "
         "of silence and change, not two."
     )
-    assert _since_label(730) == "2y since last touch"
-    assert _since_label(3650) == "10y since last touch"
+    assert _since_label(730) == "2y ago"
+    assert _since_label(3650) == "10y ago"
 
     # And no count in a century of them produces a wider string than that.
     # A character count, not a pixel one, because a character count is what a
@@ -483,11 +508,17 @@ def test_the_foot_wraps_on_the_card_width_not_on_the_day_count():
     longest = max(
         (_since_label(d) for d in [None] + list(range(0, 36525))), key=len
     )
-    assert len(longest) == 21, (
+    # The bound is what keeps the footer on ONE line, which is now the thing
+    # being protected rather than a shared floor. At the grid's own 280px
+    # `minmax` the card has 246px of content; the button pair is 149.1px and
+    # the column gap 12px, leaving about 85px for this string — roughly 12
+    # characters at `--fs-xs`. Anything longer re-opens the wrap, and the wrap
+    # is what `overflow: hidden` was silently clipping 25px of.
+    assert len(longest) <= 12, (
         f"the longest label this function can produce is now {longest!r} "
-        f"({len(longest)} chars); re-measure it against the 7.5rem floor "
-        "before accepting it, because 22 characters already measured "
-        "120.2px against a 120px floor and put two foot offsets in one grid."
+        f"({len(longest)} chars). Past ~12 the footer wraps again at the "
+        "grid's narrowest column, and a wrapped footer does not grow the "
+        "card — it gets cut off by `.contact-card`'s own `overflow: hidden`."
     )
 
 

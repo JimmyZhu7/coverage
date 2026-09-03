@@ -2399,6 +2399,33 @@ select:focus-visible, input:focus-visible {
   animation-duration: 420ms;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
+/* AND THE ROOT DOES NOT CROSS-FADE, which is the difference between "a card
+   left the queue" and "the page reloaded". Reported by the founder against
+   Today: clicking Done "refreshes the whole page".
+
+   It was not a reload and not a missing transition — `#today-cockpit` swaps
+   with `transition:true`, every act-card carries a unique
+   `view-transition-name` (22 of 22 unique, measured), and the browser
+   supports the API. The flash is the DEFAULT root snapshot. Elements with a
+   name are lifted out of it and animated individually; everything else —
+   both lanes' headers, their counts, the whole right rail — stays in one
+   raster image of the old cockpit that the UA fades out under one of the new
+   one. Twelve widgets dissolving at once is a page refresh no matter what
+   produced it, and it drowned the per-card motion it was meant to frame.
+
+   Killing only the root's animation leaves the named groups untouched: a
+   resolved card still fades where it stood and its neighbours still glide up
+   at the 420ms above. What changes is the surrounding chrome, which now
+   swaps instantly — right for it, since a count going 2 -> 1 reads as an
+   update when it ticks and as a reload when it dissolves. `mix-blend-mode`
+   is reset because the UA blends the two root snapshots while both are
+   present, and with no animation to separate them that blend is itself a
+   visible flash. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
     animation: none;

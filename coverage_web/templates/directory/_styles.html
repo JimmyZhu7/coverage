@@ -991,7 +991,19 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      because the header genuinely lost a row. */
   .firmcol-head { display: grid; flex: none;
     grid-template-columns: 38px minmax(0, 1fr);
-    grid-template-rows: minmax(38px, auto) auto;
+    /* `auto auto`, not `minmax(38px, auto) auto`. The 38px floor was the
+       logo's height, put on ROW ONE so the header could never be shorter
+       than the mark — but the logo spans both rows, so it was already
+       holding the header open on its own and the floor was only inflating
+       the row the TITLE sits in. Measured at 1280 across all 13 columns:
+       an 18px title in a 38px row, which pushed 14px of air between the
+       name and the "6 ROLES · 4 FIRMS" line that belongs to it, while the
+       grid's declared row-gap was 4.
+       Off the floor the pair closes to 8.9px and reads as one block, and
+       the header lands on 76px — its own `min-height`, the number the
+       Picked column's comment already calls the one that puts it exactly
+       level with its neighbours. All 13 stay level, 10px shorter. */
+    grid-template-rows: auto auto;
     column-gap: var(--s3); row-gap: var(--s1); align-items: center;
     min-height: 76px; padding: var(--s3) var(--s5); border-bottom: 1px solid var(--line); }
   /* The id block was a flex column holding the name and the meta; the grid
@@ -1087,7 +1099,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        name occupies one line; a name that wraps to two fills row one and
        leaves no slack to correct. No firm on the board wraps at either
        width today. */
-    transform: translateY(5px);
+    /* THE 5px NUDGE IS GONE WITH THE FLOOR IT CANCELLED (2026-09-03),
+       which is what its own test said to do: "retired the day row one loses
+       its 38px floor, which is what puts the 9.5px of dead space above a
+       one-line name in the first place." It was added because row one was
+       pinned to 38px for an 18px name, so the text sat high in its row and
+       the tile read high against it; the transform pushed the tile down to
+       meet text that was itself out of place. Row one is `auto` now. Kept,
+       the same 5px would drive the tile BELOW the centre it was added to
+       reach. */
     /* 31% lightness measured 4.11:1 against the 90% tile on some hues —
        under the 4.5 the monogram's text needs. 24% clears it on every hue
        in the wheel; the tile stays put, so nothing else shifts. */

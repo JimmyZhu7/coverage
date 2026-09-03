@@ -138,7 +138,7 @@ def test_dismissing_a_pick_moves_all_three_numbers_together(client):
     client.force_login(user)
 
     body, offered = _offer(client)
-    assert "Save all 4" in body
+    assert ">Save all</button>" in body
     assert "Save 4 picked roles to My Applications?" in body
     assert sorted(offered) == sorted(o.id for o in opps)
 
@@ -147,7 +147,7 @@ def test_dismissing_a_pick_moves_all_three_numbers_together(client):
 
     assert resp.status_code == 200
     # The button, the confirm sentence, and the stash, in one breath.
-    assert "Save all 3" in after
+    assert ">Save all</button>" in after
     assert "Save 3 picked roles to My Applications?" in after
     assert sorted(client.session[PICK_SAVE_OFFER_SESSION_KEY]) == sorted(
         o.id for o in opps[1:]
@@ -185,11 +185,11 @@ def test_undo_puts_the_role_back_in_the_offer(client):
 
     _offer(client)
     _dismiss(client, opps[0], origin="card")
-    assert "Save 1" in _offer(client)[0]
+    assert "Save 1 picked role to My Applications?" in _offer(client)[0]
 
     after = _undismiss(client, opps[0], origin="card").content.decode()
 
-    assert "Save all 2" in after
+    assert "Save 2 picked roles to My Applications?" in after
     assert sorted(client.session[PICK_SAVE_OFFER_SESSION_KEY]) == sorted(
         o.id for o in opps
     )
@@ -240,7 +240,7 @@ def test_a_card_dismissal_also_corrects_the_column_out_of_band(client):
 
     assert 'id="cov-pickcol"' in after
     assert 'hx-swap-oob="true"' in after
-    assert "Save all 2" in after
+    assert ">Save all</button>" in after
     assert "Save 2 picked roles to My Applications?" in after
     assert sorted(client.session[PICK_SAVE_OFFER_SESSION_KEY]) == sorted(
         o.id for o in opps[1:]

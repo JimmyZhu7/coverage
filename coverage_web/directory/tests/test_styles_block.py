@@ -1136,9 +1136,15 @@ def test_the_tile_span_does_not_resize_the_header():
     than emerging from what happens to be in it, which is why the tile could
     leave row one without the row collapsing behind it."""
     rule = _rule(_feed_css(), ".firmcol-head")
-    assert "grid-template-rows: minmax(38px, auto) auto" in rule, (
-        "row one still reserves the tile's 38px whether or not the tile is "
-        f"in it; without that floor the header shrinks to its min-height: {rule}")
+    # THE FLOOR MOVED, THE INVARIANT DID NOT (2026-09-03). Row one was
+    # floored at 38px, the tile's own height, so the header could never be
+    # shorter than the mark. But the tile spans BOTH rows, so it was already
+    # holding the header open by itself; all the floor did was inflate the row
+    # the NAME sits in — an 18px title in a 38px row, putting 14px between the
+    # name and the stats line that belongs to it against a declared 4px
+    # row-gap. The equal-height guarantee now rests on `min-height` alone.
+    # Measured after: all 13 headers 76px, name-to-stats 8.9px.
+    assert "grid-template-rows: auto auto" in rule, rule
     assert "min-height: 76px" in rule, rule
 
 
@@ -1147,4 +1153,9 @@ def test_the_nudge_that_closes_the_last_five_pixels_is_still_there():
     tracks, the 76px floor and every column's first role row where they were.
     Retired the day row one loses its 38px floor, which is what puts the 9.5px
     of dead space above a one-line name in the first place."""
-    assert "transform: translateY(5px)" in _rule(_feed_css(), ".firmcol-logo")
+    assert "transform: translateY(5px)" not in _rule(_feed_css(), ".firmcol-logo"), (
+        "the nudge outlived the floor it was cancelling. This test's own "
+        "premise was that it goes when row one loses its 38px floor, which "
+        "happened 2026-09-03: the name no longer sits high in an inflated "
+        "row, so the tile no longer has to be pushed down to meet it, and "
+        "the same 5px now drives it below the centre it was added to reach.")

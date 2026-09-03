@@ -194,7 +194,20 @@ there: an `hx-swap-oob` element sitting in the initial document is inert noise.
                     hx-post="{% url 'track_eligible' %}"
                     hx-vals='{"confirmed": "1"}'
                     hx-confirm="Save {{ pick_cluster.save_count }} picked role{{ pick_cluster.save_count|pluralize }} to My Applications?"
-                  {% else %}disabled{% endif %}>{% if pick_cluster.save_count == 1 %}Save 1{% elif pick_cluster.save_count %}Save all {{ pick_cluster.save_count }}{% else %}All saved{% endif %}</button>
+                  {% else %}disabled{% endif %}>{% if pick_cluster.save_count %}Save all{% else %}All saved{% endif %}</button>
+        {% comment %}
+        NO COUNT ON THE BUTTON (founder's call, 2026-09-03). It read "Save all
+        6" directly under a header already printing "6 ROLES · 4 FIRMS" — the
+        same figure twice, an inch apart, on the shortest control in the
+        column. The number has not gone anywhere it was load-bearing: the
+        `hx-confirm` above still spells it out in full before anything is
+        written ("Save 6 picked roles to My Applications?"), which is the
+        moment the count actually has to be right.
+
+        This also retires the separate `Save 1` label. It existed only to
+        avoid rendering "Save all 1"; with no number to disagree with, one
+        label covers every count.
+        {% endcomment %}
         {% endif %}
       </header>
       {% if pick_cluster.roles %}

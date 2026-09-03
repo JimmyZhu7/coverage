@@ -185,7 +185,7 @@ def test_the_confirm_saves_exactly_what_the_column_counted(client):
 
     body, cluster, offered = _column(client)
     assert cluster["save_count"] == len(offered) == 1
-    assert "Save 1" in body
+    assert "Save 1 picked role to My Applications?" in body
 
     resp = _confirm_bulk_save(client, follow=True)
     assert "Saved 1 picked role." in resp.content.decode()
@@ -523,7 +523,7 @@ def test_a_pick_whose_posting_never_states_a_year_is_still_saved(client):
 
     assert [r["id"] for r in cluster["roles"]] == [silent.id]
     assert offered == [silent.id]
-    assert "Save 1" in body
+    assert "Save 1 picked role to My Applications?" in body
 
     client.post(reverse("track_eligible"), {"confirmed": "1"})
     assert set(UserOpportunity.objects.for_user(user)
@@ -707,7 +707,7 @@ def test_a_phd_internship_is_not_picked_for_an_undergraduate(client):
 
     assert offered == [wanted.id]
     assert phd.id not in {r["id"] for r in cluster["roles"]}
-    assert "Save 1" in body
+    assert "Save 1 picked role to My Applications?" in body
 
 
 @pytest.mark.django_db
@@ -790,7 +790,7 @@ def test_the_count_the_column_and_the_write_agree_across_the_rung_gate(client):
     assert cluster["save_count"] == 2
     assert {r["id"] for r in cluster["roles"]} == keep
     assert set(offered) == keep
-    assert "Save all 2" in body
+    assert ">Save all</button>" in body
     assert "Save 2 picked roles to My Applications?" in body
 
     client.post(reverse("track_eligible"), {"confirmed": "1"})
@@ -854,7 +854,7 @@ def test_one_programme_in_six_cities_is_one_card(client):
     body, cluster, offered = _column(client)
 
     assert len(cluster["roles"]) == len(offered) == 1
-    assert "Save 1" in body
+    assert "Save 1 picked role to My Applications?" in body
 
 
 @pytest.mark.django_db
@@ -946,7 +946,7 @@ def test_the_count_the_column_and_the_write_still_agree_over_a_fold(client):
     assert len(offered) == 3
     assert cluster["save_count"] == 3
     assert {r["id"] for r in cluster["roles"]} == set(offered)
-    assert "Save all 3" in body
+    assert ">Save all</button>" in body
     assert "Save 3 picked roles to My Applications?" in body
 
     client.post(reverse("track_eligible"), {"confirmed": "1"})
