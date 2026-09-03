@@ -810,9 +810,18 @@
                 from the same opener draft this card's link used to carry.
                 {% endcomment %}
                 <div class="cc-foot">
-                  <span class="cc-since">
-                    {% if card.days_since is not None %}{{ card.days_since }}d since last touch{% else %}Never contacted{% endif %}
-                  </span>
+                  {% comment %}
+                  Built in `views.py::_since_label`, not spelled out here.
+                  This zone carries a `min-width: 7.5rem` floor whose job is
+                  to make the foot's wrap decision a property of the card's
+                  width, so interpolating the raw day count here would put
+                  an unbounded string inside a bounded box: past three digits
+                  it outgrows the floor and the zone sizes to its text again.
+                  The view switches to years at a year so the widest sentence
+                  this span can ever hold is "364d since last touch" (116.4px
+                  against a 120px floor). See that function for the pixels.
+                  {% endcomment %}
+                  <span class="cc-since">{{ card.since_label }}</span>
                   {% comment %}
                   Log Touch and Edit are not equals: Log Touch is the verb
                   this whole board exists to prompt, Edit is the escape

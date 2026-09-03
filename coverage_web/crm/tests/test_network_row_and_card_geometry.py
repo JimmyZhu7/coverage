@@ -26,6 +26,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client
 
 from crm.models import Contact, UserFirm
+from crm.views import _since_label
 from directory.models import Firm
 
 pytestmark = pytest.mark.django_db
@@ -405,6 +406,42 @@ def test_the_foot_wraps_on_the_card_width_not_on_the_day_count():
     came out with feet of 36px and 68px and their controls 31px apart. A
     fixed floor on the zone makes the answer a property of the card's width,
     identical for every card in the grid.
+
+    THE FLOOR IS HALF THE MECHANISM. `min-width` is a floor and not a cap,
+    so it only fixes the wrap decision for a string that fits inside it, and
+    a raw day count does not stay inside it forever. Re-measured 2026-09-03
+    on the demo board (49 cards, `content-visibility` forced off, both the
+    375 and 1280 layouts), the strings at `--fs-xs`:
+
+        Never contacted           91.4
+        43d since last touch     109.0   the oldest touch the board holds
+        364d since last touch    116.4   the widest `_since_label` can make
+        999d since last touch    117.2   inside the 120px floor
+        1234d since last touch   120.2   outgrows it
+        3650d since last touch   124.1   outgrows it
+
+    and the defect that follows, with a four-digit count planted on every
+    fifth card at 375, where the phone's one-column card gives the foot
+    283px against the 120 + 12 + 149.1 = 281.1px its two zones want:
+
+        floor only     footTop 101.8 x11, 125 x38  cardH 156.2 x1, 179.4 x48
+        floor + label  footTop 101.8 x49           cardH 156.2 x49
+
+    Two foot offsets in one grid, 23.2px apart, which is the same defect the
+    floor was written to prevent arriving by the one route a floor cannot
+    block. So this test pins BOTH halves, and the second half is the reason
+    the first one is still allowed to say 7.5rem: widening the floor to 8rem
+    fixes the same defect and costs 23.2px on all 49 phone cards forever
+    (measured, card height 156.2 -> 179.4 at 375, the foot wrapping on every
+    card to hold headroom for a number no card is showing), while bounding
+    the string costs nothing measurable at any of the five widths.
+
+    The vertical numbers move whenever the card's skeleton moves, and they
+    did between this file's last pass and this one (foot 117.8 -> 101.8,
+    card 171.2/202.4 -> 156.2/179.4, a spacing change from elsewhere). The
+    horizontal ones did not, and they are the ones this test is about: the
+    string widths, the 149.1px control zone, the 12px gap, and the 283px of
+    foot a phone card has to fit all three into.
     """
     since = _rule(_styles(_page()), ".cc-since")
     assert "min-width: 7.5rem" in since, (
@@ -414,6 +451,43 @@ def test_the_foot_wraps_on_the_card_width_not_on_the_day_count():
     assert "white-space: nowrap" in since, (
         "the fact can wrap inside its own zone now, which is the same "
         "variance by another route."
+    )
+
+    # The other half: the string the floor has to hold is bounded, so the
+    # floor is a cap by construction rather than by how young the board is.
+    assert _since_label(None) == "Never contacted"
+    assert _since_label(0) == "0d since last touch"
+    assert _since_label(41) == "41d since last touch"
+    assert _since_label(364) == "364d since last touch", (
+        "the last day before the switch is still counted in days; moving "
+        "this boundary moves the widest string the 7.5rem floor must hold."
+    )
+    assert _since_label(365) == "1y since last touch"
+    assert _since_label(729) == "1y since last touch", (
+        "the year count floors rather than rounds: 729 days is one full year "
+        "of silence and change, not two."
+    )
+    assert _since_label(730) == "2y since last touch"
+    assert _since_label(3650) == "10y since last touch"
+
+    # And no count in a century of them produces a wider string than that.
+    # A character count, not a pixel one, because a character count is what a
+    # test with no layout engine can actually check, and because the two
+    # measured strings either side of the floor differ by exactly one
+    # character: "364d since last touch" is 21 and fits at 116.4px, "1234d
+    # since last touch" is 22 and breaches at 120.2px. So 21 is the number
+    # this function is allowed to reach, and 22 is the one that has to come
+    # back here and be re-measured. Several strings tie at 21 ("100d" and
+    # "364d" both), and the pixel spread inside the tie is under a point:
+    # 115.8 against 116.4. It is the character count that moves the answer.
+    longest = max(
+        (_since_label(d) for d in [None] + list(range(0, 36525))), key=len
+    )
+    assert len(longest) == 21, (
+        f"the longest label this function can produce is now {longest!r} "
+        f"({len(longest)} chars); re-measure it against the 7.5rem floor "
+        "before accepting it, because 22 characters already measured "
+        "120.2px against a 120px floor and put two foot offsets in one grid."
     )
 
 

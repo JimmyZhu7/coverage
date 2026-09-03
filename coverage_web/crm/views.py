@@ -991,6 +991,58 @@ def _stale_window_days(c, params) -> int:
     return max(round(merged["followup_after_business_days"] * 7 / 5), 1)
 
 
+# THE STRING'S WIDTH IS LOAD-BEARING, so the string is decided here rather
+# than spelled inline in the template.
+#
+# `.cc-since` carries a `min-width: 7.5rem` (120px) floor whose entire job is
+# to make `.cc-foot`'s wrap decision a property of how wide the CARD is, so
+# every card in a grid answers it identically (the floor's own comment block
+# in `crm/_styles.html` is the argument). A raw day count is unbounded, and
+# past three digits it outgrows the floor and the zone starts sizing to its
+# text again — which is the exact defect the floor was written to prevent,
+# arriving by the one route the floor cannot block.
+#
+# Measured 2026-09-03 on the demo board (49 cards, `content-visibility`
+# forced off), at 375 where the phone's one-column card has 283px of content
+# against a foot wanting 281.1px, i.e. 1.9px of headroom:
+#
+#     43d    109.0px   the oldest touch the board actually holds
+#     364d   116.4px   the widest this function can now produce
+#     999d   117.2px   still inside the floor
+#     1234d  120.2px   outgrows it
+#     3650d  124.1px   foot 101.8 on 11 cards, 125 on 38, in ONE grid
+#
+# Not live today. Counted the same day: the demo board's oldest real touch is
+# 43 days back and the founder's own 323 contacts top out at 52, so no card
+# anywhere is showing three digits, let alone four. It is reachable in year
+# three of a CRM whose whole premise is a relationship kept over years, which
+# is the only reason this is worth spending a branch on.
+#
+# Bounding the string beats widening the floor, and not narrowly. 8rem also
+# fixes it, and charges 23.2px to every phone card forever: measured, card
+# height 156.2 -> 179.4 at 375, the foot wrapping on all 49 to hold headroom
+# for a number no card is showing. This costs nothing at any width. With a
+# four-digit count planted on every fifth card the board measures 156.2 x49
+# and foot 101.8 x49, which is what it measures with no long counts at all.
+#
+# It also reads better. Nobody counts to 1234 days; "3y since last touch" is
+# the sentence a person actually says about a contact they have lost.
+def _since_label(days_since: int | None) -> str:
+    """The staleness line in the card's foot, as words.
+
+    `None` is never-touched, which is a different claim from "0 days ago"
+    and gets its own sentence rather than a zero."""
+    if days_since is None:
+        return "Never contacted"
+    # `< 365` and not `abs(...) < 365`: a future-dated touch yields a
+    # negative count, and "-3y since last touch" would be a worse thing to
+    # render than the "-3d" this has always rendered. Days is where that
+    # case already lives; this branch does not move it.
+    if days_since < 365:
+        return f"{days_since}d since last touch"
+    return f"{days_since // 365}y since last touch"
+
+
 def _contact_card(c, *, tier, today, cadence=None, as_of=None):
     """One full contact card (radar style): initials, pills, firm · role,
     and days since the last touch.
@@ -1041,6 +1093,12 @@ def _contact_card(c, *, tier, today, cadence=None, as_of=None):
         "thread_state": c.thread_state,
         "parked": c.thread_state == "parked",
         "days_since": days_since,
+        # The rendered sentence, not the raw count: see `_since_label` above
+        # for why its width is this card's business and not the template's.
+        # `days_since` stays alongside it because the avatar's own title
+        # attribute wants the precise number, and because it is the value
+        # the staleness ring divides.
+        "since_label": _since_label(days_since),
         "stale_pct": round(stale * 100),
         # The tint threshold decided here, where the arithmetic lives, not by
         # a CSS substring hack that cannot tell 8% from 80%.
