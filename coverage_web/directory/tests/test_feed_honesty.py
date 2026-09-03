@@ -78,21 +78,11 @@ def test_feed_badge_reads_first_seen_not_new(client):
 # never a hardcoded window that can drift from it.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.django_db
-def test_fresh_stat_strip_label_matches_fresh_days_constant(client):
-    firm = _firm()
-    _seen(_opp(firm, "https://x/1"), 1)
-    resp = client.get(reverse("opportunities"))
-    assert resp.context["dash"]["fresh_days"] == _FRESH_DAYS
-    body = resp.content.decode()
-    assert f"Fresh ({_FRESH_DAYS}d)" in body
-    assert "Fresh This Week" not in body  # the old, drift-prone hardcoded label
+# `test_fresh_stat_strip_label_matches_fresh_days_constant` stood here. It pinned that the strip's "Fresh (Nd)" label read the same constant the
+# query filtered on, so the words and the filter could not drift apart.
+# The strip was removed on 2026-09-03 ("just take this thing away"); there is
+# no strip left to assert about, and nothing else states that figure.
 
-
-# ---------------------------------------------------------------------------
-# A2 — a dated role whose deadline has PASSED is neither "dated-and-live" nor
-# "rolling". Rolling must mean `deadline is None`.
-# ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
 def test_a_passed_deadline_is_not_rolling():
@@ -756,39 +746,24 @@ def test_the_counts_describe_the_board_not_the_loaded_slice(client):
         Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
                                    status="open", url=f"https://f{i}.com/a")
     resp = client.get("/opportunities/")
-    assert resp.context["total"] == 20, "the strip counts the board"
+    assert resp.context["total"] == 20, "the count describes the board"
     assert len(resp.context["clusters"]) == 12, "the page renders a slice"
-    # The context was always right; the STRIP was what lied. Asserting only on
-    # the context is what let `{{ clusters|length }}` survive in the template,
-    # printing "12 Firms" over a 20-firm board. Read the rendered strip.
+    # The context was always right; the surface was what lied. Asserting only
+    # on the context is what let `{{ clusters|length }}` survive in the
+    # template, printing "12 Firms" over a 20-firm board — so this still reads
+    # what is RENDERED. The strip that used to carry it went on 2026-09-03;
+    # the segment pill is the surface now, and the invariant is unchanged:
+    # whatever states a total states the board's, never the loaded slice.
     body = re.sub(r"<style.*?</style>", "", resp.content.decode(), flags=re.S)
-    strip = body[body.index('class="stat-strip"'):]
-    strip = strip[:strip.index("</div>")]
-    assert ">20</b> Firms" in strip, "the strip names the board's firm count"
-    assert ">12</b> Firms" not in strip, "never the loaded slice"
+    assert '<span id="cnt-role-campus">20</span>' in body, (
+        "the segment pill names the board's total")
+    assert '<span id="cnt-role-campus">12</span>' not in body, (
+        "never the loaded slice")
 
 
-@pytest.mark.django_db
-def test_a_one_firm_board_says_firm_not_firms(client):
-    """The strip's counts are singular-aware. "1 Firms" is the same hardcoded
-    plural that "1 deadlines" was on the calendar, one line further along.
-
-    Both anchors were `>1</b> <noun><` until 2026-09-03, when the two board
-    figures became ONE clause — "1 Open Role across 1 Firm" — so the role
-    count is no longer followed by a tag. The promise is unchanged and the
-    anchor moved onto the word that follows it instead; "Open Roles across"
-    would fail exactly as "Open Roles<" used to.
-    """
-    f = Firm.objects.create(slug="solo", name="Solo Capital")
-    Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
-                               status="open", url="https://solo.com/a")
-    body = re.sub(r"<style.*?</style>", "",
-                  client.get("/opportunities/").content.decode(), flags=re.S)
-    strip = body[body.index('class="stat-strip"'):]
-    strip = strip[:strip.index("</div>")]
-    assert ">1</b> Firm<" in strip
-    assert ">1</b> Open Role across" in strip
-    assert "Open Roles" not in strip and "Firms" not in strip
+# `test_a_one_firm_board_says_firm_not_firms` stood here. It pinned the strip's pluralisation on a one-firm board.
+# The strip was removed on 2026-09-03 ("just take this thing away"); there is
+# no strip left to assert about, and nothing else states that figure.
 
 
 @pytest.mark.django_db
@@ -834,7 +809,10 @@ def test_the_noscript_cols_link_renders_the_full_page(client):
                                    status="open", url=f"https://f{i}.com/a")
     resp = client.get("/opportunities/?cols=12")
     assert resp.status_code == 200
-    assert b"stat-strip" in resp.content
+    # `stat-strip` was the sentinel here until 2026-09-03. It only ever meant
+    # "the full page rendered, not a fragment"; `board-state` is the wrapper
+    # that survived it and says the same thing.
+    assert b'class="board-state"' in resp.content
 
 
 # ---------------------------------------------------------------------------

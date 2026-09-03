@@ -273,17 +273,44 @@ def test_the_cards_gaps_group_the_identity_block():
     css = _styles(_page())
     card = _rule(css, ".contact-card")
 
-    assert "padding: var(--s3) var(--s4)" in card, (
-        "the card is back on 16px of vertical padding. That is 32px of the "
-        "179px card spent above the avatar and below the buttons, on a card "
-        "whose own content is four short lines."
+    # 16 / 16 / 12 since 2026-09-03 ("tight on the top, loose on the bottom
+    # around the line"). The 12px top was the tight half. The bottom stays 12
+    # and is the one side that is not 16 on purpose: the footer already
+    # carries 8px above its buttons under a drawn rule, so the space below
+    # them is the third margin in a row and the only one separating nothing.
+    # Net, the card is 152.2px — under the 154 it held before, which is what
+    # "do not make the card bigger" has to mean when the ask is more air.
+    assert "padding: var(--s4) var(--s4) var(--s3)" in card, (
+        "the card is back on 12px above the avatar, which is the half of "
+        "this the founder called tight — or on a flat 16, which puts the "
+        "loose half back under the buttons."
     )
-    assert "gap: var(--s1)" in card, (
-        "the card's slots are back on a flat 8px gap, so the name, its "
-        "pills and its firm line read as three unrelated rows instead of "
-        "one identity block — and the seam above the foot reads as just "
-        "another gap rather than the card's one division."
+    # THIRD REPORT ON THIS CARD, and it moves the tight gap rather than
+    # removing it: "elements are literally squeezed together" (2026-09-03).
+    # The 4px above was right that the name, its pills and its firm line are
+    # not three unrelated rows — and wrong that the answer is to put every
+    # distance on the card at 4px, which leaves a hierarchy nobody can see.
+    #
+    # The pills moved INTO the head, stacked under the name in the 40px the
+    # avatar already occupies (20px name + 16px reserved pill row = 36). That
+    # frees the pill row's own slot and its gap — 24px — and the card spends
+    # it on the three blocks that are genuinely separate: identity, firm,
+    # footer, 12px apart. The one 4px gap left on the card is inside
+    # `.cc-idblock`, between the name and its own pills, which is the only
+    # place on it where tight means "these two are one thing".
+    # Measured after, all 49 demo cards at 1280: name->pills 4, head->firm 12,
+    # firm->seam 13.8, seam->buttons 13, card 154px — the same 154 it was.
+    assert "gap: var(--s3)" in card, (
+        "the card's blocks are back on the 4px gap that made the founder "
+        "call it squeezed; 4px belongs inside `.cc-idblock`, not between "
+        "the identity block, the firm line and the footer."
     )
+    idblock = _rule(css, ".cc-idblock")
+    assert "gap: var(--s1)" in idblock, (
+        "the name and its pills have lost the tight gap that says they are "
+        "one thing — without it the card has no hierarchy, just one spacing."
+    )
+    assert "flex-direction: column" in idblock, idblock
 
 
 def test_the_foot_is_the_cards_one_seam_and_it_is_drawn():
@@ -320,9 +347,17 @@ def test_the_foot_is_the_cards_one_seam_and_it_is_drawn():
     # no gap above it has. The 4px it gave up is exactly what paid for the
     # pills-to-firm gap, so the card kept its height while gaining a
     # hierarchy; see `.cc-foot`'s own comment for the founder's two reports.
+    # Back to `--s3` (2026-09-03) now that the card has air to give it: the
+    # seam's job is to be the card's one division, and at 8px against 12px
+    # blocks it was the SMALLEST gap on the card rather than the largest.
+    # 8px, and the seam is still the card's one division because it DRAWS a
+    # rule; it does not need to be the widest gap as well. It was 12 for one
+    # revision and that was the "loose around the line" half of the report:
+    # 12 above the rule and 12 below it put 25px of clear space around a
+    # hairline on a 152px card.
     assert "padding-top: var(--s2)" in foot, (
-        "the foot's own padding is back level with the gaps above it, so the "
-        "card's one real division reads as just another gap."
+        "the space under the rule is back to matching the gaps above it, "
+        "which is what made the footer read as loose."
     )
 
 

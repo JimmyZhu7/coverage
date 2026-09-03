@@ -529,7 +529,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      `.scope-foot`. This is the ONE declaration setting the distance between
      the strip and its footnote, so the two can no longer be written against
      each other. */
-  .board-state .stat-strip { margin-bottom: var(--s2); }
   .board-state .cycband { margin-bottom: 0; }
 
   /* The month rail, folded. It is a decorative shape (role="img" — a shown
@@ -557,13 +556,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      numbers in the display family, a hairline divider between items. Left-
      aligned and a size quieter than v4: the strip is orientation, not a
      dashboard, and the fs-l numbers were competing with the firm names below. */
-  .stat-strip { display: flex; flex-wrap: wrap; align-items: center;
-    justify-content: flex-start; row-gap: var(--s2); column-gap: 18px;
-    margin: 0 0 var(--s3);
-    /* So a divider that lands outside the strip is clipped rather than
-       drawn — see `.ss-item`'s rule below. */
-    overflow: hidden;
-    padding: 0; font-size: var(--fs-xs); color: var(--ink-2); }
   /* THE DIVIDER SITS IN THE GAP, NOT INSIDE THE ITEM (2026-09-02).
 
      It was an in-flow `::before` on every item but the first, which meant
@@ -574,15 +566,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      the container's `overflow: hidden` clip it wherever the item starts a
      line. `column-gap` is not applied at the start of a wrapped line, so
      the first item on line two sits at x=0 and its divider at x=-9. */
-  .stat-strip .ss-item { position: relative;
-    display: inline-flex; align-items: baseline; gap: 6px; }
-  .stat-strip .ss-item:not(:first-child)::before { content: "";
-    position: absolute; left: -9px; top: 50%; margin-top: -7.5px;
-    width: 1px; height: 15px; background: var(--line-strong); }
-  .stat-strip .ss-live { align-self: center; margin-right: 2px; }
-  .stat-strip b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-    font-size: var(--fs-m); font-weight: var(--w-bold); color: var(--ink);
-    letter-spacing: -0.01em; }
   /* ======================================================================
      TWO KINDS OF FACT, DRAWN AS TWO (2026-09-03).
 
@@ -606,11 +589,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      `board_count` by `.scope-foot` when "Eligible only" is on, and still the
      `#cov-live` announcement's source. It stopped being a headline; it did
      not stop being a fact. */
-  .stat-strip .ss-board { color: var(--ink-3); }
-  .stat-strip .ss-board b { font-size: var(--fs-xs); font-weight: var(--w-med);
-    color: var(--ink-2); }
-  .stat-strip .ss-warn b { color: var(--stale-t); }
-  .stat-strip .ss-fresh b { color: var(--ok); }
   /* The strip's figures arrive, they do not COUNT UP. `ss-pop` used to scale
      each digit 0.6 -> 1.08 -> 1 over 620ms, and a number growing on load is
      the one motion this product cannot afford: it reads as the figure
@@ -620,30 +598,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      loaded. The settle is now opacity and colour alone — the figure is at
      its final size and its final value from the first frame it is legible,
      and the stagger still reads left to right. */
-  @keyframes ss-settle { from { opacity: 0; color: var(--ink-3); }
-    to { opacity: 1; color: var(--ink); } }
-  .stat-strip b.dash-num { display: inline-block;
-    animation: ss-settle 380ms ease-out both;
-    animation-delay: calc(var(--i, 0) * 90ms); }
   /* Every tier that states its own colour needs its own settle: the shared
      keyframe lands on `--ink`, and `animation-fill-mode: both` means that
      landing colour WINS over the rule that set the tier's colour. One
      keyframe per tier, each ending on the colour its tier declares. */
-  .stat-strip .ss-warn b.dash-num {
-    animation-name: ss-settle-warn; }
-  @keyframes ss-settle-warn { from { opacity: 0; color: var(--ink-3); }
-    to { opacity: 1; color: var(--stale-t); } }
-  .stat-strip .ss-fresh b.dash-num {
-    animation-name: ss-settle-ok; }
-  @keyframes ss-settle-ok { from { opacity: 0; color: var(--ink-3); }
-    to { opacity: 1; color: var(--ok); } }
-  .stat-strip .ss-board b.dash-num {
-    animation-name: ss-settle-quiet; }
-  @keyframes ss-settle-quiet { from { opacity: 0; color: var(--ink-3); }
-    to { opacity: 1; color: var(--ink-2); } }
-  @media (prefers-reduced-motion: reduce) {
-    .stat-strip b.dash-num { animation: none; } }
-
+  /* An empty `@media (prefers-reduced-motion: reduce)` block stood here.
+     Everything inside it switched off the stat strip's three `ss-settle*`
+     count animations; the strip went on 2026-09-03 and took them with it,
+     leaving a media query wrapping nothing. Removed rather than kept warm:
+     an empty block that later gains a rule by accident is worse than no
+     block, and `test_every_new_motion_is_switched_off_by_reduced_motion`
+     is what makes sure a NEW animation brings its own escape. */
   /* Role-type badges — campus buckets get the accent family; "other" stays
      muted so experienced rows (in the opt-in views) read as background. */
   .role-insight     { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
@@ -2124,8 +2089,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
 
      THE NEGATIVE TOP MARGIN IS GONE (2026-09-02) and it was a real overlap,
      not a tight gap. This rule read `margin: calc(var(--s3) * -1) 0 var(--s3)`
-     — a -12px pull written to cancel `.stat-strip`'s own 12px bottom margin.
-     But `.board-state .stat-strip` overrides that margin to 6px, so the pull
      was 6px larger than the thing it was cancelling: measured live at 1280px,
      the strip's box ran 412..431 and this footnote's box started at 425,
      INSIDE it. The founder's words were "crammed directly beneath with no

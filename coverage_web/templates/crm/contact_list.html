@@ -719,8 +719,21 @@
                   height that card's pills happened to land on. The pills
                   have their own reserved row below now; see `.cc-tags`.
                   {% endcomment %}
-                  <span class="cc-name">{{ card.c.name|smart_person_name|smart_title }}</span>
-                </div>
+                  {% comment %}
+                  The name and the pill row share a column beside the avatar
+                  (2026-09-03). They are still one line each and the pill row
+                  is still reserved whether or not it has pills — the two
+                  guarantees the comments above and below this one are about.
+                  What changed is where the pair sits: the avatar is 40px and
+                  the name it was holding is 20px, so half the head was dead
+                  height while the pills took a fourth slot underneath it.
+                  Stacked into that dead height they cost nothing, and the
+                  24px they give back is what pays for the air between the
+                  card's remaining blocks. Founder, on the third look at this
+                  card: "elements are literally squeezed together".
+                  {% endcomment %}
+                  <span class="cc-idblock">
+                    <span class="cc-name">{{ card.c.name|smart_person_name|smart_title }}</span>
                 {% comment %}
                 THE PILL ROW IS ALWAYS RENDERED, even with nothing in it.
 
@@ -746,7 +759,9 @@
                   {% if card.gender %}<span class="pill cc-pill">{{ card.gender }}</span>{% endif %}
                   {% if card.tier %}<span class="pill cc-pill">T{{ card.tier }}</span>{% endif %}
                   {% if card.region %}<span class="pill cc-pill">{{ card.region }}</span>{% endif %}
-                </span>
+                  </span>
+                  </span>
+                </div>
                 {% comment %}
                 Firm and role, one line, in two spans that truncate
                 independently — and the ROLE is the one that survives.

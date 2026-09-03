@@ -334,11 +334,13 @@ def test_the_subset_sentence_is_gone_from_the_header(client, bar):
     assert "experienced role" not in body
     assert ">Show everything</a>" not in body
     # The escape hatch is one click away regardless — it just lives in the
-    # segmented control now, above the stat strip like the sentence used to.
-    strip = body.index('class="stat-strip"')
+    # segmented control now, above the results like the sentence used to. The
+    # `.stat-strip` that used to be the midpoint of this ordering went on
+    # 2026-09-03; `.board-state`, its wrapper, is what still sits between.
+    state = body.index('class="board-state"')
     everything = body.index('id="seg-role-all"')
     cards = body.index('class="firmcols"')
-    assert everything < strip < cards
+    assert everything < state < cards
 
 
 def test_the_everything_segment_states_its_own_count_honestly(client, bar):
@@ -527,12 +529,23 @@ def test_the_result_count_announces_from_outside_the_swap_target(client, bar):
     assert 'id="cov-live" hx-swap-oob="innerHTML"' in swap
     assert "4 open roles" in swap   # the fixture's four campus rows
 
-    # 3. One region for this fact, not two. The strip's own figure no longer
-    #    claims a role: two live regions holding one count is how a screen
-    #    reader ends up reading it back twice. (`base.html`'s message strip is
-    #    a separate region for a separate fact and is not counted here.)
+    # 3. One region for this fact, not two. Two live regions holding one
+    #    count is how a screen reader ends up reading it back twice.
+    #    (`base.html`'s message strip is a separate region for a separate fact
+    #    and is not counted here.)
+    #
+    #    The second half used to read the strip and assert its figure claimed
+    #    no `role="status"`. The strip was removed on 2026-09-03, which
+    #    settles that by construction — but the claim it was making is worth
+    #    keeping in a form that survives it: nothing inside the swap target
+    #    may declare itself a live region, because everything in there is
+    #    destroyed and rebuilt on every filter change.
     assert full.count('id="cov-live"') == 1
-    assert "role=\"status\"" not in full[full.index('class="stat-strip"'):]
+    _, _, results = full.partition('<div id="cov-results">')
+    assert 'role="status"' not in results, (
+        "a live region inside the swap target is replaced rather than "
+        "updated, so it announces nothing — the exact defect this test was "
+        "rewritten for")
 
 
 # ---------------------------------------------------------------------------
@@ -628,10 +641,15 @@ def test_the_board_state_binds_the_totals_to_the_cycle(client, bar):
     assert 'class="board-state"' in body
     results = body[body.index('id="cov-results"'):]
     assert 'class="board-state"' in results, "must refresh with the filters"
-    strip = results.index("stat-strip")
+    # "Totals lead, shape follows" was an ordering between the strip and the
+    # cycle band. The strip went on 2026-09-03 and the band is what is left
+    # inside `.board-state`, so what remains assertable is that the band is
+    # inside the swap target at all — it has to refresh with the filters, which
+    # is this test's actual subject.
+    state = results.index('class="board-state"')
     band = results.index("cycband") if "cycband" in results else None
     if band is not None:
-        assert strip < band, "totals lead, shape follows"
+        assert state < band, "the cycle band renders inside the board state"
 
 
 @pytest.mark.django_db

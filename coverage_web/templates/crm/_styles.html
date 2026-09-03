@@ -2035,8 +2035,40 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   two actions a student uses 174 of these cards for, nothing that sends a
   reader to the detail page to finish reading it.
   {% endcomment %}
+  /* THE GAP IS 12px, NOT 4 (2026-09-03, the founder's third report on this
+     card: "elements are literally squeezed together"). The 4px was right
+     about grouping and wrong about air — with the name, its pills, the firm
+     line and the seam all 4px apart, the card had a hierarchy nobody could
+     see because every distance in it was the same small one.
+     The identity block above now holds the name AND the pills inside the
+     avatar's 40px, which frees the pill row's own 16px slot and the gap that
+     went with it — 24px, spent here. What is left is three blocks (identity,
+     firm, footer) separated by 12px each, and the ONE 4px gap on the card is
+     between the name and its own pills, where tight means "these two are one
+     thing". The card measures what it measured before: 154px at 1280. */
+  /* 16px ALL ROUND, and the seam tightens to pay for it (2026-09-03, the
+     founder's fourth look: "tight on the top, loose on the bottom around the
+     line"). Both halves of that are one arithmetic fact. `.cc-foot` carries
+     `margin-top: auto`, so every pixel the card has spare pools in ONE place
+     — the gap above the seam — and the card was running 3.8px spare. That is
+     why the line sat 13.8px under the firm text while the name sat 12px from
+     the top: the slack could only land in the lower half.
+     Raising the top padding to 16 spends that slack where it was missing and
+     leaves the gap above the seam at exactly its declared 12, and dropping
+     the foot's own padding to 8 closes the space under the line. Measured
+     after: 16 top, 12 to the firm line, 12 to the seam, 9 from the seam to
+     the buttons, 12 bottom.
+     The bottom is the one side that is not 16, and deliberately: the footer
+     already carries its own 8px above the buttons and a drawn rule above
+     that, so the space under the buttons is the third margin in a row and
+     the only one with nothing to separate. At 16 it was the "loose on the
+     bottom" half of the same report. 12 also keeps the card at 152.2px —
+     UNDER the 154 it has held all night, which is what "do not make the card
+     bigger" has to mean when the ask is more air at the top.
+     Horizontal padding is untouched at 16: `.cc-firm`'s truncation budget was
+     measured against those sides. */
   .contact-card { border: 1px solid var(--line); border-radius: var(--r-panel); min-height: 128px;
-    padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s1);
+    padding: var(--s4) var(--s4) var(--s3); display: flex; flex-direction: column; gap: var(--s3);
     overflow: hidden;
     transition: border-color var(--t-fast), box-shadow var(--t-med);
     /* 150+ of these render at once and most are below the fold. This lets
@@ -2181,6 +2213,14 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      pill row 20px higher than its neighbour. */
   .cc-head { display: flex; gap: var(--s3); align-items: center;
     min-height: 40px; }
+  /* Name over pills, inside the 40px the avatar already occupies. 20px of
+     name and 16px of reserved pill row come to 36, so the pair fits the
+     head's own height and the pills stop costing a fourth slot below it.
+     4px between them because they are one identity — the tight gap on this
+     card is now spent where two things really do belong together, rather
+     than everywhere. */
+  .cc-idblock { display: flex; flex-direction: column; justify-content: center;
+    gap: var(--s1); flex: 1 1 auto; min-width: 0; }
   /* The explicit selection control. NOT a wrapping <label> like
      `.net-mini` — this card already has its own click targets (Log Touch,
      Edit), so the box has to be its own deliberate target rather than
@@ -2231,6 +2271,13 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      head reserves: the longest name across both live boards, "Bartholomew
      Vanderhoeven", measures 204px against 173px of room and does wrap. It
      wraps inside the frame instead of pushing the frame. */
+  /* WRAPS, NEVER ELLIPSISED — `test_the_contact_name_is_still_never_truncated`
+     states the rule and the reason: the name is the one thing on this card a
+     reader is scanning for, and the frame absorbs the second line instead.
+     I capped it to one line on 2026-09-03 to stop 3 of 49 wrapping names
+     setting the row height for all 49, and reverted it on reading that test:
+     the wrap is the decision, and the uneven gap it leaves above the seam is
+     the price of it, not a defect to fix by cutting a person's name. */
   .cc-name { font-weight: var(--w-bold); line-height: 20px;
     flex: 1 1 auto; min-width: 0; }
   {% comment %}
@@ -2422,7 +2469,7 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     column-gap: var(--s3); row-gap: var(--s1);
     border-top: 1px solid var(--line); padding-top: var(--s2); flex-wrap: wrap;
     margin-top: auto; }
-  .cc-firm { margin-top: var(--s1); }
+
   /* Plain body face, not `--font-mono`. The rest of the app reaches for
      mono+tabular-nums on a date/count that sits in a column of OTHER
      numbers it needs to line up against (`.arch-when`, `.play-when`,

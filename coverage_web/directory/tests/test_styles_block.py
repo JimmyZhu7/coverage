@@ -830,39 +830,14 @@ def test_the_meta_separator_leads_its_item_and_can_be_clipped():
         "of every wrapped line, which is what the founder's review caught")
 
 
-def test_the_stat_strip_divider_is_out_of_flow_so_a_wrapped_line_can_clip_it():
-    """At 375px this strip wraps to two lines, and line two used to open with
-    a hairline and nothing to its left. Same defect, same fix, different
-    component: the divider is absolutely positioned in the item's own gap so
-    the container's `overflow: hidden` removes it wherever the item starts a
-    line. `column-gap` is not applied at the start of a wrapped line, so that
-    item sits at x=0 and its divider at x=-9."""
-    css = _feed_css()
-    divider = _rule(css, ".stat-strip .ss-item:not(:first-child)::before")
-    assert "position: absolute" in divider, divider
-    assert "left: -9px" in divider, divider
-    strip = _rule(css, ".stat-strip")
-    assert "overflow: hidden" in strip, "nothing clips the divider without this"
-    assert "column-gap: 18px" in strip, strip
-    item = _rule(css, ".stat-strip .ss-item")
-    assert "position: relative" in item, (
-        "the divider is positioned against its own item, not against the strip")
+# `test_the_stat_strip_divider_is_out_of_flow_so_a_wrapped_line_can_clip_it`
+# stood here. It pinned the strip's between-item hairline as an absolutely
+# positioned ::before at x=-9 inside an `overflow: hidden` container, so a
+# divider that opened a wrapped line at 375px was clipped rather than left
+# hanging with nothing to its left. The strip was removed on 2026-09-03; the
+# same defect and the same fix survive one component over, on
+# `.rr-meta > *:not(:last-child)` directly above.
 
-
-# ---------------------------------------------------------------------------
-# ROW 2'S THREE WEIGHTS, AND THE SHORTHAND THAT WOULD SILENTLY UNDO ONE
-# (2026-09-03).
-#
-# The bar drew six controls identically, so it could not say which of them
-# the student had actually narrowed. The fix is a resting tier and an engaged
-# tier, keyed on a server-rendered `is-set` class — which means most of these
-# rules set a background, and a background on a <select> in this codebase is
-# a trap: coverage.css draws the native select's caret with
-# `background-image` (L1311), and the `background` SHORTHAND resets it to
-# `none`. The failure is invisible in the enhanced page (a `.csel-btn` stands
-# in for the select) and shows only with JS off, or in the frames before the
-# enhancer runs — i.e. exactly where nobody looks.
-# ---------------------------------------------------------------------------
 
 def test_no_filter_rule_wipes_the_native_selects_caret_with_a_shorthand():
     """`background-color`, never `background`, anywhere a `select` is styled.
@@ -933,14 +908,21 @@ def test_a_quiet_control_still_answers_the_mouse():
 def test_the_footnote_states_its_own_gap_instead_of_cancelling_someone_elses():
     css = _feed_css()
     foot = " ".join(_rule(css, ".scope-foot").split())
+    # The strip that used to sit above this footnote went on 2026-09-03, and
+    # `.board-state .stat-strip` — the ONE declaration that set the distance
+    # between them — went with it. What this test is really holding down
+    # outlives both: the footnote states no margin of its own and cancels
+    # nobody else's. That is the whole reason the pair could not be written
+    # against each other, and it is now the `.board-state .cycband` rule
+    # carrying the single declaration instead.
     assert foot.startswith("margin: 0;"), (
-        "the footnote must not carry a margin of its own; the ONE declaration "
-        f"setting its distance from the strip is `.board-state .stat-strip` ({foot})")
+        "the footnote carries a margin of its own again, so its spacing is "
+        f"once more a rule written against another rule ({foot})")
     assert "calc(" not in foot, (
         "a negative margin here is a rule written against another rule, which "
         "is how a 12px cancel of an 8px margin became a 4px overlap")
-    strip = _rule(css, ".board-state .stat-strip")
-    assert "margin-bottom: var(--s2)" in strip, strip
+    band = _rule(css, ".board-state .cycband")
+    assert "margin-bottom: 0" in band, band
 
 
 def test_no_scope_line_modifier_is_left_to_lose_to_the_generic_rule():

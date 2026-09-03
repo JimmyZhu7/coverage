@@ -126,86 +126,47 @@ def test_the_board_count_and_the_strip_total_reconcile(client, dupes):
     assert ctx["board_count"] == ctx["total"] == 2
 
 
-def test_the_segment_pill_states_the_number_the_strip_states(client, dupes):
-    """The two figures a student can see at once, read off the rendered page.
+def test_the_segment_pill_is_the_only_surface_stating_the_board_total(client, dupes):
+    """The original defect was "All Campus (2723)" sitting eight pixels above
+    "2596 Open Roles" — two figures for one fact, disagreeing.
 
-    The original defect was never about context keys: it was "All Campus
-    (2723)" sitting eight pixels above "2596 Open Roles". This asserts the
-    fix where the defect was — in the HTML.
+    It was fixed twice. First the numbers were made to agree; then the strip
+    demoted its copy to a quieter clause. On 2026-09-03 the founder removed
+    the strip outright ("just take this thing away"), which settles the
+    original defect by leaving exactly one surface stating the total.
 
-    Re-anchored 2026-09-03 on `.ss-total` instead of `style="--i:0"`. The
-    premise is unchanged and the promise is unweakened — the two numbers must
-    still be one number — but the strip's total is no longer the first thing
-    in its own item, and pinning a figure by its animation-stagger index tied
-    this test to the strip's drawing order rather than to which figure it is.
-    A class says which one; an `--i` says where it happens to sit.
+    So this no longer compares two numbers — there is only one — and instead
+    pins that: the pill states it, and no second figure claims it back.
     """
     body = client.get(reverse("opportunities")).content.decode()
-    pill = re.search(r'id="cnt-role-campus"[^>]*>(\d+)<', body)
-    strip = re.search(r'<b class="[^"]*\bss-total\b[^"]*"[^>]*>(\d+)</b>', body)
-    assert pill and strip
-    assert pill.group(1) == strip.group(1) == "2"
+    # MARKUP ONLY. This page inlines its stylesheet, so a bare `in body` is
+    # answered by CSS selectors and comments as readily as by anything drawn —
+    # the trap this file warns about in three other places.
+    markup = re.sub(r"<style[^>]*>.*?</style>", "", body, flags=re.S)
+    assert re.search(r'All Campus \(<span id="cnt-role-campus">\d+</span>\)', markup), (
+        "the segment pill stopped stating the board total")
+    assert 'class="stat-strip"' not in markup, (
+        "the strip is back, and with it two counts for one fact")
+    assert "Open Role" not in markup, (
+        "something restated the board total as a sentence; the pill is the "
+        "one surface that carries it")
 
 
-def test_the_strip_states_the_board_total_once_and_quietly(client, dupes):
-    """WHICH SURFACE CARRIES THE COUNT (2026-09-03).
 
-    "All Campus (3026)" sat directly above "3026 Open Roles", both in bold,
-    eight pixels apart. The counts agreeing was the fix that shipped hours
-    earlier; the visible redundancy is what it left behind.
-
-    The decision: THE SEGMENT PILL carries it. It is the only surface where
-    the number has a comparison set beside it, so it is the only one where the
-    number is a decision rather than trivia, and it is the surface that
-    survives an htmx swap (refreshed out of band) rather than being rebuilt on
-    every keystroke.
-
-    `total` is demoted here, not deleted — it is still the only figure that can
-    reconcile against `board_count` when "Eligible only" is on, and
-    `.scope-foot` still accounts for the difference. So this pins three things:
-    the figure is printed exactly once in the strip; it lives in the board tier
-    rather than the time tier; and the board tier is drawn at the strip's own
-    text size while the time tier keeps the figure size.
-    """
-    body = client.get(reverse("opportunities")).content.decode()
-    assert len(re.findall(r'\bss-total\b', body)) == 1, (
-        "the board total is one figure on this line, not two")
-    # The board pair is ONE item carrying both figures, so the coverage clause
-    # says something the pill cannot.
-    assert re.search(
-        r'class="[^"]*\bss-board\b[^"]*".*?\bss-total\b.*?Open Role.*?across.*?Firm',
-        body, re.S), "the total and the firm count are one clause, not two tiles"
-    css = _css()
-    board = _rule(css, ".stat-strip .ss-board b")
-    assert "font-size: var(--fs-xs)" in board, (
-        f"the board tier is text-sized, not figure-sized ({board})")
-    figure = _rule(css, ".stat-strip b")
-    assert "font-size: var(--fs-m)" in figure, (
-        "the time tier keeps the figure size the board tier gave up")
+# `test_the_strip_states_the_board_total_once_and_quietly` stood here. It
+# pinned how the STRIP said the board total — demoted into a coverage clause
+# at the strip's own text size rather than as a headline figure. The strip was
+# removed on 2026-09-03, so there is no second statement left to keep quiet;
+# the test above now asserts the stronger thing, that there is only one.
 
 
-@pytest.mark.parametrize("tier,colour", [
-    (".stat-strip .ss-warn b", "var(--stale-t)"),
-    (".stat-strip .ss-fresh b", "var(--ok)"),
-    (".stat-strip .ss-board b", "var(--ink-2)"),
-])
-def test_every_strip_tier_settles_on_the_colour_it_declares(tier, colour):
-    """`ss-settle` ends on `--ink` and runs with `animation-fill-mode: both`,
-    so the keyframe's landing colour WINS over whatever the tier's own rule
-    said. A tier that declares a colour and borrows the shared keyframe is
-    repainted neutral 380ms after it renders.
 
-    This generalises the rule `.ss-warn` already had its own keyframe for:
-    every tier that states a colour must name a keyframe that lands on it.
-    """
-    css = _css()
-    assert f"color: {colour}" in _rule(css, tier), tier
-    name = re.search(r"animation-name:\s*([\w-]+)", _rule(css, f"{tier}.dash-num"))
-    assert name, f"{tier} declares a colour but borrows the shared settle"
-    frames = re.search(
-        r"@keyframes\s+" + re.escape(name.group(1)) + r"\s*\{(.*?\}\s*)\}", css, re.S)
-    assert frames and f"color: {colour}" in frames.group(1), (
-        f"{name.group(1)} must land on {colour}")
+# `test_every_strip_tier_settles_on_the_colour_it_declares` stood here,
+# parametrized over the strip's warn/fresh tiers. It pinned that a tier
+# declaring a colour must name a keyframe landing on it, because `ss-settle`
+# ran with `animation-fill-mode: both` and repainted a tier neutral 380ms in.
+# The strip, its tiers and all three `ss-settle*` keyframes were removed on
+# 2026-09-03; there is no tier left to declare a colour.
 
 
 def test_the_fold_is_silent_because_there_is_nothing_left_to_say(client, dupes):
@@ -539,7 +500,10 @@ def test_every_new_motion_is_switched_off_by_reduced_motion():
         blocks.append(css[m.end():i - 1])
     guarded = " ".join(blocks)
     for selector in (".track-btn svg", ".rolerow.htmx-swapping", ".rolerow-dismissed",
-                     ".stat-strip b.dash-num"):
+                     # `.stat-strip b.dash-num` was here; the strip and its
+                     # three `ss-settle*` keyframes went 2026-09-03, so there
+                     # is no animation left needing an escape.
+                     ):
         assert selector in guarded, f"{selector} has no reduced-motion escape"
 
 

@@ -41,59 +41,19 @@ just no longer called from here. The view stopped passing `cycle_months` for
 the same reason.
 {% endcomment %}
 <div class="board-state">
-<div class="stat-strip">
-  {% comment %}
-  THE LIVE REGION MOVED OUT (2026-09-01). This span carried `role="status"`
-  so the headline count would re-announce itself after a silent swap, and it
-  could never have done that: `#cov-results` is swapped with `innerHTML`, so
-  this node — the one holding the role — is destroyed and rebuilt along with
-  the number inside it, and a live region that is replaced rather than
-  updated announces nothing. It is `#cov-live` in `opportunities.html` now,
-  outside the swap target, filled out of band by `_filter_counts.html`.
+{% comment %}
+THE STAT STRIP IS GONE (2026-09-03, the founder's own call: "just take this
+thing away"). It read "3112 Open Roles across 91 Firms | 19 Closing This Week
+| 694 Fresh (10d)" under the filter bar.
 
-  Not left here as well: two live regions holding one fact is how a screen
-  reader ends up reading the count twice, and one definition per fact is the
-  rule this file already follows for `total` vs `all_cluster_count`.
-  {% endcomment %}
-  {% comment %}
-  TWO FACTS, ONE CLAUSE — and the answer to which surface carries the count.
-
-  This used to be two items: "3026 Open Roles" and "90 Firms", drawn exactly
-  like the two time figures beside them and sitting eight pixels under a
-  segment pill reading "All Campus (3026)". The pill and the strip agreeing
-  was the fix that shipped hours earlier; the redundancy it left is what got
-  reported next.
-
-  THE PILL CARRIES THE COUNT. It is the only surface where the number has a
-  comparison set beside it (127 / 2136 / 763 / 15657), so it is the only one
-  where the number is a decision rather than trivia; it is also the surface
-  that survives an htmx swap, refreshed out of band by `_filter_counts.html`,
-  while this node is destroyed and rebuilt on every keystroke.
-
-  `total` is NOT removed from here — it is demoted. It stays because this is
-  the only line that can reconcile: with "Eligible only" on it is
-  `board_count - hidden_fit`, genuinely a different number from the pill's,
-  and `.scope-foot` below accounts for the difference. What it stops being is
-  a second headline. Folded into the coverage clause it says what the pill
-  cannot — the spread — and it is drawn at the strip's own text size rather
-  than the figure size the two time facts keep.
-
-  `all_cluster_count`, never `clusters|length`. `clusters` is the 12-column
-  lazy-load slice, so counting it told a student the whole covered universe
-  was twelve firms deep while the feed kept scrolling past seventy.
-  {% endcomment %}
-  <span class="ss-item ss-board"><span class="ss-live"><span class="live-dot"></span></span><b class="dash-num ss-total" style="--i:0">{{ total }}</b> Open Role{{ total|pluralize }} across <b class="dash-num" style="--i:1">{{ all_cluster_count }}</b> Firm{{ all_cluster_count|pluralize }}</span>
-  {% comment %}The time tier. These two are the reason to read the board today
-  rather than on Friday, and nothing else on the page states either of them —
-  so they keep the figure treatment the board pair just gave up, and take a
-  colour each.{% endcomment %}
-  {% if dash.closing_week %}<span class="ss-item ss-warn"><b class="dash-num" style="--i:2">{{ dash.closing_week }}</b> Closing This Week</span>{% endif %}
-  {% comment %}"Fresh" is driven by `dash.fresh_days` (== `_FRESH_DAYS` in
-  views.py) rather than a hardcoded "This Week", so the window in the label
-  can never drift from the window actually computed — a 10-day window
-  labelled "This Week" was the bug this replaced.{% endcomment %}
-  {% if dash.fresh_count %}<span class="ss-item ss-fresh"><b class="dash-num" style="--i:3">{{ dash.fresh_count }}</b> Fresh ({{ dash.fresh_days }}d)</span>{% endif %}
-</div>
+Every figure on it is still on the page and closer to what it describes: the
+board total and the firm count are the segment pill's own label at the top of
+the filter bar (which is where the count sits beside the comparison set that
+makes it mean something, and why the strip stopped stating it twice a day
+earlier), "Closing This Week" is a filter chip that both states the number and
+filters to it, and freshness is on each row that has it. What the strip added
+was a fourth place to read numbers nobody could act on from there.
+{% endcomment %}
 {% comment %}
 WHAT IS LEFT OF THE RECONCILIATION LINE, and why it is one fact now.
 
