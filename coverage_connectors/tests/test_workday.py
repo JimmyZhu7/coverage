@@ -500,6 +500,47 @@ def test_locations_text_is_punctuated_not_guessed_at(raw, expected):
     assert workday.normalize_locations_text(raw) == expected
 
 
+def test_a_tenant_that_sends_no_locations_text_still_normalizes(
+        monkeypatch, workday_no_locations_text_fixture):
+    """Raymond James' board sends no `locationsText` key at all and carries
+    the address in `bulletFields` instead. The connector reports "" for
+    location and that is the honest answer — picking the address out of that
+    list needs a region vocabulary to tell "Saint Petersburg, Florida" from
+    "Banking Operations", and this package deliberately owns none (models.py).
+    What it must do is not drop or mangle the rows, and keep `externalPath`
+    and `bulletFields` verbatim on `raw`.
+
+    `externalPath` is the one that matters downstream: its city segment is
+    what `directory`'s `reclassify` reads to place these rows, and measured
+    live 2026-09-02 it places every open row on all three no-`locationsText`
+    tenants — 216/225 Raymond James, 181/200 Accenture, 54/54 Fidelity
+    International, with `bulletFields` adding not one row beyond them. The
+    empty location this returns is exactly what used to erase that work; see
+    `directory/tests/test_region_no_downgrade.py`."""
+    monkeypatch.setattr(workday, "post_json",
+                        lambda url, payload, **kw: workday_no_locations_text_fixture)
+    board = WorkdayBoard(firm="Raymond James", tenant_host="raymondjames.wd1",
+                         site="raymondjamescareers")
+    result = workday.fetch(board)
+
+    assert result.ok
+    raw_jobs = workday_no_locations_text_fixture["jobPostings"]
+    assert len(result.opportunities) == len(raw_jobs) == 6
+    # Not one row carries the field the normalizer reads.
+    assert not any("locationsText" in j for j in raw_jobs)
+
+    opp = result.opportunities[2]
+    assert opp.title == "2027 Equity Research Associate"
+    assert opp.location == ""
+    # The address survives, verbatim, in both places it can.
+    assert opp.raw["bulletFields"] == [
+        "Saint Petersburg, Florida - United States", "R-0012398"]
+    assert opp.raw["externalPath"].startswith(
+        "/job/Saint-Petersburg-Florida---United-States/")
+    assert opp.url.startswith(
+        "https://raymondjames.wd1.myworkdayjobs.com/raymondjamescareers/job/")
+
+
 # ---------------------------------------------------------------------------
 # The tenacity retry for the five documented-flaky Workday tenants
 # (coverage-firms-backlog memory, 2026-08-08/09: TD Securities/MUFG/CIBC/

@@ -1,0 +1,59 @@
+{
+  "total": 6,
+  "jobPostings": [
+    {
+      "title": "Sales Coordinator, Clark Capital",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": [
+        "PA - Philadelphia - 1650 Market Street Floor 53",
+        "R-0012214"
+      ],
+      "externalPath": "/job/PA---Philadelphia---1650-Market-Street-Floor-53/Sales-Coordinator--Clark-Capital_R-0012214-1"
+    },
+    {
+      "title": "2027 Investment Banking Analyst I Technology & Services McLean, VA",
+      "postedOn": "Posted 22 Days Ago",
+      "bulletFields": [
+        "Mc Lean, Virginia - United States",
+        "R-0012413"
+      ],
+      "externalPath": "/job/Mc-Lean-Virginia---United-States/XMLNAME-2027-Investment-Banking-Analyst-I-Technology---Services-McLean--VA_R-0012413"
+    },
+    {
+      "title": "2027 Equity Research Associate",
+      "postedOn": "Posted 15 Days Ago",
+      "bulletFields": [
+        "Saint Petersburg, Florida - United States",
+        "R-0012398"
+      ],
+      "externalPath": "/job/Saint-Petersburg-Florida---United-States/XMLNAME-2027-Equity-Research-Associate_R-0012398"
+    },
+    {
+      "title": "2027 Investment Banking Summer Analyst Private Credit New York, NY",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": [
+        "New York, New York - United States",
+        "R-0012174"
+      ],
+      "externalPath": "/job/New-York-New-York---United-States/XMLNAME-2027-Investment-Banking-Summer-Analyst-Private-Credit-New-York--NY_R-0012174"
+    },
+    {
+      "title": "Branch Service Advisor | Financial Licensing Required",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "Memphis, Tennessee - United States",
+        "R-0012850"
+      ],
+      "externalPath": "/job/Memphis-Tennessee---United-States/Branch-Service-Advisor---Financial-Licensing-Required_R-0012850"
+    },
+    {
+      "title": "Sr Loan Servicing & QA Specialist",
+      "postedOn": "Posted Yesterday",
+      "bulletFields": [
+        "Pittsburgh, Pennsylvania - United States",
+        "R-0012826"
+      ],
+      "externalPath": "/job/Pittsburgh-Pennsylvania---United-States/Sr-Loan-Servicing---QA-Specialist_R-0012826"
+    }
+  ]
+}

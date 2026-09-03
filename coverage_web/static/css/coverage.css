@@ -2411,7 +2411,6 @@ select:focus-visible, input:focus-visible {
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   background: var(--ok); position: relative; flex: none;
 }
-@media (prefers-reduced-motion: reduce) { .live-dot::after { animation: none; } }
 
 /* ---- 15d. Custom select — on-brand dropdown ------------------------------
    A native <select>'s open option menu is OS-rendered and cannot be styled
