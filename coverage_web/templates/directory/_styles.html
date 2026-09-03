@@ -853,20 +853,48 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   /* Per-firm tint: --hue comes from the firm_hue filter; saturation and
      lightness are fixed here so every chip shares one muted color family. */
   .firmcol-logo { width: 38px; height: 38px; flex: none; border-radius: 10px;
-    /* Row one, column one — beside the NAME and nothing else. It kept its
-       `align-self: center` and that is now a statement about one row rather
-       than about a three-row stack, which is the whole alignment fix. */
-    grid-column: 1; grid-row: 1; align-self: center;
-    /* `align-self: center` above centers the tile on the ROW's line box,
-       which includes the descender space `line-height` reserves below the
-       text — space a firm name almost never uses ("Bank of America" has no
-       descender). That leaves the tile sitting visibly higher than the
-       letters beside it. Measured on the live name: the row's line-box
-       center sits 2.9px above the actual glyph-ink center, and a 3px nudge
-       closes it to 0.1px. `transform` rather than a margin, so it moves the
-       tile alone without touching the grid track heights the rest of the
-       header depends on. */
-    transform: translateY(3px);
+    /* BOTH ROWS, not just the name's (2026-09-02). The tile used to sit on
+       `grid-row: 1` and centre against the NAME alone, which was right while
+       the header was a tile beside a single line. It is a two-row grid now
+       (name, then category + open count + tier), and centring against the
+       top row left the tile 13.6px above the centre of the text block it is
+       meant to anchor — measured on every column of the founder's board at
+       both 1280px and 375px, and his own reading of it was that the logo
+       needed to come down.
+
+       Spanning the rows changes only where the tile sits. The track sizes
+       are stated on `.firmcol-head` (`minmax(38px, auto) auto`), so row one
+       still reserves the tile's own height whether or not the tile is in it,
+       the 76px `min-height` is untouched, and every column's first role row
+       keeps the y it had. */
+    grid-column: 1; grid-row: 1 / -1; align-self: center;
+    /* AND THEN DOWN BY HALF OF ROW ONE'S OWN SLACK, which is what is left
+       after the span.
+
+       `align-self: center` centres the tile on the GRID AREA it spans, and
+       that area is not the text. Row one is `minmax(38px, auto)` — a floor
+       that existed to reserve this tile's height back when the tile sat in
+       that row — so a one-line firm name (19px) is centred inside 38px with
+       9.5px of dead space above it. The text INK therefore starts 9.5px
+       below the area, and its centre sits 4.75px below the area's. Measured
+       after the span landed: all 13 columns of the founder's board reported
+       the tile exactly 5.0px high, at 1280px and at 375px alike.
+
+       5px closes it. A transform rather than a margin for the reason the
+       old 3px nudge gave: it moves the tile alone and leaves the grid track
+       heights, the 76px `min-height`, and every column's first role row
+       exactly where they were. Verified: header 86.2px and first row at the
+       same y before and after.
+
+       WHAT WOULD RETIRE IT. Row one losing its 38px floor, which is now
+       doing no work the tile needs — but removing it drops the header from
+       86.2px to its 76px floor and moves every column's first role row up
+       with it, so it is a deliberate change to the header's size rather
+       than a tidy-up, and it is not this one. The nudge also assumes the
+       name occupies one line; a name that wraps to two fills row one and
+       leaves no slack to correct. No firm on the board wraps at either
+       width today. */
+    transform: translateY(5px);
     /* 31% lightness measured 4.11:1 against the 90% tile on some hues —
        under the 4.5 the monogram's text needs. 24% clears it on every hue
        in the wheel; the tile stays put, so nothing else shifts. */
@@ -1204,8 +1232,17 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      faint ink and the smallest size the token scale has, wearing the
      dotted rule the figure above it wears so the two read as one claim. No
      mono: eight monospaced characters do not fit 44px, and this is a word,
-     not a figure to align. */
-  .rr-due-prov { display: block; font-family: inherit; font-size: 10px;
+     not a figure to align.
+
+     `--font-ui`, NOT `inherit` (2026-09-02). The sentence above has said "no
+     mono" since this rule shipped and the rule did not do it: `inherit`
+     resolves against `.rr-due`, which sets `var(--font-mono)`, so the word
+     rendered monospaced after all. Measured on the founder's board: all four
+     rows carrying it drew 48px of "reported" into the 44px grid track, and
+     because `.rr-due` is `justify-self: end` the 4px hung off the LEFT of a
+     column whose entire purpose is that its figures line up. The body font
+     draws the same eight characters in ~40px and fits. */
+  .rr-due-prov { display: block; font-family: var(--font-ui); font-size: 10px;
     font-weight: var(--w-reg); letter-spacing: 0; line-height: 1.3;
     color: var(--ink-3); text-align: right;
     text-decoration: underline dotted currentColor;
@@ -1218,8 +1255,12 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      footnote, it is the row saying its own countdown may be running off a
      page nobody has read this week, and it appears on ~3% of rows so the
      colour is not a wall of warnings. No mono, for the reason above: this
-     is a word, not a figure that has to align down the column. */
-  .rr-due-age { display: block; font-family: inherit; font-size: 10px;
+     is a word, not a figure that has to align down the column — and, for
+     the reason above, it now actually is not mono. `inherit` here resolved
+     to `.rr-due`'s `--font-mono` too; "28d old" fitted the track at 36px so
+     nothing overflowed, but it was drawn in the figure font while claiming
+     not to be, and its sibling's overflow came from the same line. */
+  .rr-due-age { display: block; font-family: var(--font-ui); font-size: 10px;
     font-weight: var(--w-reg); letter-spacing: 0; line-height: 1.3;
     color: var(--stale-t); text-align: right;
     text-decoration: underline dotted currentColor;

@@ -846,3 +846,95 @@ def test_no_scope_line_modifier_is_left_to_lose_to_the_generic_rule():
         f"{bare}: a single-class modifier of `.scope-line`; the generic rule "
         "is later in the file and will out-order it, silently. Write it as "
         "`.scope-line.scope-line--x`.")
+
+
+# ---------------------------------------------------------------------------
+# THE DEADLINE COLUMN'S TWO WORDS ARE WORDS, NOT FIGURES (2026-09-02).
+#
+# `.rr-due` is the 44px grid track whose whole purpose is that its figures
+# line up down the page, so it sets `var(--font-mono)`. Two of its children
+# are prose, not figures: `.rr-due-prov` ("reported", the provenance of a
+# prose-read date) and `.rr-due-age` ("28d old"). Both rules' own comments
+# have said "no mono" since they shipped, and both said it while declaring
+# `font-family: inherit` — which resolves against `.rr-due` and IS the mono
+# face.
+#
+# Measured on the founder's board, at 1280px and 375px alike: all four rows
+# carrying "reported" drew it at 48px inside the 44px track, and because
+# `.rr-due` is `justify-self: end` the surplus hung off the LEFT of the one
+# column on the page that exists to be flush. The body face draws the same
+# eight characters in 40.3px.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("selector, word", [
+    (".rr-due-prov", "reported"),
+    (".rr-due-age", "28d old"),
+])
+def test_the_due_columns_prose_does_not_borrow_the_figure_font(selector, word):
+    """A rule may not claim in a comment what it does not do in a
+    declaration. `inherit` inside `.rr-due` means mono, so these two have to
+    name the face they want."""
+    rule = _rule(_feed_css(), selector)
+    assert "font-family: var(--font-ui)" in rule, (
+        f"{selector} draws {word!r} and its own comment says it is a word, "
+        f"not a figure to align — but it asks for: {rule}")
+    assert "font-family: inherit" not in rule, (
+        f"{selector} inherits `--font-mono` from `.rr-due`, which is how "
+        "eight monospaced characters came to overflow a 44px track")
+
+
+def test_the_deadline_column_is_still_the_thing_the_words_must_fit():
+    """The 44px is the constraint the rule above is measured against, so a
+    change to it invalidates that measurement rather than merely moving the
+    column."""
+    rule = _rule(_feed_css(), ".rolerow")
+    assert "grid-template-columns: 44px minmax(0, 1fr)" in rule, rule
+
+
+# ---------------------------------------------------------------------------
+# THE LOGO TILE CENTRES ON THE TEXT BLOCK, NOT ON ONE OF ITS ROWS
+# (2026-09-02). The founder: "move company logo down a bit so it's vertically
+# centred in their little text box."
+#
+# `.firmcol-head` is a two-row grid — the firm name, then category + open
+# count + tier. The tile sat on `grid-row: 1` and centred against the name
+# alone, which measured 13.6px above the centre of the block beside it on all
+# 13 columns of the founder's board, at 1280px and at 375px.
+#
+# Spanning both rows takes that to 5.0px, and the 5px that remains is row
+# one's own `minmax(38px, auto)` floor: a one-line name is centred inside
+# 38px, so the text ink starts 9.5px below the grid area and its centre sits
+# 4.75px below the area's. The nudge closes it to 0.0px on every column.
+# ---------------------------------------------------------------------------
+
+
+def test_the_logo_tile_spans_both_header_rows():
+    css = _feed_css()
+    rule = _rule(css, ".firmcol-logo")
+    assert "grid-row: 1 / -1" in rule, (
+        "the tile anchors the whole text block, not just the name row; on one "
+        f"row it sits 13.6px high against it. Got: {rule}")
+    assert "align-self: center" in rule, rule
+    assert "grid-column: 1" in rule, rule
+
+
+def test_the_tile_span_does_not_resize_the_header():
+    """The invariant the span had to respect, and the one an earlier pass
+    broke: every column's header is the same height, so its first role row
+    lines up with its neighbours'. Both are stated on `.firmcol-head` rather
+    than emerging from what happens to be in it, which is why the tile could
+    leave row one without the row collapsing behind it."""
+    rule = _rule(_feed_css(), ".firmcol-head")
+    assert "grid-template-rows: minmax(38px, auto) auto" in rule, (
+        "row one still reserves the tile's 38px whether or not the tile is "
+        f"in it; without that floor the header shrinks to its min-height: {rule}")
+    assert "min-height: 76px" in rule, rule
+
+
+def test_the_nudge_that_closes_the_last_five_pixels_is_still_there():
+    """A transform, deliberately: it moves the tile alone and leaves the grid
+    tracks, the 76px floor and every column's first role row where they were.
+    Retired the day row one loses its 38px floor, which is what puts the 9.5px
+    of dead space above a one-line name in the first place."""
+    assert "transform: translateY(5px)" in _rule(_feed_css(), ".firmcol-logo")

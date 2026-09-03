@@ -253,7 +253,23 @@ def test_the_note_stays_silent_once_any_one_named_cycle_is_open():
 # ---------------------------------------------------------------------------
 
 def test_the_why_line_cuts_on_whole_reasons_and_counts_the_rest():
-    from directory.views import _PICK_WHY_CHARS, _pick_why_line
+    """AMENDED 2026-09-02: the count is an ITEM on the line now, not a suffix
+    glued to the last reason.
+
+    The old assertion split the line on `" +"` to find where the reasons
+    ended, which only worked because the count joined with a bare space while
+    every reason joined with `" · "`. That asymmetry was the defect: on the
+    founder's board four of six Picked rows read "Tier 1 · HK · 2027 intake, a
+    year early for you +2", and the "+2" read as the tail of the sentence it
+    was stuck to rather than as a count of what follows it. The count takes
+    the line's own separator now, so this splits on the separator instead.
+
+    The budget slack moves from 4 to 5 for the same reason: the appended
+    suffix grew from `" +N"` to `" · +N"`. It is still appended AFTER the
+    budget rather than charged to it, which is what `_PICK_WHY_CHARS`'s own
+    note says the 50-against-53 gap is reserved for.
+    """
+    from directory.views import _PICK_WHY_CHARS, _PICK_WHY_SEP, _pick_why_line
 
     long_ones = [
         Reason("Tier 1", "Alpha is a Tier 1 firm on your target list.", "tier"),
@@ -264,18 +280,52 @@ def test_the_why_line_cuts_on_whole_reasons_and_counts_the_rest():
     out = _pick_why_line(long_ones)
 
     line = out["pick_why"]
-    assert len(line) <= _PICK_WHY_CHARS + 4, line
-    # Whole reasons only: the line never ends inside one of them.
-    shown = line.split(" +")[0]
-    for part in shown.split(" · "):
-        assert any(r.text == part for r in long_ones), part
+    assert len(line) <= _PICK_WHY_CHARS + 5, line
+    parts = line.split(_PICK_WHY_SEP)
+    # Whole reasons only: the line never ends inside one of them, and the
+    # count is one of the parts rather than hiding inside the last of them.
+    hidden = len(long_ones) - len([p for p in parts if not p.startswith("+")])
+    for part in parts:
+        assert any(r.text == part for r in long_ones) or part == f"+{hidden}", part
     # And what did not fit is COUNTED, never silently dropped.
-    hidden = len(long_ones) - len(shown.split(" · "))
     if hidden:
-        assert line.endswith(f" +{hidden}"), line
+        assert parts[-1] == f"+{hidden}", line
+        assert line.endswith(f"{_PICK_WHY_SEP}+{hidden}"), (
+            f"the count needs the line's own separator in front of it: {line}")
     # The title is always every reason, whatever the line could hold.
     for r in long_ones:
         assert r.detail in out["pick_why_title"]
+
+
+def test_the_count_never_costs_a_reason_its_place_on_the_line():
+    """A first pass at the separator charged the "+N" to `_PICK_WHY_CHARS`
+    instead of appending it, which reads as the more careful choice and is
+    not. Measured on the founder's board it evicted "2027 intake, a year early
+    for you" to make room for the count of what it had just evicted, turning a
+    47-character line carrying three real reasons into "Tier 1 · HK · +3
+    more": 21 characters, 29 of the budget unspent, and one fewer thing the
+    student is told.
+
+    So the budget belongs to the reasons. The constant's own note explains
+    that it is set to 50 rather than the ~53 the row fits precisely so the
+    count has room outside it."""
+    from directory.views import _PICK_WHY_CHARS, _pick_why_line
+
+    # The founder's own row: three reasons that fit, two that do not.
+    reasons = [
+        Reason("Tier 1", "Nomura is a Tier 1 firm on your target list.", "tier"),
+        Reason("HK", "Hong Kong is one of the regions on your profile.", "region"),
+        Reason("2027 intake, a year early for you",
+               "This is a 2027 programme and you graduate in 2028.", "class"),
+        Reason("You know someone here", "You have a warm contact at Nomura.", "network"),
+        Reason("IB role", "Nomura covers IB, which you are recruiting for.", "track"),
+    ]
+    line = _pick_why_line(reasons)["pick_why"]
+    assert "2027 intake, a year early for you" in line, (
+        f"a reason that fits the budget was dropped to make room for the "
+        f"count of the ones that did not: {line}")
+    # Which is only meaningful while that reason is genuinely near the limit.
+    assert len("Tier 1 · HK · 2027 intake, a year early for you") <= _PICK_WHY_CHARS
 
 
 def test_a_year_verdict_takes_the_class_reason_off_the_visible_line():

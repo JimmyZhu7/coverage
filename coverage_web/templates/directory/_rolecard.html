@@ -144,8 +144,40 @@ only reintroduce the clipping bug this file's history is full of.
 
   <div class="rr-main">
     {% comment %}h3 keeps the 1→2→3 outline the firm column headers set.{% endcomment %}
+    {% comment %}
+    THE FULL TITLE ALWAYS RIDES THE `title` (2026-09-02), because this was
+    the one part of the row that could be cut with no way to read what was
+    cut.
+
+    `.rr-title a` is `-webkit-line-clamp: 2`. Measured on the founder's own
+    board with `content-visibility` forced off so off-screen rows reported
+    real geometry: 25 of 311 rows overflow that clamp at 1280px and 64 of
+    311 at 375px, and every one of them but one had NO `title` at all — the
+    attribute was emitted only on the ~3% of rows carrying an `unconfirmed`
+    note. So a student met "Central Relationship Management Corporate and
+    Institutional Banking Interns…" and the only way to see the end was to
+    open the posting.
+
+    That is the opposite of what every other truncating part of this row
+    does. `.rr-loc` is capped at 205px and states its own comment's rule:
+    "the full string has to survive the cut somewhere". `.rr-why` ellipsises
+    at the row's edge and keeps every sentence in `pick_why_title`. The
+    title was the exception, and it is the row's most important string.
+
+    ON EVERY ROW, not only the clipped ones. Whether the clamp bites depends
+    on the rendered width, the viewport and the reader's font, none of which
+    the template can know — the same argument `.rr-loc` makes for always
+    carrying its own text. Repeating a short title in its tooltip adds no
+    claim: it is the same string the anchor already holds.
+
+    THE STALENESS SENTENCE IS APPENDED, NOT REPLACED. It used to own this
+    attribute alone. It stays, in the parentheses the `.vh` span beside it
+    already uses for the same note, so one hover answers both "what is this
+    role called" and "why is it greyed out" instead of the second fact
+    evicting the first.
+    {% endcomment %}
     <h3 class="rr-title"><a href="{{ r.url }}" target="_blank" rel="nofollow noopener"
-        {% if r.unconfirmed %}class="is-unconfirmed" title="{{ r.unconfirmed.why }}"{% endif %}
+        {% if r.unconfirmed %}class="is-unconfirmed" {% endif %}title="{{ r.title|smart_title }}{% if r.unconfirmed %} ({{ r.unconfirmed.why }}){% endif %}"
         >{{ r.title|smart_title }}{% if r.unconfirmed %}<span class="vh"> ({{ r.unconfirmed.label }})</span>{% endif %}</a></h3>
 
     <div class="rr-line">

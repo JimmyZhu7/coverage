@@ -698,3 +698,92 @@ def test_the_mobile_filter_disclosure_carries_its_active_count(client, db):
     two = client.get(reverse("opportunities"), {"region": "us", "track": "ib"})
     assert two.context["filters_more_active"] == 2
     assert "Filters · 2</summary>" in two.content.decode()
+
+
+# ---------------------------------------------------------------------------
+# THE ONE STRING ON THE ROW THAT COULD BE CUT WITH NO WAY TO READ IT
+# (2026-09-02).
+#
+# `.rr-title a` is `-webkit-line-clamp: 2`. Measured on the founder's own
+# board with `content-visibility` forced off so off-screen rows reported real
+# geometry rather than their placeholder: 25 of 311 rows overflowed that clamp
+# at 1280px and 64 of 311 at 375px, and all but one of them carried no `title`
+# attribute at all — the attribute was emitted only on the ~3% of rows with an
+# `unconfirmed` note. So "Central Relationship Management Corporate and
+# Institutional Banking Interns…" ended there, and the only way to read the
+# rest was to open the posting.
+#
+# Every other truncating part of this row already does the opposite. `.rr-loc`
+# is capped at 205px and its own comment states the rule: "the full string has
+# to survive the cut somewhere". `.rr-why` ellipsises at the row's edge and
+# keeps every sentence in `pick_why_title`. The title, which is the row's most
+# important string, was the exception.
+# ---------------------------------------------------------------------------
+
+_LONG_TITLE = ("Central Relationship Management Corporate and Institutional "
+               "Banking Internship Hong")
+
+
+@pytest.fixture
+def long_titled_row(db):
+    """One role whose title outruns two clamped lines, which is the case the
+    `title` attribute exists for. The string is a real one off the founder's
+    board (HSBC, and truncated at the source — see `enrich_postings`)."""
+    f = Firm.objects.create(slug="hsbc", name="HSBC", tracks=["ib"])
+    Opportunity.objects.create(
+        firm=f, url="https://x/1", title=_LONG_TITLE, bucket="internship",
+        status="open", location="Hong Kong", region="apac")
+    return f
+
+
+def _title_anchor(body: str) -> str:
+    return body[body.index('class="rr-title"'):][:900]
+
+
+def test_every_role_row_carries_its_whole_title_in_the_hover(client, long_titled_row):
+    """The clamp may cut the face; it may not cut the record.
+
+    ON EVERY ROW, not only the ones that overflow. Whether two lines are
+    enough depends on the rendered width, the viewport and the reader's font,
+    none of which the template can know — the same argument `.rr-loc` makes
+    for always carrying its own text. Repeating a short title in its tooltip
+    adds no claim: it is the same string the anchor already holds.
+    """
+    anchor = _title_anchor(client.get(reverse("opportunities")).content.decode())
+    assert f'title="{_LONG_TITLE}"' in anchor, (
+        "the row's own title must survive the two-line clamp in the hover; "
+        f"got: {anchor[:400]}")
+    # And it is still the link's visible text, not only its tooltip.
+    assert f">{_LONG_TITLE}<" in anchor
+
+
+def test_a_stale_rows_note_joins_the_title_in_the_hover_instead_of_evicting_it(
+        client, long_titled_row):
+    """`unconfirmed` used to own this attribute alone, which made the ~3% of
+    rows carrying a staleness note the ONLY rows whose full title could be
+    recovered — and on exactly those rows the note had displaced the title
+    rather than joined it.
+
+    Both facts share one hover now, in the parentheses the `.vh` span beside
+    it already uses for the same note, so one pointer answers "what is this
+    role called" and "why is it greyed out" together.
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    o = Opportunity.objects.get(firm=long_titled_row)
+    o.last_verified = timezone.now() - timedelta(days=40)
+    o.last_checked = timezone.now()
+    o.save(update_fields=["last_verified", "last_checked"])
+
+    anchor = _title_anchor(client.get(reverse("opportunities")).content.decode())
+    assert "is-unconfirmed" in anchor, (
+        "fixture no longer trips the staleness threshold, so this test is no "
+        "longer exercising the two-facts-one-attribute case it exists for")
+    start = anchor.index('title="') + len('title="')
+    attr = anchor[start:anchor.index('"', start)]
+    assert attr.startswith(_LONG_TITLE), (
+        f"the title must lead its own hover, not be evicted by the note: {attr}")
+    assert len(attr) > len(_LONG_TITLE) and attr.rstrip().endswith(")"), (
+        f"the staleness sentence rides in parentheses after it: {attr}")
