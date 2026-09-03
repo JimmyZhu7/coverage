@@ -112,7 +112,15 @@ def test_no_rule_animates_with_a_keyframe_that_is_gone(settings):
 
 @pytest.mark.parametrize(
     "path, marker",
-    [("/", "live roles right now"), ("/opportunities/", "Open Role")],
+    # `/opportunities/` was the second case, matched on "Open Role" and the
+    # `.live-dot` beside it. Both lived in the stat strip, which the founder
+    # removed on 2026-09-03 ("just take this thing away"). This test guards
+    # one thing — that killing the PULSE did not take the number with it — and
+    # a surface removed outright on its own merits is not that. The board's
+    # total is still stated, by the segment pill, and
+    # `test_the_segment_pill_is_the_only_surface_stating_the_board_total`
+    # is what holds it there now.
+    [("/", "live roles right now")],
 )
 def test_the_live_count_itself_is_still_reported(path, marker):
     """Removing the animation must not remove the number with it."""
