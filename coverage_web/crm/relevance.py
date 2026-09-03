@@ -73,7 +73,7 @@ surface that asserts things the student's data does not say.
 from __future__ import annotations
 
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.utils import timezone
 
@@ -344,9 +344,12 @@ _APPLY_ONLY_ACTIONS = frozenset({"first_outreach", "follow_up"})
 # not a warning about the student's behaviour, and the copy has to stay on the
 # right side of that line.
 APPLY_ONLY_LABEL = "Apply"
+# "…so put the time there instead of into a first note" closed this until
+# 2026-09-02, when the badge above the sentence is the word Apply and the
+# clause was that badge in fourteen words. Both surviving clauses are facts
+# about the firm's process, which is all this copy was ever allowed to be.
 APPLY_ONLY_REASON = (
-    "This firm hires by assessment. The application and the test are the "
-    "process here, so put the time there instead of into a first note."
+    "This firm hires by assessment. The application and the test are the process."
 )
 
 
@@ -981,12 +984,36 @@ def season_factor(action: dict, mode: str | None) -> float:
 # `crm.today._cockpit_context`).
 #
 # EVERY CLAUSE BELOW IS READ OFF A ROW. The tier is the student's own
-# `UserFirm.tier`. "You have already had the conversation" is `warmth ==
-# 'chatted'`, which the pipeline ratchet only ever writes off a real `chat`
-# touch. The dates are a confirmed `FirmDate` or an `Opportunity.deadline`.
-# Nothing here rounds a maybe into a statement — see `assistant/brief.py` for
-# the bug that taught this codebase the cost of a surface that asserts the
-# inverse of the student's own data.
+# `UserFirm.tier`. The warmth is `Contact.warmth`, which the pipeline ratchet
+# only ever moves off a real touch. The dates are a confirmed `FirmDate` or an
+# `Opportunity.deadline`. Nothing here rounds a maybe into a statement — see
+# `assistant/brief.py` for the bug that taught this codebase the cost of a
+# surface that asserts the inverse of the student's own data.
+#
+# THE SECOND COMPLAINT, 2026-09-02, about the keep-warm card and then about
+# all of them: "refine and concise info presented here, short, concise, clean
+# and informative." The 2026-08-31 pass above bought its honesty with words,
+# and by tonight the card was saying the same fact three ways. On the
+# founder's own KEEP WARM card:
+#
+#     KEEP WARM                                  <- the badge, and the verb
+#     chatted                                    <- the warmth chip
+#     Tier 1 target, and you have already had the conversation.
+#     A role there closes Sep 30.
+#     Last: Chat happened · 24 business days ago  <- the footer
+#
+# "you have already had the conversation" is nine words for `warmth ==
+# "chatted"`, which the chip states in one and the footer restates underneath.
+#
+# THE RULE THIS SECTION NOW HOLDS, and it is `test_rail_copy_2026_09_02.py`'s
+# rule one surface over: KEEP EVERY FACT, CUT EVERY RESTATEMENT. A sentence
+# may not say what the badge above it says, what the warmth chip beside it
+# says, what the deadline chip beside it says, or what the footer below it
+# says. What is left is the part of the card only this sentence can carry, and
+# where nothing is left the sentence gets shorter rather than padded. The one
+# fact that left the face is the warmth GLOSS, and it moved to the chip's own
+# `title` (`WARMTH_NOTE`) rather than being deleted — the same "cut the
+# explanation, keep the fact, put it in a title" move the rail pass made.
 _LEAD_BY_RELEVANCE = {
     REL_SCHOOL: "Same school",
     REL_INBOUND: "Not a target firm",
@@ -998,6 +1025,43 @@ _LEAD_BY_RELEVANCE = {
 # employer, so the lead says that instead of asserting the opposite of his own
 # tier list. See `crm/campaigns.py` for the send this describes.
 _CAMPAIGN_LEAD = "From one of your campaigns"
+
+# THE WARMTH GLOSS, and the card's `title` for the chip that already prints
+# the bare value beside the contact's name.
+#
+# These two strings used to be a clause inside the keep-warm sentence
+# (`_STRENGTH_CLAUSE`: "and they would vouch for you", "and you have already
+# had the conversation"). They earned their place in 2026-08-31's pass, when
+# the card said "Advocate." and nothing else and the founder called the
+# prompts hollow — a stored warmth value is vocabulary, not a reason.
+#
+# They are still that gloss, and the fact has not moved off the card: it moved
+# off the FACE. `_act_card.html` renders `contact.warmth` as a chip two lines
+# above the sentence, so on the face the sentence was glossing a word the
+# reader could already see, in nine words, directly above a footer saying
+# "Chat happened". A `title` on the chip is where a fact about what a label
+# MEANS belongs on this page — the same place the rail put "around the close"
+# and "the good window" the same night.
+#
+# All four warmths, not just the two a keep-warm card can hold: the chip is
+# drawn on every card in the queue, and a chip that explains itself on two
+# cards and not on the other four is worse than one that never did.
+WARMTH_NOTE = {
+    "cold": "No reply from them yet.",
+    "replied": "They have written back.",
+    "chatted": "You have already had the conversation.",
+    "advocate": "They would vouch for you.",
+}
+
+# THE BENCH'S copy, and from 2026-09-02 only the bench's. It was the act
+# card's too (`keep_warm_reason` interpolated it as "and {clause}") until that
+# card's own warmth chip took the job over; the bench strip in
+# `templates/crm/_cockpit.html` renders no warmth chip and no ledger row, so
+# the clause is still the only place a parked contact's warmth is stated
+# there. Kept as its own constant rather than folded into `WARMTH_NOTE`
+# because the two are different sentences for different surfaces: this one is
+# a mid-sentence clause with no subject and no full stop, and `WARMTH_NOTE` is
+# a standalone sentence for a tooltip.
 _STRENGTH_CLAUSE = {
     "advocate": "they would vouch for you",
     "chatted": "you have already had the conversation",
@@ -1055,41 +1119,64 @@ def _opening_clause(opening: dict | None) -> str:
     return ""
 
 
-def keep_warm_reason(action: dict) -> str:
-    """The rewritten reason for a `maintain` / `keep_warm` card."""
+def why_this_person(action: dict) -> str:
+    """"Tier 1 target", "Same school" — why this contact is allowed to cost a
+    slot at all, in one noun phrase and no verb.
+
+    Extracted from `keep_warm_reason` on 2026-09-02 so `card_reason`'s
+    first-outreach branch can say it too. That card had been saying "Added but
+    never contacted. Send the first note.", which is the badge and the footer
+    read back; the lead is the one thing about a stranger the card knows and
+    had never printed.
+    """
     contact = action.get("contact") or {}
     relevance = action.get("relevance")
     tier = action.get("relevance_tier")
-    opening = action.get("opening")
-
     if contact.get("campaign_excluded"):
-        lead = _CAMPAIGN_LEAD
-    elif relevance == REL_TIERED:
-        lead = f"Tier {tier} target" if tier in _TIER_WEIGHT else "On your target list"
-    else:
-        lead = _LEAD_BY_RELEVANCE.get(relevance, "Warm contact")
+        return _CAMPAIGN_LEAD
+    if relevance == REL_TIERED:
+        return f"Tier {tier} target" if tier in _TIER_WEIGHT else "On your target list"
+    return _LEAD_BY_RELEVANCE.get(relevance, "Warm contact")
+
+
+def keep_warm_reason(action: dict) -> str:
+    """The rewritten reason for a `maintain` / `keep_warm` card.
+
+    TWO CLAUSES UNTIL 2026-09-02, now one plus whatever is live: the warmth
+    half ("and you have already had the conversation") was the chip's own
+    value spelled out, and it moved to the chip's `title` (`WARMTH_NOTE`).
+    What is left is the lead — which is the half the chip CANNOT say, because
+    the tier and the school tie are facts about the student's list and not
+    about the contact's temperature — and the opening, which is what makes
+    today the day.
+    """
+    contact = action.get("contact") or {}
+    opening = action.get("opening")
+    clause = _opening_clause(opening)
 
     if is_recruiting_contact(contact):
         # No "keep in touch" framing for somebody whose relationship to the
         # student IS the recruiting process. The opening is the entire reason
         # this card exists, so it leads; without one the card is not drawn at
-        # all (see `crm.today`).
-        clause = _opening_clause(opening)
-        return f"{clause} They are your recruiting contact there.".strip()
+        # all (see `crm.today`). "They are your recruiting contact there" lost
+        # its subject and its second "there" — the clause in front of it
+        # already said where, and the qualifier is what changes the ask.
+        return f"{clause} Your recruiting contact.".strip()
 
-    strength = _STRENGTH_CLAUSE.get(contact.get("warmth"))
-    first = f"{lead}, and {strength}." if strength else f"{lead}."
-    clause = _opening_clause(opening)
+    first = f"{why_this_person(action)}."
     return f"{first} {clause}".strip() if clause else first
 
 
-# The one sentence a recruiting contact's inbound message earns. Says what to
-# do and, just as importantly, what not to do — the card it replaces said
-# "propose a 15-min chat" to a talent-acquisition manager whose "reply" was a
-# mass programme invite.
-RECRUITING_REPLY_REASON = (
-    "They wrote to you. Answer the note. Recruiting contact, not a coffee chat."
-)
+# The one sentence a recruiting contact's inbound message earns. Says what NOT
+# to do — the card it replaces said "propose a 15-min chat" to a
+# talent-acquisition manager whose "reply" was a mass programme invite.
+#
+# IT USED TO OPEN "They wrote to you. Answer the note." (2026-09-02: cut).
+# Both halves are printed elsewhere on the same card and neither is printed
+# anywhere else: the badge reads REPLY, and the footer under the sentence
+# reads "They replied · 14 business days". The qualifier is the only clause
+# here that changes what the student writes, so it is the only clause left.
+RECRUITING_REPLY_REASON = "Recruiting contact, not a coffee chat."
 RECRUITING_REPLY_LABEL = "Reply"
 RECRUITING_KEEP_WARM_LABEL = "Check in"
 
@@ -1103,9 +1190,7 @@ RECRUITING_KEEP_WARM_LABEL = "Check in"
 # the user has SAID is not their recruiting must never be handed a recruiting
 # ask; the inbound override grants exactly one thing (see rule 1 above), and
 # this is the sentence for it.
-CAMPAIGN_REPLY_REASON = (
-    "They wrote to you. Answer the note. From a send that was not your recruiting."
-)
+CAMPAIGN_REPLY_REASON = "From a send that was not your recruiting."
 CAMPAIGN_REPLY_LABEL = "Reply"
 
 # And the same one sentence for a recruitment-hidden contact's inbound
@@ -1114,7 +1199,157 @@ CAMPAIGN_REPLY_LABEL = "Reply"
 # grants exactly one thing, and the engine's own action (a re-ping, a chat
 # proposal) would be a recruiting move aimed at somebody the rule just said
 # is not part of the user's recruiting.
-UNRELATED_REPLY_REASON = (
-    "They wrote to you. Answer the note. Not part of your recruiting."
-)
+UNRELATED_REPLY_REASON = "Not part of your recruiting."
 UNRELATED_REPLY_LABEL = "Reply"
+
+
+# ---------------------------------------------------------------------------
+# 5b. Every OTHER card's sentence (2026-09-02).
+# ---------------------------------------------------------------------------
+# The founder asked for the keep-warm card's diet and then for it everywhere:
+# "This is Today's page under Move it forward but do it for all cards like
+# Move it forward."
+#
+# WHY THE REWRITE IS HERE AND NOT IN THE ENGINE. `coverage_domain.cadence`
+# writes a reason for every branch, and its own contract says `ctx` "carries
+# the raw numbers the reason string renders, so a UI can build its own
+# phrasing without re-parsing `reason`". That is the door this walks through:
+# every clause below is built from `ctx`, never scraped back out of the
+# engine's prose, so the sentence and the number that produced it cannot
+# disagree. The engine keeps its fragments and its golden fixtures; this
+# module keeps the copy, exactly as `crm.today._sentenceize` and `_age_in_days`
+# already do one layer down.
+#
+# WHAT EACH BRANCH IS ALLOWED TO SAY is decided by what the card already
+# renders around the sentence (`templates/crm/_act_card.html`):
+#
+#     the badge          `a.label` — the verb. FOLLOW UP, FIRST OUTREACH, REPLY
+#     the warmth chip    `contact.warmth`, glossed in its title (WARMTH_NOTE)
+#     the deadline chip  "Closes Sep 30", confirmed FirmDates only
+#     the footer         the latest real touch and its age in business days
+#     the buttons        Done · They replied · Compose · Snooze · Skip · Park it
+#
+# A clause that repeats any of those is cut. Nothing else is.
+_FOLLOWUP_FIRST = "No reply to your first note."
+
+
+def _no_reply(outbound) -> str:
+    """"No reply to your first note." / "No reply after 3 notes."
+
+    BEFORE: "No reply 7 business days after touch 1. Follow up." Three facts,
+    two of them printed twice — "7 business days" is the footer's own number
+    in the footer's own unit, and "Follow up" is the badge. "touch 1" is the
+    one fact only this sentence held, and it is the one that decides whether
+    the student pushes again or parks: a first note unanswered is normal, a
+    third is a verdict.
+
+    It says "note" rather than "touch" because the ledger row below it says
+    "Reached out" and the button says Compose; "touch" is the schema's word
+    for the row, not the student's word for the email.
+    """
+    if not isinstance(outbound, int) or outbound < 1:
+        # No count on the dict is not a licence to invent one. The silence
+        # itself is still true and the footer still carries the age.
+        return "No reply yet."
+    return _FOLLOWUP_FIRST if outbound == 1 else f"No reply after {outbound} notes."
+
+
+def card_reason(action: dict) -> str:
+    """The card sentence for every action `keep_warm_reason` does not own.
+
+    Returns the engine's own (already prose-polished) sentence untouched for
+    any action this does not recognise, so a new cadence branch renders the
+    way it did before anybody edited this file rather than rendering nothing.
+    """
+    ctx = action.get("ctx") or {}
+    kind = action.get("action")
+    engine = (action.get("reason") or "").strip()
+
+    if kind == "first_outreach":
+        # BEFORE: "Added but never contacted. Send the first note." The first
+        # half is the footer ("No touches yet"), the second is the badge
+        # (FIRST OUTREACH), and between them the card said nothing about the
+        # person. `why_this_person` is what it should have been saying: on a
+        # cold stranger the tier or the school tie IS the reason to spend the
+        # morning on them. Reachable values are the tiered and school leads
+        # only — `contact_relevance` needs `owed_reply` for REL_INBOUND, and a
+        # contact with no touches on record is owed nothing.
+        return f"{why_this_person(action)}."
+
+    if kind == "follow_up":
+        return _no_reply(ctx.get("outbound"))
+
+    if kind == "park":
+        if ctx.get("expired"):
+            # The expired-follow-up park. BEFORE: "First note went unanswered
+            # 5 weeks ago. Park it, or re-open with a new reason." The weeks
+            # were the footer's business days in a second unit — the exact
+            # two-registers-for-one-fact problem the rail pass ended — and
+            # "Park it" is the badge and the primary button. What is left is
+            # the thing the card cannot otherwise say: why this is a park and
+            # not the follow-up the same silence would have earned last week.
+            return "Too late to follow up. Re-open only with a new reason."
+        # The cap-reached park. Same sentence the follow-up card gets, because
+        # it is the same fact; the badge is what differs, and the badge is
+        # where the difference belongs.
+        return _no_reply(ctx.get("outbound"))
+
+    if kind == "advance":
+        # BEFORE: "They replied. Propose a 15-min chat." The first sentence is
+        # the footer ("They replied · 14 business days"), the second is the
+        # badge (Propose a chat). The size of the ask is the whole of what the
+        # badge leaves out, and it is the half that gets the chat agreed.
+        return "Ask for 15 minutes."
+
+    if kind == "reping":
+        # BEFORE: "Barclays app closes Aug 30. Re-ping before you submit."
+        # The firm is the card's own identity line, the date is the
+        # `Closes Aug 30` chip beside the badge (built from the SAME
+        # `_closing_soon` index this branch fired on, so the chip is there
+        # whenever this card is), and "re-ping" is the badge. The order of
+        # operations is what nothing else states.
+        return "Before you submit the application."
+
+    if kind == "thank_you":
+        # BEFORE: "Chat done 2d ago. Send thank-you." — the footer's fact in
+        # calendar days beside the footer's business days, then the badge.
+        # And the window that justifies the whole card never reached the
+        # screen at all: the engine writes it as "(within 24h)" / "(OVERDUE)"
+        # and `crm.today._sentenceize` strips every parenthetical. So this
+        # branch cuts two restatements and promotes the fact they were hiding.
+        hours = ctx.get("window_hours")
+        if not isinstance(hours, int):
+            return engine
+        if ctx.get("overdue"):
+            return f"Overdue past the {hours} hour window."
+        return f"Within {hours} hours of the chat."
+
+    if kind == "confirm_chat":
+        # BEFORE: "Chat was scheduled for Aug 24. Did it happen? Log the chat
+        # or reschedule." The question and the two options are the card's own
+        # two buttons, which is as literal as a restatement gets. The booked
+        # day is the fact, and where none is held the card says the state and
+        # stops — the silence itself is already in the footer.
+        booked = ctx.get("scheduled_on")
+        if booked:
+            try:
+                return f"A chat was set for {_on_date(date.fromisoformat(booked))}."
+            except (TypeError, ValueError):
+                return engine
+        return "A chat was being arranged."
+
+    if kind == "promised_followup":
+        # BEFORE: "They offered a referral 5d ago. Chase it." — "Chase it" is
+        # the badge ("Chase the offer"). The offer and its age both stay: the
+        # age here is measured off `promised_action_at`, which is a DIFFERENT
+        # event from the footer's last touch, so the two numbers are two facts
+        # and not one fact twice.
+        promised = str(ctx.get("promised") or "").strip()
+        if not promised:
+            return engine
+        days = ctx.get("days_since")
+        if isinstance(days, int):
+            return f"They offered {promised} {days}d ago."
+        return f"They offered {promised}."
+
+    return engine

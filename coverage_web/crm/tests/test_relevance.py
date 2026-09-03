@@ -258,7 +258,17 @@ def test_a_bare_recruiting_recruiter_who_wrote_gets_a_reply_not_a_chat_invitatio
 def test_a_recruiter_who_wrote_to_you_gets_a_reply_not_a_chat_invitation():
     """The measured card: a "Manager, Talent Acquisition" whose mass programme
     invite had been logged as a reply, answered with "they replied, propose a
-    15-min chat"."""
+    15-min chat".
+
+    REWRITTEN 2026-09-02. `assert "Answer the note" in reason` is retired:
+    that sentence was the badge read back. The label this test already pins
+    two lines up IS "Reply", so the assertion was checking that the card said
+    the same word twice.
+
+    Nothing else moved. The ask is still pinned (by the label), and what the
+    card must NOT say is still pinned twice over — the whole point of this
+    copy is the qualifier, and the qualifier is now the whole of it.
+    """
     user = _user()
     c = Contact.all_objects.create(
         user=user, name="Talent Person", firm_text="West Monroe",
@@ -271,11 +281,13 @@ def test_a_recruiter_who_wrote_to_you_gets_a_reply_not_a_chat_invitation():
     assert a["is_recruiting"] is True
     assert a["label"] == rel.RECRUITING_REPLY_LABEL
     assert a["label"] != "Propose a chat"
-    assert "Answer the note" in a["reason"]
     # The card says out loud what NOT to do, because the thing it replaced did
     # exactly that thing.
     assert "not a coffee chat" in a["reason"]
     assert "15-min chat" not in a["reason"]
+    assert "Answer the note" not in a["reason"], (
+        "the sentence is restating the REPLY badge above it again"
+    )
 
 
 def test_a_recruiter_you_already_answered_gets_no_card_at_all():
@@ -343,7 +355,20 @@ def test_the_students_own_answer_beats_the_role_text_in_both_directions():
 # ---------------------------------------------------------------------------
 def test_a_keep_warm_reason_never_states_a_day_count():
     """THE COMPLAINT. "Advocate. Last touch 34d ago." is a stopwatch, not a
-    reason to spend social capital on a human being."""
+    reason to spend social capital on a human being.
+
+    REWRITTEN 2026-09-02. The sentence used to end "and they would vouch for
+    you", and that clause moved to the warmth chip's `title`
+    (`rel.WARMTH_NOTE`) on the night the founder asked for the whole queue to
+    get shorter: the chip beside this contact's name already prints
+    "advocate", so the clause was glossing a word two lines above it.
+
+    NO DAY COUNT IS STILL THE HEADLINE and it is asserted unchanged. The
+    second assertion is the one that moved, and it moved WITH its fact rather
+    than losing it: the gloss is pinned below, in the map the chip's title
+    reads. If a future pass deletes the gloss instead of relocating it, this
+    fails.
+    """
     user = _user()
     firm = _target_firm(user)
     c = Contact.all_objects.create(
@@ -354,7 +379,10 @@ def test_a_keep_warm_reason_never_states_a_day_count():
 
     reason = _actions_by_name(user)["Old Advocate"]["reason"]
     assert "34d" not in reason and "days ago" not in reason
-    assert reason == "Tier 1 target, and they would vouch for you."
+    assert reason == "Tier 1 target."
+    assert rel.WARMTH_NOTE["advocate"] == "They would vouch for you.", (
+        "the advocate gloss left the card instead of moving to the chip"
+    )
 
 
 def test_a_live_deadline_at_their_firm_becomes_the_reason():
@@ -374,7 +402,16 @@ def test_a_live_deadline_at_their_firm_becomes_the_reason():
     a = _actions_by_name(user)["Warm Banker"]
     assert a["opening"]["kind"] == rel.OPENING_FIRM_DATE
     assert "Applications close" in a["reason"]
-    assert "you have already had the conversation" in a["reason"]
+    # REWRITTEN 2026-09-02: the chatted gloss used to be the second half of
+    # this sentence and is now the warmth chip's `title`, for the reason
+    # `test_a_keep_warm_reason_never_states_a_day_count` spells out. Both
+    # facts still have to be on the card, so both are still asserted — one on
+    # the face, one in the map the chip reads.
+    assert "you have already had the conversation" not in a["reason"], (
+        "the sentence is glossing the warmth chip printed two lines above it"
+    )
+    assert a["contact"]["warmth"] == "chatted"
+    assert rel.WARMTH_NOTE["chatted"] == "You have already had the conversation."
 
 
 def test_a_rumoured_date_is_not_a_reason():

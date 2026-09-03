@@ -364,6 +364,16 @@ def test_keep_warm_logs_an_existing_touch_kind_and_moves_no_state(client):
 # F3 / D. The card says WHY, and shows its evidence.
 # ---------------------------------------------------------------------------
 def test_the_card_renders_the_reason_and_the_last_touch(client):
+    """REWRITTEN 2026-09-02: the ledger row lost its "Last:" label that night
+    ("short, concise, clean and informative"). The label is not one of the
+    row's facts, it is a claim about them — that this is the LATEST touch and
+    not merely a touch — so it moved into the row's `title`, the same place
+    the rail pass put its own provenance the same night.
+
+    Every fact the old assertions checked is still checked: the reason is on
+    the page, the ask is on the page, the last touch's kind is on the page,
+    and it is still counted in business days.
+    """
     user = _user(weekly_touch_goal=14)
     c = _contact(user=user, name="Ethan Gao")
     _touch(user, c, "outreach", days_ago=20)
@@ -371,8 +381,12 @@ def test_the_card_renders_the_reason_and_the_last_touch(client):
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
     assert "No reply" in body and "follow up" in body.lower()
-    assert "Last: Reached out" in body
+    assert "Reached out ·" in body
     assert "business day" in body
+    assert "Last: Reached out" not in body, "the label is back on the ledger row"
+    assert "The most recent touch on record" in body, (
+        "the row no longer says anywhere that it is the LATEST touch"
+    )
 
 
 def test_a_queue_row_keeps_its_three_zones(client):
@@ -393,11 +407,19 @@ def test_a_queue_row_keeps_its_three_zones(client):
 
 
 def test_a_contact_with_no_touches_says_so_rather_than_guessing(client):
+    """REWRITTEN 2026-09-02: "No touches on record" became "No touches yet".
+
+    "on record" is provenance — it says where the absence was checked — and
+    the row is the record. The FACT is unchanged and load-bearing in a new
+    way: the first-outreach sentence above this row used to read "Added but
+    never contacted. Send the first note.", and that sentence was cut because
+    THIS row already carries its first half. Both halves cannot leave.
+    """
     user = _user(weekly_touch_goal=14)
     _contact(user=user, name="Brand New")
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
-    assert "No touches on record" in body
+    assert "No touches yet" in body
 
 
 def test_an_audit_row_is_not_shown_as_a_touch(client):
@@ -410,8 +432,11 @@ def test_an_audit_row_is_not_shown_as_a_touch(client):
 
     client.force_login(user)
     body = client.get(reverse("crm:week")).content.decode()
-    assert "Last: Reached out" in body
-    assert "Last: Manual_override" not in body
+    # The "Last:" label moved into the row's `title` on 2026-09-02; the two
+    # facts this test is about did not move at all.
+    assert "Reached out ·" in body
+    assert "Updated manually" not in body
+    assert "Manual_override" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -1507,7 +1532,24 @@ def test_the_thank_you_prompt_speaks_days_once_hours_stop_helping(client):
     "2 business days ago" on that same card's ledger row. The engine formats
     the thank-you branch in hours because its window IS hours, but
     `_sentenceize` strips "(within 24h)"/"(OVERDUE)", so the anchor never
-    reaches the screen and a bare hour count sits between two day counts."""
+    reaches the screen and a bare hour count sits between two day counts.
+
+    REWRITTEN 2026-09-02, and the rewrite is the stronger version of the same
+    claim. The copy pass that night gave `crm.relevance.card_reason` the
+    thank-you sentence, and it prints NO age at all: "chat done 2d ago" was
+    the ledger row's own fact in a second unit, and "send thank-you" was the
+    badge. So the three-renderings bug is now closed by construction rather
+    than by a unit conversion — the card states one clock, the row's, and the
+    row states business days.
+
+    AND THE ANCHOR THIS BUG WAS REALLY ABOUT finally reaches the screen. The
+    24-hour window is why this card exists today and `_sentenceize` had been
+    throwing it away with the brackets it arrived in; it is the sentence now.
+
+    `_age_in_days` is NOT retired and its unit test below is untouched: it is
+    still what runs on any engine reason `card_reason` hands back unchanged,
+    including this branch's own fallback when the engine sends no window.
+    """
     user = _user(weekly_touch_goal=14)
     c = _contact(
         user=user, name="Ellen Chung", warmth="chatted", thread_state="chat_done"
@@ -1519,9 +1561,20 @@ def test_the_thank_you_prompt_speaks_days_once_hours_stop_helping(client):
     client.force_login(user)
 
     body = client.get(reverse("crm:week")).content.decode()
-    assert "Chat done" in body, "the thank-you prompt is on the page at all"
+    assert "Send thank-you" in body, "the thank-you prompt is on the page at all"
     assert "h ago" not in body, "no hour count survives on a day-based surface"
-    assert "d ago. Send thank-you." in body
+    assert "Overdue past the 24 hour window." in body, (
+        "57h is past the 24h window and the card no longer says so"
+    )
+    # Scoped to the queue card's own sentence, which is this fixture's only
+    # one. The Debrief card one rail over still says "Chatted 3d ago" about
+    # the same chat and is allowed to: that is the only thing that card
+    # states, while this sentence sits directly above a ledger row already
+    # counting the same silence in business days.
+    import re as _re
+    assert _re.findall(r'<p class="act-reason">(.*?)</p>', body, _re.S) == [
+        "Overdue past the 24 hour window."
+    ]
 
 
 def test_a_fresh_chat_keeps_its_hours():

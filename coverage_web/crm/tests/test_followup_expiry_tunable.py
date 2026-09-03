@@ -111,7 +111,22 @@ def test_the_settings_page_saves_the_knob(client):
 @pytest.mark.django_db(transaction=True)
 def test_a_month_old_first_note_is_a_park_by_default_and_a_follow_up_at_sixty():
     """30 calendar days is 20-22 business days on every weekday: past the
-    default 15, inside a tuned 60."""
+    default 15, inside a tuned 60.
+
+    REWRITTEN 2026-09-02. It asserted the card said "went unanswered ...
+    weeks ago", and the copy pass of that night cut both halves — "weeks ago"
+    because the ledger row directly beneath already prints the same silence in
+    business days (the queue's own unit, and the one the expiry is measured
+    in), "went unanswered" because the badge above the sentence reads PARK IT.
+    See `crm/tests/test_act_card_copy_2026_09_02.py` for the rule.
+
+    THE FACT THE PHRASE CARRIED is the only thing this ever needed from the
+    string: that the engine took the EXPIRED branch and not the cap-reached
+    one, which is what the tunable under test moves. Read off `ctx["expired"]`
+    now — the same flag the sentence itself is built from, one step earlier —
+    so a future copy pass cannot break this test and a future ENGINE change
+    cannot slip past it.
+    """
     user = _user()
     c = Contact.all_objects.create(user=user, name="Gone Quiet", school_affiliation=True)
     _touch(user, c, "outreach", days_ago=30)
@@ -119,8 +134,12 @@ def test_a_month_old_first_note_is_a_park_by_default_and_a_follow_up_at_sixty():
     actions, _ = _build_actions(user)
     mine = [a for a in actions if a["contact"]["name"] == "Gone Quiet"]
     assert [a["action"] for a in mine] == ["park"]
-    assert "went unanswered" in mine[0]["reason"]
-    assert "weeks ago" in mine[0]["reason"]
+    assert mine[0]["ctx"]["expired"] is True, (
+        "this is the follow-up window expiring, not the touch cap filling up"
+    )
+    assert mine[0]["reason"] == (
+        "Too late to follow up. Re-open only with a new reason."
+    )
 
     user.cadence_params = {KEY: 60}
     user.save(update_fields=["cadence_params"])
