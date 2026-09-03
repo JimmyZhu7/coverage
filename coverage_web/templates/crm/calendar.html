@@ -204,6 +204,23 @@
      same three facts, so they are one row rather than two. */
   .cal-legend { display: flex; gap: var(--s3); flex-wrap: wrap;
     font-size: var(--fs-xs); color: var(--ink-2); }
+  /* A month with nothing on it still shipped this <p>, and a zero-width flex
+     item still takes the row's gap. Measured at 1440px on an empty month:
+     `.cal-legend` came back 0x0 at x=1416 — the bar's own right edge — while
+     the Subscribe link ended at 1404, so the last thing you can SEE on the
+     control line stopped 12px short of the panel below it. Day view has the
+     same shape whenever the day is clear. The row's right edge should not move
+     with the month's contents, and 12px is exactly the `--s3` gap being paid
+     for an item with nothing in it.
+
+     `:has()` rather than `:empty`, which cannot work here: the <p> is written
+     one key per line, so with every count zero it still holds the whitespace
+     between them, and `:empty` does not match an element with a text node in
+     it. Flex is what collapses it to 0x0; the keys are what decide whether it
+     is there at all. Bare, not behind `@supports`, like the other purely
+     cosmetic `:has()` rules in coverage.css — a browser without it gets
+     today's 12px, which is what it has now. */
+  .cal-legend:not(:has(.cal-key)) { display: none; }
   .cal-key { display: inline-flex; align-items: center; gap: 6px; }
   .cal-key::before { content: ""; width: 9px; height: 9px; border-radius: 3px; }
   .cal-key-chat::before { background: var(--w-chatted-bar); }
@@ -265,7 +282,15 @@
   .cal-day.load-1 { background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
   .cal-day.load-2 { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
   .cal-day.load-3 { background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
-  .cal-day:hover { box-shadow: inset 0 0 0 1px var(--accent-line); z-index: 1; }
+  /* Hover draws in `--line-strong`, the grid's own strong rule (it is the ink
+     `.cal-dow` already uses for the header's bottom edge), NOT in the accent.
+     See `.cal-day.is-today` below for the measurement: these two rules used to
+     draw the same colour, one at 1px and one at 1.5px, so running the mouse
+     across the month painted today's marker on every cell it touched. Hover
+     says "the pointer is here" and today says "this is the date" — one of them
+     is transient and one is a fact about the month, and they now differ in hue
+     rather than by half a pixel. */
+  .cal-day:hover { box-shadow: inset 0 0 0 1px var(--line-strong); z-index: 1; }
 
   /* Days from the neighbouring months stay visible but recede — removing
      them would leave ragged weeks, and greying them keeps the grid honest
@@ -284,7 +309,33 @@
     transition: background-color var(--t-fast), color var(--t-fast); }
   .cal-day.is-today .cal-num { background: var(--accent); color: var(--on-accent);
     font-weight: var(--w-bold); animation: chip-check 320ms cubic-bezier(0.22,1,0.36,1); }
-  .cal-day.is-today { box-shadow: inset 0 0 0 1.5px var(--accent-line); }
+  /* The ring is the accent proper, and it is the same navy as the chip on the
+     line above, so today is ONE colour said twice rather than two colours
+     sharing a cell.
+
+     What it replaces was `--accent-line` at 1.5px, against `.cal-day:hover`'s
+     `--accent-line` at 1px: the same ink, half a pixel apart. Measured at
+     1280px, today's computed shadow was `rgb(207, 219, 231) 0 0 0 1.5px
+     inset` and hover's rule the same colour — so the two states were
+     indistinguishable, and moving the pointer across the grid drew today's
+     marker on whichever cell it was over. Two meanings, one visual language.
+
+     The ink was also doing nothing on its own. `--accent-line` against an
+     untinted cell measures 1.38:1 in light and 1.72:1 in dark, and the
+     ordinary gridline beside it (`--line`) measures 1.37:1 — today's marker
+     was exactly as visible as the lattice it was drawn on. On a busy day it
+     was worse: 1.06:1 against the load-3 tint in light, which is not a ring,
+     it is nothing. `--accent` measures 8.48:1 / 6.54:1 untinted and 6.53:1 /
+     4.94:1 on the heaviest tint, so it clears 4.5:1 in both themes on every
+     step of the intensity scale.
+
+     Still not the only marker, deliberately: the filled `--accent` chip on
+     the day number carries today for anyone who cannot separate two rings,
+     and the ring is what makes the CELL findable when you are scanning the
+     month rather than reading a number. Written after `.cal-day:hover` at
+     equal specificity so hovering today keeps the navy instead of trading it
+     for the pointer cue. */
+  .cal-day.is-today { box-shadow: inset 0 0 0 1.5px var(--accent); }
   /* Replayed by clicking Today while already on the current month (see that
      link's own comment) -- same animation .is-today already plays once on
      page load, just re-triggered on demand so the click has an answer. */
@@ -321,6 +372,57 @@
     opacity: 1; pointer-events: auto; }
   .cal-day-add:hover { color: var(--accent-ink); border-color: var(--accent-line);
     transform: scale(1.12); text-decoration: none; }
+  /* "Quiet until you approach it" has no meaning on a screen you touch: there
+     is no approach, only arrival. Both reveal conditions above are a hover or
+     a focus ring, so on a tablet this control was `opacity: 0` with
+     `pointer-events: none` and stayed that way.
+
+     Measured at 1180px — an iPad in landscape, 360px past the width where the
+     grid gives way to the agenda — with `(pointer: coarse)` and `(hover:
+     none)` emulated: `--cal-h` computed 44px and `.cal-views a` took its own
+     44px floor, so the page had already worked out it was being touched and
+     sized every control on the bar for a finger. All 30 of these stayed 22x22
+     at zero opacity behind a hover that cannot happen. The page grants a
+     thumb 44px twice on the same screen and then hides the one control the
+     thumb is actually pointing at a day to reach.
+
+     So it stands up, because nothing else will reveal it, and the target
+     grows from a transparent box drawn AROUND the circle rather than from the
+     circle: 30 filled 44px discs would be the loudest thing in the month, and
+     the ink is not what a thumb aims at.
+
+     44 WIDE, 36 TALL, and the second number is a boundary rather than a
+     shortfall. 36px is all the room there is above `.cal-day-list` — the cell
+     spends 8 padding + 24 for the day number + a 4px gap before the entries
+     start — and the entries are tap targets too. A square 44 would have
+     covered the top-right 44x8 of the first card in every day that has one,
+     so a thumb aiming at the day's first entry would have opened the add
+     panel instead. Stealing one target to reach the size of another is not a
+     fix. 44x36 clears the 24x24 floor with room to spare, and it is the whole
+     corner, which is what a finger is aiming at.
+
+     Stated as an explicit `bottom` rather than left to paint order. At a flat
+     `inset: -12px` the target measured 44 wide but 37 tall anyway, because
+     `.cal-day-list`'s mask makes it a stacking context and it is written
+     after this link, so it painted over the overhang. That lands in the same
+     place, but it lands there by way of one property on a sibling; `-4px`
+     says it out loud, and re-measured it puts the target's bottom edge on the
+     entry list's top edge exactly (36px from the cell's top, gap 0).
+
+     `-12px`, not `-11px`, on the other three: an absolutely positioned child
+     is laid out against its parent's PADDING box, and this button is 22px
+     border-box with a 1px edge, so the box `::before` grows from is 20, not
+     22. At `-11px` the target measured 42 wide and a hit test 10px past the
+     circle came back `.cal-day` — the corner of the square was not the
+     button. 20+12+12 is the 44. Offsetting the circle 11px from the corner
+     then puts its padding box at 12, and 12-12 lands the target flush with
+     the day's own top and right: a tap near the next column cannot open the
+     wrong day, and nothing spills into the week above. */
+  @media (pointer: coarse) {
+    .cal-day-add { opacity: 1; pointer-events: auto; top: 11px; right: 11px; }
+    .cal-day-add::before { content: ""; position: absolute;
+      inset: -12px -12px -4px; }
+  }
 
   /* An entry. Colour + a left bar per kind; never colour alone — each row
      also carries its title in words, and the chat rows carry the person's
@@ -362,11 +464,36 @@
   .cal-ev-event { border-left-color: var(--accent); }
   .cal-ev-deadline { border-left-color: var(--stale-t); }
   .cal-ev-opening { border-left-color: var(--ok); }
-  /* A tracked role's own closing date. Same deadline family, but it is YOUR
-     row and it opens the posting, so it carries the accent bar and an arrow.
-     Colour alone never distinguishes it: the arrow is the affordance. */
-  .cal-ev-tracked { border-left-color: var(--danger); color: inherit;
-    text-decoration: none; }
+  /* A tracked role's own closing date. Same deadline family, so it takes the
+     deadline family's rail — it inherits `.cal-ev-deadline` above and no
+     longer overrides it — and what marks it as YOURS is the arrow, the link
+     hover and the dotted rule below, none of which is a colour.
+
+     It used to override the rail to `--danger`, which broke the key on the
+     bar. The legend counts both kinds of deadline under ONE tally: a firm's
+     published closing date (directory data, no link, a static row) and the
+     closing date of a role this student tracks are both `kind: "deadline"`,
+     both counted by `counts.deadline`, and the key beside that number draws
+     `--stale-t`. Measured on the demo month at 1440px: the legend read "3
+     Deadlines" with a `rgb(125, 84, 16)` swatch, and all three of the rows it
+     was counting drew `rgb(157, 43, 35)`. The key named a colour that was on
+     no row, and the grid drew a colour that was in no key — five inks on the
+     grid against four entries in the thing that claims to explain them.
+
+     Which of the two to move was decided by the count, not by taste: the
+     tally cannot be split here (it is one number from `CAL_KINDS`), so one
+     ink is the only way one key can be true. This is the same bug the opening
+     split fixed one step further along — there the row's own TEXT disagreed
+     with the tally above it; here the row's own COLOUR did.
+
+     The rule's own first line has said "the arrow is the affordance" since
+     the day it shipped, and the line above it claimed an accent bar the rule
+     never drew, so the red was drift rather than a decision. Contrast is
+     unaffected: `--stale-t` on the card ground measures 6.02:1 in light and
+     9.17:1 in dark, against `--danger`'s 6.76:1 / 6.83:1. `.is-shut` below
+     still drops the rail to grey, and its argument is unchanged — a coloured
+     rail is live, a grey one is not. */
+  .cal-ev-tracked { color: inherit; text-decoration: none; }
   .cal-ev-tracked::after { content: "↗"; flex: none; color: var(--ink-3);
     font-size: 10px; }
   .cal-ev-tracked:hover { background: var(--surface); box-shadow: var(--shadow-1); }
