@@ -239,8 +239,9 @@
       repeated listing button?" (2026-08-28).
 
       This is a genuine narrowing, not a relocation like its three siblings
-      in `_scope.html`'s header-strip note — there is nowhere left for a
-      folded-duplicate student to see the fold or reverse it. That is a
+      (fit, region, campaign, each of which still states its own count at the
+      control that causes it) — there is nowhere left for a folded-duplicate
+      student to see the fold or reverse it. That is a
       deliberate call, not an oversight: a firm re-filing one job as several
       requisitions is noise on every reading of this page, never a role a
       student was trying to reach, unlike the other three hides (fit,
@@ -417,65 +418,11 @@ else is htmx and the platform.
     check();
   })();
 
-  // The bulk-save peek. CSS already opens the panel on hover and on keyboard
-  // focus (see `.peek` in _styles.html), so this adds only the three things a
-  // stylesheet cannot do: latch it open on a tap, where hover never fires;
-  // close it on Escape; and keep `aria-expanded` telling the truth.
-  //
-  // DELEGATED, on the document, registered once. The banner lives inside
-  // #cov-results, which htmx replaces wholesale on every filter keystroke —
-  // per-element listeners bound here would be attached to a node that is
-  // thrown away on the first swap, and re-binding after each swap would stack
-  // duplicates. Nothing here holds a reference to an element across a swap.
-  (function () {
-    function sync(peek) {
-      var btn = peek.querySelector(".peek-toggle");
-      if (btn) btn.setAttribute(
-        "aria-expanded", peek.dataset.peekState === "open" ? "true" : "false");
-    }
-    function shut(peek) { peek.dataset.peekState = "shut"; sync(peek); }
-    function clear(peek) { delete peek.dataset.peekState; sync(peek); }
-
-    document.addEventListener("click", function (e) {
-      var btn = e.target.closest && e.target.closest(".peek-toggle");
-      if (!btn) return;
-      var peek = btn.closest(".peek");
-      if (peek.dataset.peekState === "open") shut(peek);
-      else { peek.dataset.peekState = "open"; sync(peek); }
-    });
-
-    // Escape closes and leaves focus on the button that opened it — the same
-    // contract the Companies panel above keeps. `shut` rather than `clear`
-    // because focus is still inside the peek at this point, and the CSS
-    // `:focus-within` rule would otherwise reopen it the instant we let go.
-    document.addEventListener("keydown", function (e) {
-      if (e.key !== "Escape") return;
-      var peek = document.querySelector('.peek[data-peek-state="open"]');
-      if (!peek && document.activeElement && document.activeElement.closest) {
-        peek = document.activeElement.closest(".peek");
-      }
-      if (!peek) return;
-      e.preventDefault();
-      shut(peek);
-      var btn = peek.querySelector(".peek-toggle");
-      if (btn) btn.focus();
-    });
-
-    // Leaving by keyboard or by pointer both return the panel to its default
-    // (hover/focus) behaviour, so an Escape earlier in the session cannot
-    // leave it permanently unhoverable.
-    document.addEventListener("focusin", function (e) {
-      document.querySelectorAll(".peek").forEach(function (peek) {
-        if (!peek.contains(e.target)) clear(peek);
-      });
-    });
-    document.addEventListener("mouseout", function (e) {
-      var peek = e.target.closest && e.target.closest(".peek");
-      if (peek && !peek.contains(e.relatedTarget) && !peek.contains(document.activeElement)) {
-        clear(peek);
-      }
-    });
-  })();
+  // The bulk-save peek's script lived here. It latched the panel open on a
+  // tap, closed it on Escape and kept `aria-expanded` honest. Gone with the
+  // panel (2026-09-02): the Picked column is the list a bulk save reads from
+  // now, and a column is not a disclosure — there is no open/shut state left
+  // for a script to hold. See `_pickcol.html`.
 
   // Re-settle each filter <select> after an htmx swap has refreshed its
   // options with live counts. Two distinct repairs, both observed failing:

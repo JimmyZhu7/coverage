@@ -8,7 +8,23 @@ personalized from the survey: the user's target firms and chosen tracks/regions
 float to the top.
 {% endcomment %}
 
-{% include "directory/_scope.html" %}
+{% comment %}
+THE BLUE BANNER IS GONE (2026-09-02, the founder's own call: "take away the
+blue banner on the top"). `_scope.html` used to render here: an accent-tinted
+band saying "N roles fit you and name your year. Not saved yet.", a "Which
+ones?" peek panel, and a `<details>` confirm carrying "Save them all".
+
+It answered a different question from the Picked column below it and said so
+in a different voice — measured on the founder's board that morning, 2 of the
+9 roles it offered were among his 6 picks. Two shortlists, one board. The
+column absorbed it: the save lives in `.firmcol-head` now, the column is its
+own peek, and there is one list, one count and one write. See
+`directory.views.track_eligible` for what "all" means and the measurement
+that decided it.
+
+The file went with it, along with `_bulk_save_offer`, `_offer_fits`,
+`_bulk_save_peek` and the `from=peek` dismissal path.
+{% endcomment %}
 
 {% comment %}
 THE BOARD STATE — the running totals, on the boundary between what you ASKED
@@ -106,155 +122,7 @@ exactly the moment it had something to say.
 {% endcomment %}
 {% if clusters or pick_cluster %}
   <div class="firmcols"{% if request.user.is_authenticated %} hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'{% endif %}>
-    {% if pick_cluster %}
-      {% comment %}
-      THE PICKED COLUMN — first in the pile, and coloured apart from the firm
-      columns beside it. It is a column rather than a band above the filters
-      because that is where a student looks for roles; the accent tint and
-      the star in place of a monogram are what stop it reading as a firm
-      called "Picked for you".
-
-      It is NOT in `clusters` (see views.py): every role here is also listed
-      under its own firm further along the row, so counting this column would
-      double every pick in "N Open Roles" and invent a firm.
-
-      Its cards are the same standardised 146px card as everywhere else, with
-      one addition — they name their firm, because this is the one column
-      whose header cannot.
-      {% endcomment %}
-      <article class="firmcol firmcol--picked{% if not pick_cluster.roles %} is-empty{% endif %} kin-reveal panel" style="--i:0" aria-labelledby="pickcol-h">
-        {% comment %}
-        The two cycle sentences live here now (2026-09-02) rather than as
-        two italic lines inside the card. `title` on the header, so the
-        whole column carries the context and no vertical space is spent on
-        it. Both are still built in views.py and still printed in full by
-        the weekly digest.
-        {% endcomment %}
-        <header class="firmcol-head"{% if pick_cluster.cycle_note or pick_cluster.cycle_open.text %} title="{{ pick_cluster.cycle_note }}{% if pick_cluster.cycle_note and pick_cluster.cycle_open.text %} {% endif %}{{ pick_cluster.cycle_open.text }}{% if pick_cluster.cycle_open.why %} {{ pick_cluster.cycle_open.why }}{% endif %}"{% endif %}>
-          <span class="firmcol-logo firmcol-logo--picked" aria-hidden="true">★</span>
-          <div class="firmcol-id">
-            {% comment %}h2 like the firm columns beside it: this column is a
-            section too, and leaving it a span put its role cards (h3)
-            straight under the page's h1 — the 1→3 jump a screen-reader user
-            hears as a missing level.{% endcomment %}
-            <h2 class="firmcol-h"><span class="firmcol-name" id="pickcol-h">Picked for you</span></h2>
-            <div class="firmcol-stats">
-            {% comment %}
-            TWO KINDS OF EMPTY, and until 2026-09-02 only one of them had a
-            sentence. "None match this filter" is true when the student's
-            filters hid picks that exist; it is a lie when there were never
-            any picks to hide, and that second case did not even reach this
-            template — the column was not built at all, so the profile most
-            in need of an explanation got the least. See the `pick_cluster`
-            block in views.py.
-
-            The copy names the two levers a student can actually pull. It
-            does not quote the score bar: 25 is a scoring internal with no
-            meaning outside `recommend.py`, and printing it invites a "why is
-            this one 24" question the number cannot answer. The cycle
-            sentences below carry the rest of the answer, which on an
-            early-cycle profile is usually the whole of it.
-
-            "Nothing scores high enough yet", not "Nothing on the board
-            scores high enough for you yet" (2026-09-02): this span shares
-            its line with the tier slot now and shrinks to fit it, and the
-            long form was the only string on the board wide enough to be
-            ellipsised by that. "On the board" and "for you" were the words
-            adding no lever; the sentence one line below still names both.
-            {% endcomment %}
-            <span class="firmcol-meta">{% if pick_cluster.roles %}{{ pick_cluster.open_count }} role{{ pick_cluster.open_count|pluralize }} · {{ pick_cluster.firm_count }} firm{{ pick_cluster.firm_count|pluralize }}{% elif pick_cluster.nothing_scored %}Nothing scores high enough yet{% else %}None match this filter{% endif %}</span>
-            {% comment %}
-            The shared "why", as ONE text line in the firm columns' own meta
-            voice ("Tier 1"), not a row of pills. Pills wrapped
-            the moment two reasons showed ("2027 INTAKE" + "2027 SUMMER
-            INTERNSHIP" is 266px against a 236px row), and a wrapped stats row
-            made this header 122px against its neighbours' 92px, pushing every
-            card in this column 30px below the row it is trying to join. One
-            line, ellipsised past the edge, with every full sentence in the
-            tooltip — nothing lost, nothing staggered.
-
-            ONLY what every pick shares. It is routinely empty — six picks
-            from three firms share no reason, because "Tier 1" carries a
-            different sentence per firm — and until 2026-09-01 an empty line
-            here meant NO reason rendered anywhere on the column. The rest
-            now prints per card, as each row's own `.rr-why` line (see
-            _rolecard.html); this line and those lines partition the
-            scorer's reasons between them, nothing printed twice.
-
-            It rides the SAME line as the count above, in `.firmcol-stats`,
-            which is where a firm column now carries "GLOBAL BANK · 24 OPEN ·
-            TIER 1". Two headers, one shape.
-            {% endcomment %}
-            {% comment %}
-            THE "PICKED" EYEBROW IS GONE (2026-09-02), and the argument it was
-            added on is what retires it. It was a mono uppercase word reading
-            "PICKED" directly under a heading reading "Picked for you" — the
-            founder's review named it as pure redundancy and he is right: a
-            label that repeats the heading above it teaches a reader nothing
-            the heading did not.
-
-            What it was there to do still gets done, by the two signals no
-            firm column can wear. The star tile is `--accent`-filled (a firm
-            tile is a white logo plate or a pastel monogram, never the accent)
-            and the heading is `--accent-ink` (a firm name is `--ink`). The
-            third signal, the accent border, IS shared with every `.is-mine`
-            column and was never the one carrying this — see
-            `test_the_picked_column_still_says_it_is_not_a_firm_without_the_wash`,
-            which pins all three. The tile only started rendering in the
-            accent when its cascade bug was fixed (`.firmcol-logo.
-            firmcol-logo--picked`), which is AFTER the eyebrow was written to
-            compensate for a tile that was quietly drawing a monogram chip.
-            {% endcomment %}
-              {% if pick_cluster.reasons %}<span class="firmcol-why" title="{% for r in pick_cluster.reasons %}{{ r.detail }}{% if not forloop.last %} {% endif %}{% endfor %}">{% for r in pick_cluster.reasons %}{% if forloop.first %}<strong>{{ r.text }}</strong>{% else %}<span class="fc-stat">{{ r.text }}</span>{% endif %}{% endfor %}</span>{% endif %}
-            </div>
-            {% comment %}
-            BOTH CYCLE SENTENCES CAME OFF THE CARD (2026-09-02, the founder's
-            own call: "kill the block of words below 6 roles 4 firms"). They
-            were two italic paragraphs standing between the column's heading
-            and its first role, so the card spent five lines explaining
-            before it showed a single thing to apply to.
-
-            Not deleted, moved: both now ride the header's `title`, which is
-            where this file already puts a fact about where a fact came from.
-            `cycle_note` (this cycle has no live postings, so these are
-            near-misses) and `cycle_open` (when the student's own cycle is
-            forecast to open) are unchanged in views.py, and the weekly
-            digest still prints both in full — see `cycle_open_estimate`.
-            The board is the surface that was overloaded, not the sentences.
-            {% endcomment %}
-            {% comment %}
-            Never a silent truncation. This column obeys the filters like its
-            neighbours, so it owns up to what they removed — and it stays on
-            screen when they remove EVERYTHING, because a column that
-            disappears the moment you touch a filter reads as breakage rather
-            than as an answer.
-            {% endcomment %}
-            {% if pick_cluster.hidden_by_filter %}
-              <span class="firmcol-hidden">
-                {% if pick_cluster.roles %}{{ pick_cluster.hidden_by_filter }} more hidden by your filters
-                {% else %}All {{ pick_cluster.total_picks }} of your picks are hidden by your filters{% endif %}
-              </span>
-            {% endif %}
-            {% comment %}WHAT TO DO NEXT, and only on the empty-by-score
-            state: the filter case already offers its own reversal one click
-            above, and the full case needs no instruction. Settings is where
-            both levers live (target firms, tracks and regions), and it is a
-            link rather than a sentence about a link because the whole point
-            is that the student can act on it from here.{% endcomment %}
-            {% if pick_cluster.nothing_scored %}
-              <span class="firmcol-hidden">Add target firms or widen your tracks in <a href="{% url 'accounts:settings' %}">Settings</a>.</span>
-            {% endif %}
-          </div>
-        </header>
-        {% if pick_cluster.roles %}
-          <div class="firmcol-scroll">
-            {% for r in pick_cluster.roles %}
-              {% include "directory/_rolecard.html" %}
-            {% endfor %}
-          </div>
-        {% endif %}
-      </article>
-    {% endif %}
+    {% include "directory/_pickcol.html" %}
     {% include "directory/_columns.html" %}
   </div>
 {% endif %}

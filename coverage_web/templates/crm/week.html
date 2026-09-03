@@ -129,43 +129,46 @@
         <span class="ribbon-lbl">Closing in 10 days{% if dash.closing_10_reported %}, {{ dash.closing_10_reported }} reported{% endif %}</span>
       </a>
       {% comment %}
-      The most actionable number on the page, honest at zero too: nothing
-      unsaved is a real state worth naming, not a bare "0" that reads like
-      the feature is broken.
+      THE SAME NUMBER THE PICKED COLUMN'S "SAVE ALL" WILL WRITE, and it is
+      that number by construction: `crm.today` calls
+      `directory.views.picked_roles` and `pick_save_ids`, the very functions
+      the Opportunities feed builds that column and its button out of. It
+      used to read the retired bulk-save banner's own count (roles whose text
+      NAMED the class year, unranked and uncapped), which answered a
+      different question from the column beside it — measured on the
+      founder's board 2026-09-02, 2 of the 9 it counted were among his 6
+      picks. The banner is gone; a ribbon still pointing at its function
+      would have been a number with nothing on the other end.
 
-      The label used to read "Name your year, unsaved" — a phrase that
-      parses as "your profile didn't save" as easily as its intended
-      meaning ("N roles name your class year and you haven't saved them").
-      Spelling out the class year itself (read straight off `user`, not
-      `dash` — `crm.today._dashboard_context` carries the count but not the
-      year) removes the ambiguity instead of relying on word order to
-      carry it.
+      "Picked for you", not the class year, because the year is no longer
+      what the number is about. What the label still owes the reader is the
+      distinction the year spelled out: this is a count of things WAITING,
+      not a count of things missing. "Not saved yet" carries that, and the
+      destination is the column itself.
+
+      Honest at zero too: nothing unsaved is a real state worth naming, not a
+      bare "0" that reads like the feature is broken.
       {% endcomment %}
-      {% if dash.eligible_unsaved %}
+      {% if dash.picked_unsaved %}
         <a class="ribbon-stat kin-reveal is-urgent" style="--i: 2" href="{% url 'opportunities' %}">
-          <span class="ribbon-num">{{ dash.eligible_unsaved }}</span>
-          <span class="ribbon-lbl">For Class of {{ user.class_year }}, not saved yet</span>
+          <span class="ribbon-num">{{ dash.picked_unsaved }}</span>
+          <span class="ribbon-lbl">Picked for you, not saved yet</span>
         </a>
-      {% elif dash.has_year %}
+      {% elif dash.has_picks %}
         <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'opportunities' %}">
-          {% comment %}
-          "All caught up on your year" was the one label in this cell that
-          didn't say WHICH year -- its two siblings both name the class
-          year explicitly ("For Class of 2027, not saved yet", "Add your
-          class year..."), so this state read as the odd one out. Matched
-          to the same specificity (2026-08-31, wording pass).
-          {% endcomment %}
-          <span class="ribbon-lbl">Caught up for Class of {{ user.class_year }}</span>
+          <span class="ribbon-lbl">Every pick saved</span>
         </a>
       {% else %}
         {% comment %}
-        Zero with NO class year stated is not "caught up" — the check never
-        ran. Day-zero walkthrough caught this cell congratulating a
-        ten-minute-old account on clearing a check it had never taken. Say
-        what is actually missing, and link to where it gets fixed.
+        Zero with NO picks is not "caught up" — there was nothing to catch up
+        on. The day-zero walkthrough caught the old version of this cell
+        congratulating a ten-minute-old account on clearing a check it had
+        never taken. Say what is actually missing, and link to where it gets
+        fixed: the scorer reads target firms, tracks, regions and class year,
+        and all four live in Settings.
         {% endcomment %}
         <a class="ribbon-stat kin-reveal" style="--i: 2" href="{% url 'accounts:settings' %}#profile">
-          <span class="ribbon-lbl">Add your class year to check eligibility</span>
+          <span class="ribbon-lbl">Fill in Settings to get picks</span>
         </a>
       {% endif %}
       {% comment %}

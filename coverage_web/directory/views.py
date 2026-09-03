@@ -78,9 +78,8 @@ from directory.open_runs import (
     open_run_days,
 )
 from directory.recommend import (
-    MIN_SCORE, Candidate, Profile, level_mismatch, parse_target_cycle, recommend,
-    role_function, role_function_cached, role_level, role_matches_regions,
-    score_candidate,
+    DEFAULT_LIMIT, MIN_SCORE, Candidate, Profile, parse_target_cycle, recommend,
+    role_function, score_candidate,
 )
 from directory.sponsorship import effective_sponsorship, firm_policy_map, firm_policy_q
 from directory.timeline import (
@@ -3347,7 +3346,7 @@ def _qs_without(request, param: str) -> str:
     return q.urlencode()
 
 
-def opportunities(request, *, dismiss_undo=None, scope_only=False):
+def opportunities(request, *, pick_only=False):
     """The Opportunities page (public, no login): open campus roles joined
     to firms, sorted by deadline proximity (nulls last), with querystring
     filters for role type / region / track / provider / firm / free-text.
@@ -3364,11 +3363,10 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     list; an HX-Request gets the list partial, a plain GET gets the full
     page. Works with JS off, too (the form is a normal GET form).
 
-    `dismiss_undo` is the one thing this view does not compute for itself: the
-    "you just said not for me / Undo" strip, handed in by `_refresh_feed` when
-    a dismissal is what triggered this render. `scope_only` asks for the scope
-    block alone. Both are keyword-only and defaulted, so the URLconf still
-    calls this with a request and nothing else."""
+    `pick_only` asks for the Picked column alone, as htmx's out-of-band half
+    of a dismissal made from a card elsewhere on the page. Keyword-only and
+    defaulted, so the URLconf still calls this with a request and nothing
+    else."""
     now = timezone.now()
     today = timezone.localdate()
 
@@ -3728,13 +3726,13 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # keyed the skip on the cursor alone, so exactly the no-JS fallback the
     # sentinel carries for honesty was the request that crashed on feed=None.
     cols_fragment = bool(cols_from) and bool(request.headers.get("HX-Request"))
-    # The mirror-image fragment: `scope_only` asks for the scope block alone
-    # (see `scope_context` and the early return that uses it, far below). A
-    # KEYWORD, not a querystring flag like `cols=`, because nothing about it
-    # belongs in a URL: `_refresh_feed` is its only caller, and a `?scope=1`
-    # in the address bar would leak into every "show me the hidden ones" link
-    # this very block builds out of the live request.
-    scope_fragment = scope_only and bool(request.headers.get("HX-Request"))
+    # The mirror-image fragment: `pick_only` asks for the Picked column alone
+    # (see the early return that uses it, far below). A KEYWORD, not a
+    # querystring flag like `cols=`, because nothing about it belongs in a
+    # URL: `_refresh_feed` is its only caller, and a `?pick=1` in the address
+    # bar would leak into every "show me the hidden ones" link this very block
+    # builds out of the live request.
+    pick_fragment = pick_only and bool(request.headers.get("HX-Request"))
 
     elig_profile = _eligibility_profile(request.user)
     fit = request.GET.get("fit", "").strip() == "1" and elig_profile is not None
@@ -3758,7 +3756,7 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # each used to build its own: two `_urgency_item` calls per row, 30,068 of
     # them at `?role=all`, for an identical dict. The band now takes copies of
     # these (see `_urgency_feed`'s `items`), the clusters take them by
-    # reference and annotate them in place, and `_bulk_save_peek` reads the
+    # reference and annotate them in place, and the Picked column copies the
     # annotated ones — which is the same reference contract the map already
     # had, just established a few lines earlier.
     item_by_id: dict[int, dict] = {
@@ -3791,6 +3789,11 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # instead of six generic cards pretending to be tailored. See recommend.py
     # for the scoring itself.
     picks: list = []
+    # `{role id: how many branch offices this one card stands for}`, from the
+    # same fold that produced the picks — see `picked_roles`. Never a second
+    # guess at it, and printed on the card, because a fold nobody can see is
+    # the invisible filter this product does not ship (P4).
+    pick_places: dict[int, int] = {}
     profile = None
     if request.user.is_authenticated and not cols_fragment:
         # The student's live relationships, collapsed to the warmest per
@@ -3816,49 +3819,29 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         profile = Profile.from_user(request.user, tier_by_firm,
                                     warm_firms=warm_by_firm)
         if not profile.is_empty:
-            picks = [
-                _pick_card(r)
-                for r in recommend(
-                    profile,
-                    # The page's own clock, not the ranker's default. `recommend`
-                    # keeps itself free of Django and so falls back to
-                    # `date.today()` — the SERVER's local date — while every
-                    # date-sensitive surface in this view (`today` above, the
-                    # urgency feed, `deadlines.closing_soon_window`) reads
-                    # `timezone.localdate()`, i.e. the date in `settings.
-                    # TIME_ZONE` (UTC). On any host whose OS clock is not UTC
-                    # the two are a different day for part of every day — eight
-                    # hours of it on the founder's own machine — and in that
-                    # window the picks dropped a role as expired that the feed
-                    # beside them still rendered as closing today. One clock
-                    # per request, passed in.
-                    today=today,
-                    candidates=[
-                        Candidate.from_opportunity(o)
-                        # Folded first, and scored second. Two copies of one
-                        # posting score identically by construction, so an
-                        # unfolded input spends two of six pick slots saying
-                        # the same thing — the most expensive place on the
-                        # page to repeat yourself. This reads `open_qs`, not
-                        # the filtered `rows`, so the ranking still sees the
-                        # whole board (see the note above).
-                        for o in fold_duplicates(
-                            [
-                                o for o in open_qs.filter(bucket__in=TARGET_BUCKETS)
-                                # A pick is a RECOMMENDATION, held to a higher
-                                # bar than a listing: a role whose own text
-                                # blocks this user (wrong stated year, refuses
-                                # their visa) may still be worth seeing on the
-                                # board, but the product must not point at it
-                                # and say "for you".
-                                if not (lambda v: v and v["blocking"])(
-                                    _eligibility(o, elig_profile))
-                            ],
-                            sticky_ids=sticky_ids,
-                        )[0]
-                    ],
-                )
-            ]
+            # `picked_roles` owns the whole column — the blocking-verdict
+            # filter, the duplicate fold, the ranking, the city-variant fold
+            # — because Today's ribbon reads the same column and the two must
+            # not be able to disagree about it. It scores `open_qs`, not the
+            # filtered `rows`, so a filter can never reorder the ranking or
+            # promote a weaker pick (see the note above).
+            #
+            # `today=today` is the page's own clock, not the ranker's default.
+            # `recommend` keeps itself free of Django and so falls back to
+            # `date.today()` — the SERVER's local date — while every
+            # date-sensitive surface in this view (`today` above, the urgency
+            # feed, `deadlines.closing_soon_window`) reads
+            # `timezone.localdate()`, i.e. the date in `settings.TIME_ZONE`
+            # (UTC). On any host whose OS clock is not UTC the two are a
+            # different day for part of every day — eight hours of it on the
+            # founder's own machine — and in that window the picks dropped a
+            # role as expired that the feed beside them still rendered as
+            # closing today. One clock per request, passed in.
+            recs, pick_places = picked_roles(
+                request.user, open_qs=open_qs, elig_profile=elig_profile,
+                rec_profile=profile, sticky_ids=sticky_ids, today=today,
+            )
+            picks = [_pick_card(r) for r in recs]
     pick_shared, pick_blocks = _group_picks(picks)
 
     clusters: dict[int, dict] = {}
@@ -3869,9 +3852,9 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
     # `item_by_id` — every feed item by role id — is built above the urgency
     # band now, so the band and these columns share one build per row. The
     # dicts are still the SAME objects the firm columns render, held by
-    # reference, which is what lets the bulk-save peek show the rows the
-    # banner is offering without building or querying a second set; see
-    # `_bulk_save_peek`, which is the only reader.
+    # reference, which is what lets the Picked column show the rows "Save
+    # all" is offering without building or querying a second set; the column
+    # takes its COPY further down, after the track-status annotation.
     for o in rows:
         cl = clusters.get(o.firm_id)
         if cl is None:
@@ -4091,12 +4074,23 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             {
                 **pick_items[p["id"]],
                 "show_firm": True,
+                # What the city-variant fold did, said out loud on the card
+                # that survived it. `None` on every other row, so the card
+                # prints nothing rather than a chip meaning zero.
+                "places": pick_places.get(p["id"]),
                 "pick_reasons": why_by_id.get(p["id"], []),
                 **_pick_why_line(why_by_id.get(p["id"], []),
                                  pick_items[p["id"]].get("verdict")),
             }
             for p in picks if p["id"] in pick_items
         ]
+        # WHAT "SAVE ALL" WILL WRITE — the unsaved roles of the column as it
+        # is rendered, filters and all. Resolved HERE, once, and stashed
+        # below, so the count in the header, the count in the confirm and the
+        # ids the confirm writes are one fact (see `track_eligible` for the
+        # 206/209/208 measurement that forced that discipline on the banner
+        # this column replaced).
+        pick_save = pick_save_ids(request.user, visible)
         # Built even when the filter hid EVERY pick. A column that silently
         # vanishes the moment you touch a filter reads as breakage, and this
         # page's whole posture is to name what it is holding back rather than
@@ -4106,6 +4100,11 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "roles": visible,
             "open_count": len(visible),
             "firm_count": len({r["firm_slug"] for r in visible}),
+            # THE COLUMN'S ONE PRIMARY ACTION. `save_count` is `len()` of the
+            # very list stashed for the confirm to write — never a second
+            # count of the same thing — and 0 renders as a sentence saying
+            # everything here is saved, never as an empty button.
+            "save_count": len(pick_save),
             # Never silently truncated: if the filter hid picks, the column's
             # header says so in its own words.
             "hidden_by_filter": len(picks) - len(visible),
@@ -4150,6 +4149,23 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
             "nothing_scored": not picks,
         }
 
+    # THE SAVE-ALL OFFER, stashed, so the count in the column header and the
+    # ids the confirm writes are the same fact rather than two separately
+    # derived ones. The banner this replaced learned that the hard way: it
+    # counted the feed's folded rows while the write re-derived its own set
+    # from the whole table, and one page load produced 206 in the confirm
+    # sentence, 209 rows written and 208 on My Applications' tile (see
+    # `track_eligible`).
+    #
+    # Rewritten on EVERY render of this view, htmx swaps included, because
+    # the column is re-rendered on every one of them: whatever number is on
+    # screen is the offer that is live. Stale offers cannot accumulate —
+    # there is one key and the newest write wins.
+    if request.user.is_authenticated:
+        request.session[PICK_SAVE_OFFER_SESSION_KEY] = (
+            pick_save if pick_cluster else []
+        )
+
     # The two figures the stat strip actually renders. (The old hero widget's
     # total/for-you/funnel counts were dropped with it — they cost 5 queries a
     # request and nothing displayed them.)
@@ -4177,62 +4193,24 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         .order_by("firm__name").values_list("firm__slug", "firm__name").distinct()
     ]
 
-    # THE BULK-SAVE OFFER, resolved to ids here and stashed, so the confirm
-    # dialog's number and the write are the same fact rather than two
-    # separately-derived ones (see `_bulk_save_offer` for the 206/209/208
-    # measurement that forced this). `track_eligible` reads the stash; it no
-    # longer queries for a set of its own.
+    # ---- The Picked column alone, for an out-of-band swap. -----------------
+    # A `pick_only` call is a "Not for me" that happened somewhere ELSE on the
+    # page (a role card deep inside a firm column) asking this view to restate
+    # the one thing that click just changed and that is nowhere near it: the
+    # Picked column, its "Save all" count, and the id list stashed above for
+    # the confirm to write.
     #
-    # Rewritten on EVERY render of this view, htmx swaps included, because the
-    # banner is re-rendered on every one of them: whatever number is on screen
-    # is the offer that is live. Stale offers cannot accumulate — there is one
-    # key and the newest write wins.
-    #
-    # `profile` — the scorer's own, built once above for the Picked column —
-    # travels with it, because the offer is now the intersection of "names
-    # your year" and "the recommender would rank it" (see `_offer_fits`).
-    # Passing it rather than letting `_bulk_save_offer` build its own is
-    # two queries saved on the page that already holds the answer; every
-    # `_bulk_save_offer` caller ends up with the same profile either way.
-    # It is never None here: the only render that leaves it so returns above
-    # (`cols_fragment`), and an anonymous visitor has no `elig_profile`.
-    bulk_save_offer, bulk_save_places = (
-        _bulk_save_offer(request.user, rows, elig_profile, rec_profile=profile)
-        if elig_profile and elig_profile.get("class_year") else ([], {})
-    )
-    if request.user.is_authenticated:
-        request.session[BULK_SAVE_OFFER_SESSION_KEY] = bulk_save_offer
-    # The same list again, resolved to the rows already on the page, so the
-    # banner can show WHICH roles it is offering before the student commits.
-    # Derived from `bulk_save_offer` and nothing else — see `_bulk_save_peek`.
-    # `bulk_save_places` rides the same call, so the "N cities" note a row
-    # carries describes the fold that produced this very list.
-    bulk_save_peek = _bulk_save_peek(bulk_save_offer, item_by_id, bulk_save_places)
-    # WHETHER "SAVE THEM ALL" IS OFFERED AT ALL. One click that commits to
-    # more roles than the peek can print is a commit to roles the student has
-    # not looked at — the panel names the first `BULK_SAVE_PEEK_MAX` and
-    # counts the rest, so above that number the button would be asking for
-    # agreement to a list nobody has read. At or below it, the panel IS the
-    # offer and the button is honest.
-    #
-    # `BULK_SAVE_PEEK_MAX` rather than a second number, deliberately: the
-    # threshold and the peek's cap are one fact ("what a student can see
-    # before deciding"), and two constants that happened to agree today would
-    # not agree after the first edit to either.
-    #
-    # Above the threshold the banner keeps its sentence and its peek: the
-    # roles are still there, still named, still savable one by one from the
-    # panel or the board. What is withheld is the bulk commitment, not the
-    # information.
-    bulk_save_all = 0 < len(bulk_save_offer) <= BULK_SAVE_PEEK_MAX
+    # It stops HERE, after that stash has been rewritten, and the ordering is
+    # the whole point. The number on screen, the number in the confirm
+    # sentence and the ids `track_eligible` will actually write are one fact
+    # resolved once. A dismissal that updated only the number on screen — or
+    # only the stash — would put the two back out of agreement by a new route,
+    # and a subtler one than the original (see `track_eligible`).
+    if pick_fragment:
+        return render(request, "directory/_pickcol.html",
+                      {"pick_cluster": pick_cluster, "oob": True})
 
-    # THE SCOPE BLOCK — every sentence at the top of the results that states
-    # what this board is NOT showing you, plus the "Save them all" offer and
-    # its peek. Assembled as its own dict because it is swappable on its own:
-    # a "Not for me" click on a card 600 rows down changes both the hidden
-    # count and the offer, and neither is anywhere near the card. See
-    # `_scope.html` and the `scope_only` return below.
-    scope_context = {
+    context = {
         "hidden_region": hidden_region,
         "show_unregioned_qs": show_unregioned_qs,
         "hidden_fit": hidden_fit,
@@ -4244,50 +4222,6 @@ def opportunities(request, *, dismiss_undo=None, scope_only=False):
         # sentence's lone `show_dupes_qs` link, so it needs to render
         # checked/unchecked like every other filter-bar toggle.
         "dupes_shown": dupes_shown,
-        # The lens→pipeline bridge's trigger: open roles whose text names the
-        # user's year, which the recommender would rank for them, and which
-        # they have never touched (tracked or dismissed both count as touched
-        # — "not for me" outranks "your year"). Computed over the FULL row
-        # set, not the paged slice.
-        "eligible_unsaved": len(bulk_save_offer),
-        # Whether that number gets a one-click button under it, or only the
-        # peek. See `bulk_save_all` above for the rule and why it reuses the
-        # peek's own cap.
-        "bulk_save_all": bulk_save_all,
-        # The peek panel behind that number: `rows` (capped), `more` (what the
-        # cap left out) and `total` (== `eligible_unsaved`, by construction).
-        "bulk_save_peek": bulk_save_peek,
-        # Present only on the render a dismissal caused (see `_refresh_feed`).
-        # Every other render — a filter keystroke, a reload, a lazy-loaded
-        # column — draws no strip, which is the whole intended lifetime of a
-        # one-shot undo. Nothing is stored, so nothing goes stale; same
-        # posture as `crm.views._dismiss_undo_offer`.
-        "dismiss_undo": dismiss_undo,
-    }
-
-    # ---- The scope block alone, for an out-of-band swap. --------------------
-    # A `scope_only` call is a dismissal that happened somewhere ELSE on the
-    # page (a role card deep inside a firm column) asking this view to restate
-    # the two things that dismissal just changed: how many roles are hidden,
-    # and what the "Save them all" offer now covers.
-    #
-    # It stops HERE, after the session stash above has been rewritten, and that
-    # ordering is the whole point. The number on screen, the number in the
-    # confirm sentence and the ids `track_eligible` will actually write are one
-    # fact resolved once (see `_bulk_save_offer` for the 206/209/208
-    # measurement that forced that). A dismissal that updated only the number
-    # on screen — or only the stash — would put the three back out of
-    # agreement by a new route, and a subtler one than the original.
-    if scope_fragment:
-        return render(request, "directory/_scope.html",
-                      {**scope_context, "oob": True})
-
-    context = {
-        # Every "here is what this board is not showing you" sentence, the
-        # bulk-save offer and its peek, resolved once above and spread here so
-        # the full page and the `scope_only` fragment can never state two
-        # different versions of the same counts.
-        **scope_context,
         # The paged slice renders; the full list still backs every count
         # above, so the strip describes the board, not the loaded fraction.
         "clusters": cluster_page,
@@ -4486,6 +4420,205 @@ def _drawer_sponsorship(o) -> dict:
     }
 
 
+def picked_roles(user, *, open_qs=None, elig_profile=None, rec_profile=None,
+                 sticky_ids=(), today=None):
+    """`(recommendations, places_by_id)` — the "Picked for you" column, once.
+
+    THE ONE DERIVATION, and the reason this function exists at all. Two
+    surfaces read this column: the Opportunities feed draws it, and Today's
+    ribbon counts what is unsaved in it. They used to answer two DIFFERENT
+    questions (the feed ranked; the ribbon counted a separate year-gated
+    "eligible unsaved" set) and so could not be compared at all. Now they
+    call this, and a number that disagrees with the column is not reachable
+    — the same property the 206/209/208 incident bought for the old banner
+    (see `track_eligible`), applied one level up.
+
+    WHAT THE GATES ARE, and that they are all `recommend()`'s own. A pick has
+    already survived: the blocking-verdict exclusion below (wrong stated year,
+    a posting that refuses this student's visa), `stated_class_mismatch`, the
+    RUNG filter — `role_matches_level` with the student's `study_level`, or
+    `level_mismatch` where the posting stated a window — the passed-deadline
+    exclusion, `MIN_SCORE`, and `MAX_PER_FIRM`. That is a strictly harder bar
+    than the retired bulk-save banner's fit gate applied, and the study-level
+    half of it is applied harder here than that gate ever did.
+
+    ONE ROW PER DISTINCT JOB, LAST. `fold_duplicates` runs over the candidates
+    (two copies of one posting score identically, so an unfolded input spends
+    two of six slots saying the same thing) and it deliberately treats the
+    stated city as a hard divider, because on a BOARD folding London into New
+    York deletes a job from the catalogue. A shortlist is not a board: a firm
+    that opens one programme in nine branch offices is ONE decision here, and
+    `fold_families` is the product's single answer to "same programme, another
+    city" (see `dupes.fold_families`, and `_family_key`, which the feed's own
+    "+N more locations" disclosure already groups on).
+
+    AFTER THE GATES, BEFORE THE CAP, and both halves of that are load-bearing.
+
+    Fold the candidates first and a family's survivor could be a row that
+    fails a gate while a sibling passes — a wrong-cohort copy winning the fold
+    and taking a qualifying one down with it. So the ranker runs first.
+
+    But fold after `MAX_PER_FIRM` and the count is wrong in the other
+    direction: the cap admits two of a firm's nine branch requisitions, the
+    fold sees two, and the card announces "2 cities" about a programme open in
+    nine. A fold that miscounts what it folded is the invisible filter with a
+    number painted on it. So the first call is uncapped and unlimited — every
+    row that CLEARS the gates, ranked — the fold runs over all of it, and the
+    survivors go back through `recommend()` for the cap and the limit. Two
+    calls rather than a local reimplementation of the greedy cap, because one
+    page may not hold two answers to "how many picks may one firm have" (P5),
+    and scoring is pure so the second pass reproduces the first pass's order
+    exactly.
+
+    `places_by_id` rides the same call, never a second guess at it: a card
+    that stood for nine branch offices says so, because a fold nobody can see
+    is the invisible filter this product does not ship (P4).
+
+    Every argument is optional and defaulted to the same value the feed
+    computes for itself, so a caller holding none of them (Today's ribbon)
+    gets the identical column for four extra queries rather than a second
+    definition of it.
+    """
+    from analytics.models import UserOpportunity
+
+    if open_qs is None:
+        # `select_related("firm")` IS LOAD-BEARING, not a tidy-up. Every row
+        # here is asked for an `_eligibility` verdict, whose visa branch reads
+        # `directory.sponsorship.effective_sponsorship` -> `opp.firm.sponsors`
+        # for every posting silent on sponsorship. Unjoined, that is one
+        # `SELECT ... FROM firms WHERE id = ?` per row: measured on the
+        # founder's live board (2026-09-01) 1,332 of 1,866 folded rows were
+        # silent, and Today ran 1,397 queries for one page load. With the join
+        # the same block costs 2.
+        #
+        # NOT `.defer("raw")` on top of it: `_eligibility` reads `raw.facts`
+        # for the graduation-window branch, so deferring the column trades
+        # 1,332 firm fetches for 647 deferred-field loads and measured SLOWER
+        # (531 ms against the 373 ms it was meant to fix). The row is wide on
+        # purpose here.
+        open_qs = Opportunity.objects.filter(status="open").select_related("firm")
+        # The feed drops the student's own dismissals before it ranks; a
+        # caller that did not would let a "not for me" row hold a pick slot
+        # here and nowhere else, which is exactly how two surfaces start
+        # disagreeing about one column.
+        hidden = set(
+            UserOpportunity.objects.for_user(user)
+            .filter(dismissed=True).values_list("opportunity_id", flat=True)
+        )
+        if hidden:
+            open_qs = open_qs.exclude(id__in=hidden)
+    if elig_profile is None:
+        elig_profile = _eligibility_profile(user)
+    profile = _scoring_profile(user) if rec_profile is None else rec_profile
+    if profile.is_empty:
+        return [], {}
+    candidates = [
+        Candidate.from_opportunity(o)
+        for o in fold_duplicates(
+            [
+                o for o in open_qs.filter(bucket__in=TARGET_BUCKETS)
+                # A pick is a RECOMMENDATION, held to a higher bar than a
+                # listing: a role whose own text blocks this user (wrong
+                # stated year, refuses their visa) may still be worth seeing
+                # on the board, but the product must not point at it and say
+                # "for you" — and must certainly not write it in bulk.
+                if not (lambda v: v and v["blocking"])(_eligibility(o, elig_profile))
+            ],
+            sticky_ids=sticky_ids,
+        )[0]
+    ]
+    # `max(…, 1)`, never a bare `len()`: `recommend(limit=0)` is a caller
+    # asking for nothing and correctly returns nothing, so an empty board
+    # would skip the call entirely — and the guard that pins the feed and the
+    # picks onto one clock works by watching that call happen.
+    whole = max(len(candidates), 1)
+    ranked = recommend(profile, candidates, today=today,
+                       limit=whole, max_per_firm=whole)
+    # The fold reads Opportunity rows (deadline, cohort, sponsorship,
+    # location — `_competing_claims` and `_survivor_rank` want the model, not
+    # the scoring candidate), so it runs over the postings behind the ranking.
+    # Ranked order is preserved: `fold_families` keeps input order and the
+    # survivor of a family is the copy `_survivor_rank` prefers.
+    by_id = {o.id: o for o in open_qs.filter(id__in=[r.candidate.id for r in ranked])}
+    ordered = [by_id[r.candidate.id] for r in ranked if r.candidate.id in by_id]
+
+    def _family(o):
+        # Bucket and cohort as well as the base title, the same triple
+        # `_group_city_variants` uses: an internship and a full-time role that
+        # share a name are not one job, and neither are two intakes.
+        #
+        # AND THE REGION, which the retired bulk-save offer's version did not
+        # need and this one does. That offer folded AFTER a hard region gate,
+        # so every row reaching its fold was already in a market the student
+        # had named and a family could not span two. This column has no hard
+        # region gate — `recommend()` charges a wrong market and lets a strong
+        # row survive it — so a family CAN span markets, and then
+        # `_survivor_rank` (a data-quality rule, blind to this student)
+        # decides which market survives.
+        #
+        # Measured on the founder's column 2026-09-02 without this term:
+        # Nomura runs its 2027 Global Markets programme in Hong Kong (6293)
+        # and Singapore (6292), the Singapore copy won the fold, it scores
+        # below the Hong Kong one because Singapore is a market he never
+        # named, and a Hong Kong Global Markets internship he had been shown
+        # all week fell out of the column entirely. A false fold costs a job
+        # never seen — `dupes`' own rule — and this one cost the exact job the
+        # student was there for.
+        #
+        # Keyed on the market rather than fixed by picking the best-ranked
+        # member, because the market is the unit the student actually stated.
+        # Within one market the members differ only by town, score
+        # identically, and `_survivor_rank`'s completeness rule is the right
+        # tie-break; across markets they are different decisions and the fold
+        # has no business making one for them.
+        fk = _family_key(o)
+        return None if fk is None else (o.bucket, o.cohort, o.region, fk[0])
+
+    distinct, places = fold_families(ordered, _family, sticky_ids=sticky_ids)
+    kept = {o.id for o in distinct}
+    survivors = recommend(profile, [c for c in candidates if c.id in kept],
+                          today=today)
+    return survivors, {r.candidate.id: places[r.candidate.id]
+                       for r in survivors if r.candidate.id in places}
+
+
+def pick_save_ids(user, picks, *, touched=None) -> list[int]:
+    """The ids "Save all" will write: every role in `picks` this student has
+    no relationship with yet.
+
+    `picks` is whatever the column is SHOWING — the filtered list, not the
+    ranked six — because the button sits in that column's header and a bulk
+    write must never reach a role the student cannot see from the button. The
+    column is its own peek; there is no second panel to keep in agreement
+    with it, which is the whole point of folding the old banner into it.
+
+    "Touched" is tracked OR dismissed, both. A saved role has nothing to add;
+    a dismissed one the student has already answered, and "not for me"
+    outranks "picked for you".
+
+    NO ABANDONED CHECK, and that is a property of the column rather than an
+    omission. The old banner needed one — a posting whose stated deadline
+    passed weeks ago and which the firm never took down is one the feed
+    declines to draw a Save button for, and a bulk write must not reach past
+    a card's own refusal. It cannot arise here: `recommend()` skips any
+    candidate whose deadline is already in the past, so a pick's deadline is
+    always future or absent and `_abandoned_note` is {} for every row this
+    ever sees. Re-testing it would be a second, weaker statement of a rule
+    the ranker already enforces (P5).
+    """
+    from analytics.models import UserOpportunity
+
+    if touched is None:
+        touched = set(
+            UserOpportunity.all_objects.filter(user=user)
+            .values_list("opportunity_id", flat=True)
+        )
+    ids = [p["id"] for p in picks if p["id"] not in touched]
+    # Sorted so the stashed batch is deterministic and two renders of the
+    # same board stash the same list.
+    return sorted(ids)
+
+
 def _scoring_profile(user) -> Profile:
     """The recommender's `Profile` for this student. Two queries.
 
@@ -4645,353 +4778,6 @@ def role_description(request, pk):
     })
 
 
-def _offer_fits(rec_profile, o) -> bool:
-    """Whether the recommender would rank this role for this student.
-
-    ELIGIBILITY IS NOT FIT, and the banner used to act as if it were. Its
-    only test was "the posting names your class year", which answers whether
-    the student is ALLOWED TO APPLY, and it drove a bulk SAVE, which is an
-    expression of INTENT. Measured on the founder's live board on 2026-09-02
-    (class 2029, tracks ib+st, regions hk+us), the 56 roles that offer would
-    have written in one click: 16 on one of his tracks, 22 silent on
-    function, 16 naming a function that is none of them (three Jefferies
-    Human Resources programmes, Jefferies Internal Audit and Marketing, two
-    SocGen audit/IT internships, Nomura Operations, three Optiver Shanghai
-    engineering roles) and 2 naming private capital, which he does not
-    recruit for; 14 in Hong Kong or the US against 32 in a market he never
-    named (15 EU, 10 outside the tracked six, 6 CN, 1 SG) and 10 the product
-    could not place at all. This gate removes 48 of the 56 — so the banner
-    was asking, in bulk and above the fold, for a commitment the column three
-    inches below it would not have made.
-
-    Four tests, each one the scorer's own and none of them a second
-    definition of anything (P5):
-
-    TRACK, the three cases `_track_fit` ranks with, read through
-    `role_function_cached` — the single definition of what function a title
-    names. A title that names one of the student's tracks fits; a title
-    silent on function fits, because the firm's own coverage is still there
-    to speak for it; a title that names a function outside the track
-    vocabulary ("none") does not, because the posting has stated what it is
-    and it is not this. Neither does one that names a DIFFERENT track: the
-    student said which desks they are recruiting for. A student who has
-    stated no tracks is filtered on none of this, exactly as
-    `role_matches_tracks` treats them — there is nothing to be relevant to.
-
-    REGION, `role_matches_regions`, plus "global". A stated market the
-    student never named is a stated non-fit, and a blank region fails the
-    same way it fails every other region filter on the board (that function's
-    docstring carries the argument, and diverging here would make the banner
-    the one surface where "you said Hong Kong" quietly includes rows nobody
-    can place). "global" passes because it is what the scorer does with it:
-    it is outside `_STATED_MARKETS`, so `_region_fit` scores it zero rather
-    than as a wrong place — the posting saying it has no single location is
-    not the posting naming somewhere else.
-
-    Note what this makes the offer on that one axis: STRICTER than ranking
-    alone. `recommend()` charges a wrong market `W_REGION_MISMATCH` and lets
-    a strong enough row survive it; this excludes the row outright, the way
-    every listing filter on the board already does. That is deliberate and it
-    is the axis the measurement turned on — 30 of the 48 rows this gate
-    removes are removed here. A ranked row a student scrolls past is a
-    suggestion they can ignore; a bulk save is a decision made once for all
-    of them, so the offer takes the filter's answer, not the ranker's
-    penalty.
-
-    THE BAR, `score_candidate` against `MIN_SCORE` — the same bar the ranker
-    applies before ordering anything, and the same one `_drawer_pick_why`
-    uses to decide whether there is a recommendation to justify at all. It
-    removes nothing on the founder's board today and is not expected to: a
-    row only reaches this function with a `year_ok` verdict, which means the
-    posting STATED his class, which is `W_CLASS_STATED` (30) before any other
-    axis speaks — already past `MIN_SCORE` (25). The four tests measured in
-    order on the founder's board, 2026-09-02 after the rung test landed, ran
-    72 → 41 → 11 → 9 → 9, the lowest survivor scoring 56.
-    It stays because it is the ranker's own number: while this reads it, the
-    offer cannot drift below the column it sits above, whatever the weights
-    become. `test_a_role_under_the_recommenders_bar_does_not_fit` pins it
-    here rather than through the feed, for exactly that reason.
-
-    THE RUNG, `level_mismatch` over `role_level` — the rung the posting's own
-    title names against the rung this student is on. Added 2026-09-02, and it
-    is not a fourth test invented here: it is the one `recommend()` itself
-    applies to a row whose posting has STATED the student's class, copied
-    across whole rather than re-derived (P5).
-
-    That branch is the only one of `recommend()`'s level exclusions that can
-    ever fire on this path, which is why it is the only one here. `recommend`
-    reads the softer, INFERRED signals — the programme bucket against the
-    student's stated cycles, and the derived intake year — ONLY when
-    `_stated_grad_window` is None, and every row that reaches this function
-    carries a `year_ok` verdict, which is `_eligibility` reading the posting's
-    own stated class or its extracted graduation window. Measured on the
-    founder's board 2026-09-02: 78 of his folded campus rows verdict
-    `year_ok`, and `_stated_grad_window` is non-None on 78 of 78. So writing
-    the bucket and derived-year checks in here would be writing two tests
-    that can never run, which is worse than leaving them out and saying so.
-
-    The measurement that forced it. This gate used to hand a class-2029
-    undergraduate two Wells Fargo PhD internships — "2027 Quantitative
-    Analytics Summer Internship Applied Computational Intelligence (ACI PhD)"
-    and its Capital Markets sibling — in a fourteen-role bulk save. Both
-    state his graduation window, both sit in a market he named, both score
-    72 and 78, and neither is a job he can take: the title says PhD and he is
-    a sophomore. The old note here called that a boundary and left it for the
-    next measurement; this is that measurement. Board-wide it removes three
-    rows of the 78 (the third, an Optiver Shanghai PhD engineering
-    internship, the region test already had), and it can only ever remove a
-    row whose own title names a rung — `level_mismatch` is False the moment
-    either side is silent, so a student who has stated no level and a title
-    that names none are both filtered on nothing, exactly as before.
-
-    What this still does NOT do is re-run `recommend()`. Ranking the whole
-    board to answer a question about one row is the wrong shape (see
-    `_drawer_pick_why`, which declines it for the same reason), and the one
-    exclusion left in that function — a deadline already passed — is not part
-    of the decision recorded here. It is deliberately left: a listing the
-    firm still publishes is a listing a student may still want tracked, and
-    on the founder's board 2026-09-02 no offered row had a passed deadline,
-    so adding the test would be adding an unmeasured gate to a surface whose
-    whole complaint was gates nobody had measured.
-    """
-    fn = role_function_cached(o.title)
-    if rec_profile.tracks and (fn == "none" or (fn and fn not in rec_profile.tracks)):
-        return False
-    region = o.region or ""
-    if region != "global" and not role_matches_regions(region, rec_profile.regions):
-        return False
-    if level_mismatch(rec_profile.level, role_level(o.title)):
-        return False
-    return score_candidate(rec_profile, Candidate.from_opportunity(o))[0] >= MIN_SCORE
-
-
-def _bulk_save_offer(user, rows, profile, *, rec_profile=None):
-    """`(ids, places_by_id)` — the exact roles the "Save them all" banner is
-    offering, and for each one that stands for several branch offices, how
-    many places it covers.
-
-    THE ONE DERIVATION. The banner's number, the peek panel and the ids
-    `track_eligible` writes all come from this call and nowhere else, which is
-    the property the 206/209/208 incident bought (see below). `places_by_id`
-    rides along rather than being recomputed by the peek for the same reason:
-    a panel that said "9 cities" about a fold the save did not make would be
-    the same defect wearing different clothes.
-
-    THE INTERSECTION OF ELIGIBILITY AND FIT. The posting has to name the
-    student's class year (`year_ok`, the verdict contract's own positive
-    case) AND the recommender has to be willing to rank it (`_offer_fits`,
-    which reads the scorer's track, region and score-floor rules). Either
-    half alone is the wrong question: the first is what the student is
-    allowed to apply for, the second is what the product would point at, and
-    a one-click bulk save is a claim of the second kind.
-
-    `rec_profile` is the scorer's `Profile`, passed in by the feed (which
-    already built one for its Picked column) and built here for callers that
-    have not (`crm.today`'s ribbon chip — two queries, once, not per row).
-
-    Returns the LIST, not a count, and the caller stashes it in the session
-    (`BULK_SAVE_OFFER_SESSION_KEY`) so the confirm writes precisely what the
-    banner named. `track_eligible` used to re-derive its own set from
-    `Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)` —
-    the whole table — while this counted `rows`, which is the FEED's
-    materialised list AFTER `fold_duplicates` and the user's hidden-row
-    exclusions. Two different questions, so two different answers on one page
-    load: measured live on the dev board, the banner said 206 and the save
-    wrote 209, the three extras being repeat listings the feed had folded
-    and the save had not. My Applications then folded them again and its tile
-    read 208 — three numbers for one action, in a confirm dialog, which is
-    the one place a number has to be exact.
-
-    ONE ROW PER DISTINCT JOB, LAST. `fold_duplicates` has already run over
-    `rows` upstream and it cannot reach this shape: a firm that opens one
-    programme in nine branch offices titles each requisition with its own
-    city, so nine titles hash nine ways and never meet — and even if they did,
-    that function splits on the stated city on purpose, because on a BOARD
-    folding London into New York deletes a job from the catalogue.
-
-    A bulk-save offer is not a catalogue. It is a shortlist of DECISIONS the
-    product asks a student to commit to in one click, and nine branches of one
-    programme is one decision whose city sub-choice gets made on the firm's own
-    board. Measured on the founder's live offer 2026-09-02 (user 6, class 2029,
-    tracks ib+st, regions hk+us): 9 of the 20 offered roles were a single
-    KeyBank programme, filling five of the peek's eight visible slots.
-
-    THE FAMILY RULE IS `_family_key`, THE ONE THE FEED ALREADY USES (P5). It
-    is the product's single answer to "is this the same programme in another
-    city?" — a trailing title segment every 4+ character word of which appears
-    in the row's own location — and the feed's firm columns already group on
-    it to draw their "+N more locations" disclosure. Writing a second
-    normalizer here would have given one page two answers to one question,
-    which is the defect this docstring is otherwise about.
-
-    It is a conservative rule and that is the right direction of error. It
-    folded 7 of the founder's 9 KeyBank rows and left two standing, because
-    their titles name the metro while their `location` names the suburb
-    ("- Cleveland, OH" at Chagrin Falls, "- Dayton, OH" at Vandalia) and
-    nothing in the row corroborates that those are the same place. A false
-    SPLIT costs a scroll; a false FOLD costs a job never seen (`dupes`' own
-    rule). Widening the family rule means changing the feed's grouping too,
-    with its own measurement, and is deliberately not done inside a bulk-save
-    fix.
-
-    Later the same night those KeyBank rows left the offer entirely, by the
-    front door rather than this one: "Certified Financial Planner Track" is
-    retail financial planning, `recommend._NON_TRACK_FUNCTION` had a hole
-    where the word "planner" should have been, and the track test now
-    declines all ten. So the fold currently removes nothing from the
-    founder's offer — `places` is `{}` on his board. The rule stays measured
-    on the evidence above and stays in the path: the next firm to file one
-    programme under nine city-suffixed requisitions will be a firm he is
-    actually recruiting for.
-
-    AFTER THE GATES, NOT BEFORE, and the order is load-bearing. Fold first and
-    a family's survivor could be a row that fails the region or track test
-    while a sibling passes — a London copy winning the fold and taking a New
-    York role the student would have wanted down with it. Filtering first
-    means every row reaching the fold has already qualified on its own, so the
-    survivor is always a role this student could have been offered anyway and
-    the fold can only ever remove a repeat of it.
-
-    WHAT IS SAVED IS THE SURVIVOR, NOT THE FAMILY. Saving all nine because the
-    banner counted one would be the 206/209/208 defect rebuilt from the other
-    end. The rows it folds away are not lost: they are still on the board,
-    still in the firm's column behind its "+N more locations" disclosure,
-    still savable one at a time. What the offer declines to do is commit a
-    student, in one click, to eight addresses of a job they picked once.
-
-    Sorted so the stashed batch is deterministic and two renders of the same
-    board produce the same offer.
-    """
-    from analytics.models import UserOpportunity
-
-    rec = _scoring_profile(user) if rec_profile is None else rec_profile
-    touched = set(
-        UserOpportunity.all_objects.filter(user=user)
-        .values_list("opportunity_id", flat=True)
-    )
-    qualified = [
-        o for o in rows
-        if o.id not in touched
-        # A posting the feed has just declined to offer a Save button for
-        # cannot be in the offer a "Save them all" button honours. The card
-        # and the banner are two renderings of one decision (see
-        # `_abandoned_note`), and the banner is the one that acts in bulk —
-        # letting it write what the card withheld would be the product
-        # contradicting itself in the direction that costs the student the
-        # most. Measured 2026-09-02: 1 open campus row board-wide.
-        and not _abandoned_note(o)
-        and (lambda v: v and v["kind"] == "year_ok")(_eligibility(o, profile))
-        # Last, and only over what the year test already kept: this is the
-        # one line here that scores, and on the founder's board that is 56
-        # rows out of 2,857 rather than the whole feed.
-        and _offer_fits(rec, o)
-    ]
-    # The family is keyed on bucket and cohort as well as the base title, the
-    # same triple `_group_city_variants` uses — an internship and a full-time
-    # role that share a name are not one job, and neither are two intakes.
-    #
-    # `sticky_ids` is not passed: `touched` above has already removed every row
-    # this student has any relationship with, so no family reaching the fold
-    # holds one and `_survivor_rank`'s first tier can never fire.
-    def _family(o):
-        fk = _family_key(o)
-        return None if fk is None else (o.bucket, o.cohort, fk[0])
-
-    distinct, places = fold_families(qualified, _family)
-    return sorted(o.id for o in distinct), places
-
-
-def _eligible_unsaved_ids(user, rows, profile, *, rec_profile=None) -> list[int]:
-    """The offer's ids alone, for callers with no peek to render.
-
-    A thin read of `_bulk_save_offer` rather than a second derivation of the
-    same set — that is the whole lesson of the 206/209/208 incident recorded
-    there, and it applies to a convenience wrapper as much as to a view.
-    """
-    return _bulk_save_offer(user, rows, profile, rec_profile=rec_profile)[0]
-
-
-#: How many of the offered roles the peek panel prints before it stops naming
-#: them and starts counting them. The offer runs to 223 roles on the live dev
-#: board; a panel that rendered all of them would be a page, not a peek, and
-#: would scroll past the button it is meant to explain. Eight is what fits
-#: above the fold at 375px without the panel needing its own scrollbar, and
-#: it is enough rows to see WHAT KIND of roles the offer is made of — which
-#: is the question a student actually has before clicking "Save them all".
-#: The remainder is never silently dropped: the panel says how many it did
-#: not print.
-BULK_SAVE_PEEK_MAX = 8
-
-
-def _bulk_save_peek(offer_ids, item_by_id, places=None, *, cap=BULK_SAVE_PEEK_MAX):
-    """The first few roles behind the "Save them all" banner, for its peek.
-
-    THE SET IS THE OFFER'S. `offer_ids` is the very list `_bulk_save_offer`
-    produced and `opportunities` stashes under `BULK_SAVE_OFFER_SESSION_KEY`
-    for `track_eligible` to write — so what the panel names, what the confirm
-    counts and what the click saves are one fact resolved once. Re-deriving
-    the rows from a second query is precisely the mistake that put 206, 209
-    and 208 on one page load (see `_bulk_save_offer`), and it would be a
-    worse mistake here: a count that disagrees is an error, but a NAMED role
-    that never gets saved is a promise broken by name.
-
-    It costs no query either. `item_by_id` holds the feed items the firm
-    columns already built for these same rows, so the panel reads what is on
-    the page rather than asking the database a fourth question about it.
-
-    `places` comes from the SAME call, and is the fold speaking rather than
-    the panel guessing (P4). A row standing for nine branch offices says so,
-    because the offer quietly dropping eight addresses of one job and the
-    panel presenting the survivor as an ordinary single posting would be the
-    invisible filter this product does not ship. Rendered on a COPY of the
-    shared item dict: `item_by_id` is the same object the firm columns hold by
-    reference, and a "9 cities" note belongs to the peek's reading of the row,
-    not to every card on the page.
-
-    Sorted by what a student is deciding on: dated roles soonest-first, then
-    passed deadlines and undated ones, then alphabetically. That order is what
-    makes the cap honest — the roles the cap hides are the ones with the least
-    to say about acting today.
-    """
-    places = places or {}
-
-    def _key(r):
-        dated = r["dated"] and r["level"] != "passed"
-        return (
-            0 if dated else 1,
-            r["days_left"] if dated else 0,
-            (r["firm_name"] or "").lower(),
-            (r["title"] or "").lower(),
-        )
-
-    # `if i in item_by_id` is belt-and-braces, not a filter: every offered id
-    # came out of the same `rows` these items were built from. It is here so a
-    # future caller passing a narrower item map degrades to a shorter list
-    # rather than a 500.
-    rows = sorted((item_by_id[i] for i in offer_ids if i in item_by_id), key=_key)
-    shown = [dict(r, places=places.get(r["id"])) for r in rows[:cap]]
-    return {
-        "rows": shown,
-        # Stated, never implied. A panel that just stopped at eight would be
-        # telling a student the offer is eight roles.
-        "more": max(0, len(rows) - cap),
-        "total": len(rows),
-    }
-
-
-def _eligible_unsaved_count(user, rows, profile, *, rec_profile=None) -> int:
-    """How many roles the "Save them all" offer covers, for surfaces that
-    only print the number (Today's chip — `crm.today._cockpit_context`).
-
-    Deliberately `len()` of the id list rather than its own count: this and
-    the banner disagreeing is the same defect one level up, and the Today
-    chip really did read 209 against the feed banner's 206 on the same board.
-    Callers must pass a row list that has already been through
-    `directory.dupes.fold_duplicates`, for the same reason — a repeat listing
-    is one role, and counting it twice here is what made the third number."""
-    return len(_eligible_unsaved_ids(user, rows, profile, rec_profile=rec_profile))
-
-
 # The session key `track_eligible` stashes its batch under, so a redirect to
 # My Applications can offer an "Undo" that removes exactly the rows THIS
 # bulk save created — never a hand-saved row, and never an earlier batch's
@@ -5002,51 +4788,79 @@ def _eligible_unsaved_count(user, rows, profile, *, rec_profile=None) -> int:
 # `record_event` below) already carries the durable count for that.
 BULK_SAVE_SESSION_KEY = "bulk_save_batch"
 
-#: The ids the "Save them all" banner is currently OFFERING — written by
+#: The ids the Picked column's "Save all" is currently OFFERING — written by
 #: `opportunities` on every render, read by `track_eligible` as the exact set
-#: to write. The point of the stash is that the number in the confirm sentence
-#: and the rows the confirm creates are one fact, resolved once, rather than
-#: two queries that answered slightly different questions (they did: see
-#: `_bulk_save_offer`). Session-backed for the same reason the undo batch
-#: above is — it is meaningful only between the render and the click that
-#: follows it, and nothing later ever needs to query it.
-BULK_SAVE_OFFER_SESSION_KEY = "bulk_save_offer"
+#: to write. The point of the stash is that the number in the header, the
+#: number in the confirm sentence and the rows the confirm creates are one
+#: fact, resolved once, rather than two queries that answered slightly
+#: different questions (they did: see `track_eligible`). Session-backed for
+#: the same reason the undo batch above is — it is meaningful only between the
+#: render and the click that follows it, and nothing later ever needs to query
+#: it.
+PICK_SAVE_OFFER_SESSION_KEY = "pick_save_offer"
 
 
 @login_required
 @require_POST
 def track_eligible(request):
-    """Save every open role whose own text names the user's class year.
+    """Save every role in the Picked for you column that isn't saved yet.
 
-    The lens→pipeline bridge: the eligibility work produced "Your year"
-    verdicts, and then left the user to find and star those roles one by
-    one. This saves them in a click — and ONLY them: year_ok verdicts,
-    which by the verdict contract exist only where the posting stated its
-    window AND Settings stated a class year. A role already tracked keeps
-    its stage untouched, and a dismissed role stays dismissed — "not for
-    me" outranks "your year", because the user said so.
+    WHAT "ALL" MEANS, and the measurement that decided it. Until 2026-09-02
+    this wrote a different list from a different question: every open role
+    whose own text NAMED the student's class year, unranked, uncapped, offered
+    in a blue banner above the board. That list and the Picked column were
+    genuinely different — measured on the founder's board that morning, 2 of
+    the 9 offered roles were among his 6 picks — and the founder's call was to
+    keep one surface: "merge the two into the pick for you widget".
 
-    Two guards this used not to have, added after a customer-perspective
-    walk found one click dumping 207 roles into a 1-role pipeline with no
-    way back:
+    The column won, and the year gate went with the banner, because in the
+    column that gate is not doing the work it was written for. A pick can only
+    ever be year_ok or year-SILENT: a stated wrong year is `blocking` (see
+    `_eligibility`), and `recommend()` refuses blocked candidates outright, so
+    a posting that named a cohort this student is not in cannot be in the
+    column to be saved. All the gate could still decide is whether SILENCE
+    disqualifies — and this product's rule, stated in `_eligibility`'s own
+    contract, is that a posting that does not state its window gets no verdict
+    in either direction.
 
-    CONFIRM. The banner's own `<details>` discloses "Save N roles to My
-    Applications?" before the real submit button ever renders (see
-    `directory/_results.html`), so a plain click never writes. But that is
-    a template affordance, not a guarantee — anyone can POST this endpoint
+    Measured on the founder's column the same day (user 6, class 2029, tracks
+    ib+st, regions hk+us): 6 picks, all unsaved, 2 stating a year (Jefferies'
+    2027 Treasury Summer Analyst, Houlihan Lokey's Summer 2027 Research
+    Intern) and 4 silent on it — Nomura Global Markets Hong Kong, Nomura
+    Investment Banking Hong Kong, HSBC Investment Banking Hong Kong, HSBC
+    Markets Sales and Trading Hong Kong. Those four are the dead centre of
+    what he recruits for. Keeping the gate would have put a "Save all" under a
+    heading of six roles and written two of them.
+
+    The gate was earning its place on the BANNER because the banner had no fit
+    test at all: 56 roles, of which 48 named a function he does not recruit
+    for or sat in a market he never named. The column has the fit — see
+    `picked_roles` for the six exclusions every pick has already survived,
+    including the study-level rung filter applied harder than the banner's
+    ever was — so the year test is no longer the only thing standing between a
+    student and 56 rows of junk. And every card in the column already draws
+    its own Save button: a "Save all" that skipped four of the six cards
+    beneath it would be the button contradicting the column it sits in.
+
+    Two guards, both from the customer-perspective walk that found one click
+    dumping 207 roles into a 1-role pipeline with no way back:
+
+    CONFIRM. The column header's button carries `hx-confirm`, so the styled
+    dialog states the exact count before anything is issued. But that is a
+    template affordance, not a guarantee — anyone can POST this endpoint
     directly. `confirmed=1` is the actual gate: without it, nothing is
     written, full stop, no matter what the client claims the count was.
 
     UNDO. Every id this call creates is stashed in the session (see
     `BULK_SAVE_SESSION_KEY` above) for `track_eligible_undo` to reverse.
 
-    THE SET IS THE BANNER'S, NOT THIS VIEW'S. It used to re-derive its own
+    THE SET IS THE COLUMN'S, NOT THIS VIEW'S. It used to re-derive its own
     from `Opportunity.objects.filter(status="open", bucket__in=TARGET_BUCKETS)`
     — the whole table — while the banner counted the FEED's materialised rows,
     which are folded for duplicates and stripped of the user's hidden rows.
     One page load therefore produced three numbers for one action: the confirm
     said 206, the write made 209, and My Applications' tile then read 208. So
-    this reads `BULK_SAVE_OFFER_SESSION_KEY`, the exact ids the banner named
+    this reads `PICK_SAVE_OFFER_SESSION_KEY`, the exact ids the column counted
     when it rendered.
 
     The per-row checks below still run over that set, and can only ever REMOVE
@@ -5058,21 +4872,18 @@ def track_eligible(request):
     """
     from analytics.models import UserOpportunity
 
-    profile = _eligibility_profile(request.user)
-    if not profile or not profile.get("class_year"):
-        return HttpResponseBadRequest("no class year in Settings")
-
     if request.POST.get("confirmed") != "1":
         return HttpResponseBadRequest("confirmation required")
 
-    offered = request.session.get(BULK_SAVE_OFFER_SESSION_KEY) or []
+    offered = request.session.get(PICK_SAVE_OFFER_SESSION_KEY) or []
     if not offered:
         # Nothing was offered on this session's last look at the feed, so
         # there is no number this call could honour. Same posture as the
         # confirm gate above: refuse rather than fall back to a set the
         # student was never shown.
-        return HttpResponseBadRequest("no bulk-save offer to confirm")
+        return HttpResponseBadRequest("no save-all offer to confirm")
 
+    profile = _eligibility_profile(request.user)
     touched = dict(
         UserOpportunity.all_objects.filter(user=request.user)
         .values_list("opportunity_id", "dismissed")
@@ -5080,8 +4891,13 @@ def track_eligible(request):
     saved_ids: list[int] = []
     for o in Opportunity.objects.filter(
             id__in=offered, status="open", bucket__in=TARGET_BUCKETS):
+        # The COLUMN's own gate, re-applied — not the retired year test. A
+        # posting that started blocking this student between the render and
+        # the click (a scrape that filled in its graduation window, a
+        # sponsorship answer changed in Settings) is one `recommend()` would
+        # no longer rank, so it is one this must no longer write.
         v = _eligibility(o, profile)
-        if not (v and v["kind"] == "year_ok"):
+        if v and v["blocking"]:
             continue
         if o.id in touched:
             continue
@@ -5099,22 +4915,31 @@ def track_eligible(request):
     # The offer is consumed either way: a second POST of the same confirm
     # (a double-click, a back-then-resubmit) must not re-run against a batch
     # the student has already acted on.
-    request.session.pop(BULK_SAVE_OFFER_SESSION_KEY, None)
+    request.session.pop(PICK_SAVE_OFFER_SESSION_KEY, None)
     if saved:
         record_event("eligible_bulk_saved", user=request.user, count=saved)
         # Overwrites any earlier, presumably-already-seen batch — only the
         # most recent bulk save is ever offered an undo.
         request.session[BULK_SAVE_SESSION_KEY] = {"ids": saved_ids, "count": saved}
     from django.contrib import messages
+    from django.shortcuts import resolve_url
 
     messages.success(
         request,
-        (f"Saved {saved} role that names your year." if saved == 1
-         else f"Saved {saved} roles that name your year.")
-        if saved else "Nothing new to save: every role naming your year is already tracked.")
+        (f"Saved {saved} picked role." if saved == 1
+         else f"Saved {saved} picked roles.")
+        if saved else "Nothing new to save: every role picked for you is already tracked.")
     from django.shortcuts import redirect
 
-    return redirect("my_applications" if saved else "opportunities")
+    dest = resolve_url("my_applications" if saved else "opportunities")
+    # htmx's own redirect header, because the button is an `hx-post` (that is
+    # what makes `hx-confirm` fire the site's styled dialog). A 302 body would
+    # be followed by the XHR and swapped into the page; `HX-Redirect` makes
+    # the browser navigate, so the student lands on My Applications with the
+    # flash message and the Undo strip, exactly as a form submit did.
+    if request.headers.get("HX-Request"):
+        return HttpResponse(status=204, headers={"HX-Redirect": dest})
+    return redirect(dest)
 
 
 @login_required
@@ -5205,18 +5030,18 @@ def clear_saved(request):
 _ACTION_FIELDS = ("csrfmiddlewaretoken", "status", "from", "next", "show_firm")
 
 
-def _refresh_feed(request, *, scope_only=False, dismiss_undo=None):
-    """Re-render the Opportunities feed (or just its scope block) after a
+def _refresh_feed(request, *, pick_only=False):
+    """Re-render the Opportunities feed (or just its Picked column) after a
     write that changed what the board is allowed to offer.
 
-    WHY RE-RENDER RATHER THAN PATCH THE NUMBER. Dismissing a role changes four
-    things at once: the hidden count, the "Save them all" sentence, the peek
-    behind it, and the id list stashed in the session for `track_eligible` to
-    write. Decrementing the visible number and leaving the stash alone is the
-    206/209/208 bug (see `_bulk_save_offer`) reintroduced from the other
-    end — the screen and the write disagreeing, only now the screen is the one
-    that is wrong. Running the real view is what keeps all four one fact,
-    because the real view is where that fact is computed.
+    WHY RE-RENDER RATHER THAN PATCH THE NUMBER. Dismissing a role changes
+    three things at once: which roles the Picked column holds, the "Save all"
+    count in its header, and the id list stashed in the session for
+    `track_eligible` to write. Decrementing the visible number and leaving the
+    stash alone is the 206/209/208 bug (see `track_eligible`) reintroduced
+    from the other end — the screen and the write disagreeing, only now the
+    screen is the one that is wrong. Running the real view is what keeps all
+    three one fact, because the real view is where that fact is computed.
 
     THE FILTERS RIDE IN THE POST. The dismiss controls carry
     `hx-include=".filters"`, so the live filter bar is in `request.POST` and
@@ -5231,25 +5056,25 @@ def _refresh_feed(request, *, scope_only=False, dismiss_undo=None):
     for field in _ACTION_FIELDS:
         filters.pop(field, None)
     request.GET = filters
-    return opportunities(request, dismiss_undo=dismiss_undo, scope_only=scope_only)
+    return opportunities(request, pick_only=pick_only)
 
 
-def _dismiss_undo_offer(opp, *, source):
-    """The one-shot "Not for me / Undo" strip a dismissal comes back with.
+def _dismiss_undo_offer(opp):
+    """The one-shot "Not for me / Undo" stub a dismissal comes back with.
 
     IN THE RESPONSE, NOT IN THE SESSION, for the same reason
     `crm.views._dismiss_undo_offer` chose that: the offer is handed back in
     the very swap that removed the role, so it can ride in the markup and get
     the right lifetime for free. Any later render of this page — a filter
-    keystroke, a reload — draws no strip. Nothing is stored, so nothing goes
+    keystroke, a reload — draws no stub. Nothing is stored, so nothing goes
     stale.
 
-    `source` is where the click happened, and the peek reads it to stay open
-    across the swap: a student pruning a list of eight roles should not have
-    to reopen the panel between each one.
+    It carried a `source` until 2026-09-02, read by the bulk-save banner's
+    peek panel to stay open across the swap. That panel is gone — the Picked
+    column is the list a bulk save reads from now, and it has no open/shut
+    state to preserve — so there is one caller and one shape.
     """
-    return {"id": opp.id, "firm_name": opp.firm.name, "title": opp.title,
-            "source": source}
+    return {"id": opp.id, "firm_name": opp.firm.name, "title": opp.title}
 
 
 def _one_rolecard(request, opp, *, show_firm=False):
@@ -5351,40 +5176,37 @@ def track_opportunity(request, pk):
     if request.headers.get("HX-Request"):
         if is_my_applications:
             return render(request, "directory/_apps_body.html", _my_applications_context(request))
-        if origin == "peek" and undone:
-            return _refresh_feed(
-                request,
-                dismiss_undo=(_dismiss_undo_offer(opp, source="peek")
-                              if status == "dismiss" else None),
-            )
+        # `from=peek` is gone with the bulk-save banner's peek panel: the
+        # Picked column is now the only list a bulk save reads from, and a
+        # "Not for me" inside it is an ordinary card dismissal, handled below.
         if origin == "card" and undone:
             # TWO fragments in one response. The card's own target is
             # `closest .rolecard`, so the first replaces the card in place —
             # with the Undo stub on a dismissal, with the real card again on
-            # an undo. The second is an out-of-band swap of the scope block,
-            # which is at the top of the page and states two things this
-            # click just changed: how many roles are hidden, and how many the
-            # "Save them all" offer now covers. Patching only the card would
-            # leave the banner promising a number the confirm can no longer
-            # honour.
+            # an undo. The second is an out-of-band swap of the PICKED COLUMN,
+            # which sits at the head of the grid and holds the one thing this
+            # click may have changed and cannot see: whether the role was a
+            # pick, and what "Save all" would now write. Patching only the
+            # card would leave that header promising a number the confirm can
+            # no longer honour, and would leave a dismissed role sitting in a
+            # column headed "Picked for you".
             #
-            # The undo lives ON the stub rather than in that scope block on
-            # purpose: a strip at the top of the page is invisible to someone
-            # who just clicked a card 600 rows down, and an undo you cannot
-            # see is not an undo.
+            # The undo lives ON the stub rather than in that column on
+            # purpose: a control at the top of the page is invisible to
+            # someone who just clicked a card 600 rows down, and an undo you
+            # cannot see is not an undo.
             show_firm = request.POST.get("show_firm") == "1"
             card = (
                 render_to_string(
                     "directory/_rolecard_dismissed.html",
-                    {"r": _dismiss_undo_offer(opp, source="card"),
-                     "show_firm": show_firm},
+                    {"r": _dismiss_undo_offer(opp), "show_firm": show_firm},
                     request=request,
                 )
                 if status == "dismiss"
                 else _one_rolecard(request, opp, show_firm=show_firm)
             )
-            scope = _refresh_feed(request, scope_only=True)
-            return HttpResponse(card + scope.content.decode(scope.charset))
+            col = _refresh_feed(request, pick_only=True)
+            return HttpResponse(card + col.content.decode(col.charset))
         if status == "dismiss":
             # No `from` — an older card, or any other caller. The card's own
             # target is `closest .rolecard`, so an empty body removes the row.

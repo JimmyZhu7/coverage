@@ -824,18 +824,25 @@ def test_the_footnote_states_its_own_gap_instead_of_cancelling_someone_elses():
     assert "margin-bottom: var(--s2)" in strip, strip
 
 
-def test_the_save_banner_owns_its_own_bottom_margin():
-    """`.scope-line--act` was ONE class, and `.scope-line` further down the
-    same file is also one class, so source order handed the generic rule the
-    win and this element's margin was silently whatever `.scope-line` said.
-    The values agreed, so nothing showed until one of them had to change.
-    Pinned by specificity, the same fix `.firmcol-logo.firmcol-logo--picked`
-    carries a few hundred lines up."""
+def test_no_scope_line_modifier_is_left_to_lose_to_the_generic_rule():
+    """REWRITTEN 2026-09-02. Its premise was the blue "Save them all" banner,
+    which is gone: the save is the Picked column's own header button now (see
+    `_pickcol.html`), and the rule this pinned went with the markup.
+
+    What the test was actually about outlives it. `.scope-line--act` was ONE
+    class and `.scope-line` further down the same file is also one class, so
+    source order handed the generic rule the win and the modifier's margin was
+    silently whatever the generic one said. The values agreed, so nothing
+    showed until one of them had to change. So this now guards the shape of
+    the mistake rather than the one element that made it: any future
+    `.scope-line--*` modifier has to be written at higher specificity, the
+    same way `.firmcol-logo.firmcol-logo--picked` is (pinned in
+    test_firmcol_head.py).
+    """
     css = _feed_css()
-    rule = _rule(css, ".scope-line.scope-line--act")
-    assert "margin: 0 0 var(--s4)" in rule, (
-        "a bordered box needs more air under it than a line of text does")
-    bare = [b for sel, b in _rules(css) if sel == ".scope-line--act"]
+    bare = [sel for sel, _ in _rules(css)
+            if sel.startswith(".scope-line--")]
     assert not bare, (
-        "the single-class form is back; `.scope-line` will out-order it and "
-        "this rule's margin will go quiet again")
+        f"{bare}: a single-class modifier of `.scope-line`; the generic rule "
+        "is later in the file and will out-order it, silently. Write it as "
+        "`.scope-line.scope-line--x`.")

@@ -302,230 +302,6 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .filters .fit-toggle:focus-within { outline: 2px solid var(--accent);
     outline-offset: 2px; }
 
-  /* The save-your-year line. It used to be plain scope-line text wedged
-     between two disclosures, and the stack read as one block of fine print —
-     the only control in the group got skipped with the paragraphs around it.
-     Its own tinted band now: still quiet (an offer, not a nag), but visibly
-     a different KIND of line from the ones reporting what is hidden. */
-  /* `--s4` under it, not `--s3`. This is a BORDERED box and the stat strip
-     under it is bare text: 12px between a boxed edge and a line of numbers
-     reads tighter than 12px between two lines of text, so the two bands were
-     touching by eye even before the footnote's negative margin (see
-     `.scope-foot`) put them on top of each other for real. The block now
-     goes 16 / 8 / 16 down the page: out of the banner, into the footnote,
-     out into the columns.
-
-     PINNED BY SPECIFICITY, not by source order. This rule was
-     `.scope-line--act` — one class — and `.scope-line` further down this file
-     is also one class, so the generic rule won and this element's margin was
-     whatever `.scope-line` said, silently. The values happened to agree, so
-     nothing showed until the moment one of them needed to change. Same trap
-     and same fix as `.firmcol-logo.firmcol-logo--picked` above. */
-  .scope-line.scope-line--act { display: flex; align-items: center; gap: var(--s3);
-    flex-wrap: wrap; margin: 0 0 var(--s4);
-    padding: var(--s2) var(--s4) var(--s2) var(--s3);
-    background: var(--accent-soft); border: 1px solid var(--accent-line);
-    border-left: 3px solid var(--accent); border-radius: 10px;
-    color: var(--ink-2); }
-  /* `--r-ctl`, not the 999px this carried. coverage.css's `.btn` states the
-     rule this board was the last page ignoring (L1089-1093): a thing you
-     PRESS is 10px, a thing that merely REPORTS state keeps the pill. "Save
-     them all" is a write, and it sat under a filter bar squared for exactly
-     this reason. Same edit on `.track-btn`, `.rcd-undo` and `.meta-read`
-     (the last one in `_drawer.html`, beside its own component). */
-  .scope-act { border: 1px solid var(--accent-line); background: var(--accent-soft);
-    color: var(--accent-ink); border-radius: var(--r-ctl); padding: var(--s1) 14px;
-    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
-    transition: background var(--t-fast), border-color var(--t-fast); }
-  .scope-act:hover { border-color: var(--accent); }
-
-  /* The bulk-save confirm, disclosed rather than modal — same mechanism as
-     `.variant-fold` elsewhere on this page. `<summary>` wears `.scope-act`'s
-     own look so opening it reads as the same button; the swap to a stated
-     question plus a second, explicit "Yes" button is the whole point: a
-     click can no longer silently become a write. */
-  .scope-confirm { display: inline-flex; }
-  .scope-confirm > summary { list-style: none; }
-  .scope-confirm > summary::-webkit-details-marker { display: none; }
-  .scope-confirm[open] > summary { border-color: var(--accent); }
-  .scope-confirm-form { display: flex; align-items: center; gap: var(--s2);
-    flex-wrap: wrap; margin-top: var(--s2); }
-  .scope-confirm-q { font-size: var(--fs-xs); color: var(--ink-2); }
-  .scope-act--confirm { background: var(--accent); color: var(--paper);
-    border-color: var(--accent); }
-  .scope-act--confirm:hover { background: var(--accent-ink); border-color: var(--accent-ink); }
-
-  /* THE PEEK — which roles the offer covers, before you agree to it.
-
-     Opens three ways because three kinds of visitor exist: hover (mouse),
-     focus-within (keyboard), and a latched click (touch, where hover is not
-     a thing). The first two are pure CSS so the panel works with the script
-     broken; the third and Escape are the script's whole job.
-
-     `visibility`, not `display`: it keeps the closed panel out of the
-     accessibility tree and out of the tab order the same way `display: none`
-     would, while still being a property a transition can animate. */
-  .peek { position: relative; display: inline-flex; }
-  /* A control, so `--r-ctl` — the pill is `--r-badge`'s and reserved for
-     state. The dotted underline is not decoration either: `.scope-hidden a`
-     already spends it on the links that reveal rows in place rather than
-     navigate, and this reveals rows in place. Between the two marks it reads
-     as a different KIND of thing from the filled pill beside it, which is
-     the honest distinction — one shows you the offer, the other writes it. */
-  .peek-toggle { border: 1px solid transparent; background: none;
-    color: var(--accent-ink); border-radius: var(--r-ctl); padding: var(--s1) var(--s2);
-    font: inherit; font-size: var(--fs-xs); font-weight: var(--w-med);
-    cursor: pointer; text-decoration: underline dotted currentColor;
-    text-underline-offset: 3px;
-    transition: background var(--t-fast), border-color var(--t-fast); }
-  .peek-toggle:hover { background: var(--surface); border-color: var(--accent-line); }
-  .peek-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-  /* `panel panel--raised panel--inset`, with the stronger hairline a
-     floating panel needs to read against what it covers. */
-  .peek-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
-    width: min(36rem, calc(100vw - 2 * var(--s4)));
-    padding: var(--s3); border-color: var(--line-strong);
-    opacity: 0; visibility: hidden; transform: translateY(-2px);
-    transition: opacity var(--t-fast), transform var(--t-fast),
-      visibility var(--t-fast); }
-  @media (hover: hover) and (pointer: fine) {
-    .peek:hover > .peek-panel { opacity: 1; visibility: visible; transform: none; }
-  }
-  .peek:focus-within > .peek-panel,
-  .peek[data-peek-state="open"] > .peek-panel { opacity: 1; visibility: visible;
-    transform: none; }
-  /* Escape's state, and it has to outrank both rules above: a keyboard user
-     who dismissed the panel still has it focused, and a mouse user who
-     dismissed it may not have moved the pointer off yet. Cleared as soon as
-     focus or the pointer leaves, so the next hover behaves normally. */
-  .peek[data-peek-state="shut"] > .peek-panel { opacity: 0; visibility: hidden;
-    transform: translateY(-2px); }
-  @media (prefers-reduced-motion: reduce) {
-    .peek-panel { transition: none; transform: none; }
-    .peek[data-peek-state="shut"] > .peek-panel { transform: none; }
-  }
-
-  .peek-head { margin: 0 0 var(--s2); font-family: var(--font-mono);
-    font-size: var(--fs-nano); letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--ink-3); }
-  .peek-list { margin: 0; padding: 0; list-style: none; }
-  /* One line per role: firm, title, when. The title is the elastic column and
-     the only one allowed to clip — the firm is how you scan the list and the
-     date is why you would act on it, so neither may lose characters. */
-  /* Five columns now: firm, title, the branch-count chip, the date, the veto.
-     Everything but the title gets `auto`, so the elastic title is still the
-     only column allowed to clip — the whole point of the row's original
-     split. The chip's cell is rendered even when a row has no count to show
-     (see `_scope.html`), because a column that appears on some rows and not
-     others would step the dates out from under each other. */
-  .peek-row { display: grid;
-    grid-template-columns: 7.5rem minmax(0, 1fr) auto auto auto;
-    gap: 0 var(--s2); align-items: baseline; padding: 5px 0;
-    font-size: var(--fs-xs); line-height: 1.35; }
-  .peek-row + .peek-row { border-top: 1px solid var(--line); }
-  /* "Not for me", inside the peek. Same words and the same quiet weight as
-     the card's own `.track-hide` — one verb, one vocabulary — but drawn
-     always rather than revealed on hover: the panel itself is already a
-     hover state, and hiding a control inside a control is how you get a
-     live target with nothing painted in it (see `.track-hide`'s note). */
-  .peek-hide { justify-self: end; border: 0; background: none; padding: 2px var(--s1);
-    cursor: pointer; font: inherit; font-size: var(--fs-nano);
-    color: var(--ink-3); border-radius: 6px; white-space: nowrap;
-    transition: color var(--t-fast); }
-  .peek-hide:hover { color: var(--danger); }
-  .peek-hide:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  .peek-firm { color: var(--ink); font-weight: var(--w-med);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .peek-title { color: var(--ink-2);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* `.peek-title` is an <a> when the posting only lives on the firm's board,
-     and a <button> when we hold the text ourselves and can open the drawer.
-     A bare <button> arrives wearing the browser's own chrome - grey fill,
-     border, centred label, its own font - which inside a text row reads as a
-     form control rather than a title. Reset it to the shape `.peek-hide`
-     above already uses, then give it the underline the <a> variant gets from
-     the global link rule, so both spellings of this title advertise the same
-     affordance instead of one looking clickable and the other looking like a
-     stray submit button. `min-width: 0` is what lets the inherited ellipsis
-     actually fire on a grid item. */
-  .peek-title-btn { border: 0; background: none; padding: 0; margin: 0;
-    font: inherit; text-align: left; cursor: pointer;
-    min-width: 0; max-width: 100%;
-    text-decoration: underline; text-decoration-color: var(--line);
-    text-underline-offset: 2px;
-    transition: color var(--t-fast), text-decoration-color var(--t-fast); }
-  .peek-title-btn:hover { color: var(--ink);
-    text-decoration-color: var(--ink-3); }
-  .peek-title-btn:focus-visible { outline: 2px solid var(--accent);
-    outline-offset: 2px; }
-  .peek-when { justify-self: end; }
-  /* The branch-count chip. Quieter than the date beside it on purpose: the
-     date is why you would act today and this is only what the row stands
-     for, so it reads as an annotation on the title rather than a second
-     status competing with the first. */
-  .peek-places { justify-self: end; }
-  .peek-places-n { display: inline-block; padding: 1px 6px; border-radius: 999px;
-    border: 1px solid var(--line); background: var(--paper);
-    font-size: var(--fs-nano); color: var(--ink-3); white-space: nowrap;
-    cursor: help; }
-  .peek-more { margin: var(--s2) 0 0; padding-top: var(--s2);
-    border-top: 1px solid var(--line); font-size: var(--fs-xs);
-    color: var(--ink-3); }
-
-  /* Phones: hover does not exist, and a floating panel anchored to a button
-     that has wrapped to its own line is a panel half off the screen. So it
-     stops floating and expands in flow under the sentence — the same shape
-     the mobile Filters disclosure takes. The band is `flex-wrap: wrap`, so
-     a 100% basis is all it takes to give the peek its own row. */
-  @media (max-width: 640px) {
-    /* `display: contents` so the button and the panel become flex items of
-       the band itself: the button stays on the same row as "Save them all"
-       (a wrapper with `flex: 1 0 100%` would push it onto a line of its own
-       and make a three-deck band out of a two-deck one), while the panel
-       takes a full row under both. The disclosure selectors below still
-       match — `display: contents` changes boxes, not the DOM tree. */
-    .peek { display: contents; }
-    /* `display`, not just visibility, once the panel is in the flow: an
-       invisible-but-laid-out panel would hold 200px of empty band open under
-       the sentence at every width where nobody has opened it. */
-    /* `order: 1` puts the opened panel LAST in the band, under "Save them
-       all", instead of between the toggle and it. In DOM order it sits
-       between the two, which on a phone shoved the button this whole feature
-       exists to inform a screen and a half below the sentence that asks for
-       it. Reading it before you can reach the button is the point; having to
-       scroll back up for the button is not. */
-    .peek-panel { position: static; display: none; order: 1; flex: 1 0 100%;
-      width: auto; margin-top: 0; box-shadow: none; transform: none; }
-    .peek:focus-within > .peek-panel,
-    .peek[data-peek-state="open"] > .peek-panel { display: block; }
-    .peek[data-peek-state="shut"] > .peek-panel { display: none; }
-    .peek-row { grid-template-columns: minmax(0, 1fr) auto auto auto; }
-    .peek-title { grid-column: 1 / -1; }
-    /* No hover on a phone, so the veto is a real tap target rather than a
-       4px-padded word: 44px wide and 32px tall is the floor the rest of this
-       page's touch controls hold to. */
-    .peek-hide { padding: 7px 10px; min-width: 44px; text-align: right; }
-  }
-
-  /* THE PEEK'S UNDO STRIP. Same shape and tokens as Today's dismissed-proposal
-     strip (`.prop-undo`) and My Applications' bulk-save undo (`.apps-undo`),
-     because it is the same promise made in the same words: you just hid
-     something, here is the way back, and here is where they all live. */
-  .scope-undo { display: flex; align-items: center; gap: var(--s3);
-    flex-wrap: wrap; margin-bottom: var(--s3);
-    padding: var(--s2) var(--s4) var(--s2) var(--s3);
-    background: var(--accent-soft); border: 1px solid var(--accent-line);
-    border-left: 3px solid var(--accent); border-radius: 10px;
-    color: var(--ink-2); font-size: var(--fs-s); }
-  .scope-undo-said { flex: 1 1 auto; }
-  .scope-undo-note { color: var(--ink-3); }
-  .scope-undo-btn { border: 1px solid var(--accent-line); background: var(--surface);
-    color: var(--accent-ink); border-radius: 999px; padding: var(--s1) 14px;
-    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
-    transition: background var(--t-fast), border-color var(--t-fast); }
-  .scope-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
-
   /* The lazy-load sentinel: a full-width strip at the end of the loaded
      columns. It occupies real height so `revealed` fires before the user
      hits the bottom, and its text is the honest state ("loading", not a
@@ -616,21 +392,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .recbar-note { max-width: 62ch; margin: 0; font-size: var(--fs-s);
     color: var(--ink-2); line-height: 1.5; }
 
-  /* THE BOARD STATUS — #cov-scope (what's hidden, and the save prompt) and
-     .board-state (the totals + cycle shape) as ONE bounded section, not two.
-     The hairline used to sit only above .board-state, so the hidden-roles
-     sentence and the save banner floated above it unbounded — three
-     page-level meta rows reading as three separate bands when they answer
-     one connected question ("what does this board look like, and what of it
-     is not shown"). The hairline moves to the top of #cov-scope so it fences
-     the WHOLE group at once; .board-state keeps only its bottom margin, the
-     boundary into the firm columns below. `#cov-scope` renders even when
-     empty (no active hides, no save prompt), in which case this pads a
-     hairline directly onto .board-state with nothing between — the same
-     rendered result the old split produced for that case, so no visual
-     regression when there is nothing to disclose. */
-  #cov-scope { border-top: 1px solid var(--line); padding-top: var(--s3); }
-  .board-state { margin: 0 0 var(--s4); }
+  /* THE BOARD STATUS — the totals and the one hide that still reports itself
+     here, as one bounded section. The hairline used to live on `#cov-scope`,
+     the block above this one holding the hidden-roles sentence and the blue
+     "Save them all" banner; both are gone (2026-09-02 — the save is the
+     Picked column's own header button now, see `_pickcol.html`), so the rule
+     that fenced the group moves onto the block that is left. Same rendered
+     result: a hairline, then the strip. */
+  .board-state { border-top: 1px solid var(--line); padding-top: var(--s3);
+    margin: 0 0 var(--s4); }
   /* `--s2`, and the footnote below it states no margin of its own — see
      `.scope-foot`. This is the ONE declaration setting the distance between
      the strip and its footnote, so the two can no longer be written against
@@ -934,7 +704,10 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        it grows past them, and that is the honest outcome: those two lines
        are content this column has and a firm column does not. They cost two
        rows now rather than the five the founder's screenshot caught. */
-    min-height: 76px; }
+    min-height: 76px;
+    /* A THIRD COLUMN for "Save all" (see `.pickcol-save`), so this header's
+       one control rides beside the name instead of adding a row under it. */
+    grid-template-columns: 38px minmax(0, 1fr) auto; }
   .firmcol--picked .firmcol-name { color: var(--accent-ink); }
   /* Not a link — it names a view, not a firm — so it must not offer a link's
      hover affordance. */
@@ -1042,6 +815,41 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      the middle of an empty band. */
   .firmcol-h { grid-column: 2; grid-row: 1; min-width: 0; margin: 0; }
   .firmcol-stats { grid-column: 2; grid-row: 2; }
+  /* SAVE ALL — the Picked column's one primary action, and the only control
+     in any column header.
+
+     A THIRD COLUMN, not a third row. Drawn on its own line under the meta
+     it grew this header to 106px against every firm column's 76 and dropped
+     this column's first role card 30px below the row it is trying to join —
+     the identical defect the retired "PICKED" eyebrow was moved for, and
+     visible in the first screenshot of the merge. So the picked header runs
+     `38px | 1fr | auto` and the button spans both of its rows on the right,
+     which leaves the header exactly as tall as its neighbours'. The name
+     column is `minmax(0, 1fr)`, so the heading clamps rather than pushing
+     the button off the edge.
+
+     PRIMARY WEIGHT, and nothing else in this header has any: filled accent
+     against the column's own accent-soft ground, where the retired banner's
+     button was an outlined `.scope-act` sitting beside a "Which ones?"
+     toggle and a `<details>` summary all wearing the same treatment. One
+     action, one emphasis. `--r-ctl` because it is a thing you PRESS
+     (coverage.css L1089) — the pill is reserved for things that report
+     state.
+
+     The disabled state keeps the shape and drops the fill, so the slot does
+     not move when there is nothing left to save. `cursor: default`, not
+     `not-allowed`: it is a true statement, not a refusal. */
+  .pickcol-save { grid-column: 3; grid-row: 1 / span 2; align-self: center;
+    white-space: nowrap;
+    border: 1px solid var(--accent); background: var(--accent); color: var(--paper);
+    border-radius: var(--r-ctl); padding: var(--s1) 14px;
+    font-size: var(--fs-xs); font-weight: var(--w-med); cursor: pointer;
+    transition: background var(--t-fast), border-color var(--t-fast); }
+  .pickcol-save:hover:not(:disabled) { background: var(--accent-ink);
+    border-color: var(--accent-ink); }
+  .pickcol-save:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pickcol-save:disabled { background: none; border-color: var(--line);
+    color: var(--ink-3); cursor: default; }
   /* Per-firm tint: --hue comes from the firm_hue filter; saturation and
      lightness are fixed here so every chip shares one muted color family. */
   .firmcol-logo { width: 38px; height: 38px; flex: none; border-radius: 10px;
@@ -1227,8 +1035,8 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      Save and "Not for me" are opposite verbs and were zero-gap siblings, so
      the dismiss target began at exactly the pixel Save ended. */
   .track { display: inline-flex; gap: 6px; }
-  /* `--r-ctl`, not 999px — see `.scope-act` above for the rule and the rest
-     of the family. `.track-chip` below KEEPS its pill: it is a read-only
+  /* `--r-ctl`, not 999px — see `.pickcol-save` above for the rule and the
+     rest of the family. `.track-chip` below KEEPS its pill: it is a read-only
      status ("Applied", "Interviewing"), which is exactly the thing the pill
      shape is reserved for. */
   .track-btn { display: inline-flex; align-items: center; gap: var(--s1);
@@ -1512,6 +1320,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .rr-meta > *:not(:first-child) { margin-left: -6px; padding-left: 6px;
     border-left: 1px solid var(--line-strong); }
   .rr-firm { font-weight: var(--w-med); color: var(--ink-2); flex: none; }
+  /* The branch-count chip: how many places the Picked column's city-variant
+     fold left this one card standing for. Quiet on purpose — it annotates
+     the role rather than competing with the deadline beside it — and drawn
+     as a chip rather than plain text so it reads as a count, not a location.
+     `cursor: help` because the whole explanation is in its `title`. */
+  .rr-places { flex: none; padding: 0 6px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--ink-3); cursor: help;
+    white-space: nowrap; }
   /* THE ONE TRUNCATION POINT (see the contract note below `.rr-fact`).
      205px is off the measured distribution of every `.rr-loc` on the
      founder's board: p50 60px, p75 118px, p90 154px, p95 185px, p99 272px,
@@ -1861,7 +1677,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rcd-note { margin: 0 0 2px; font-size: var(--fs-nano); color: var(--ink-3);
     line-height: 1.35; }
-  /* `--r-ctl`, not 999px — see `.scope-act` for the rule. */
+  /* `--r-ctl`, not 999px — see `.pickcol-save` for the rule. */
   .rcd-undo { align-self: flex-start; border: 1px solid var(--accent-line);
     background: var(--paper); color: var(--accent-ink); border-radius: var(--r-ctl);
     padding: var(--s1) 14px; font: inherit; font-size: var(--fs-xs);

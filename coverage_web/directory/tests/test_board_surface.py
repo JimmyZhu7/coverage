@@ -259,10 +259,12 @@ def test_the_out_of_band_refresh_ships_the_folded_counts(client, dupes):
 
 SQUARED = [
     (".track-btn", "Save / Saved — writes a row"),
-    # "up to 310 rows" until 2026-09-02; the offer is scored now and capped at
-    # `BULK_SAVE_PEEK_MAX`, so the button never commits to more than the peek
-    # above it printed. Still a control that writes, still squared.
-    (".scope-act", "Save them all — writes up to 8 rows"),
+    # `.scope-act` until 2026-09-02, when the blue banner it belonged to was
+    # folded into the Picked column. Same control, same argument: the button
+    # writes rows, so it is squared. It now commits to at most the six cards
+    # rendered under it (`DEFAULT_LIMIT`), which is why the cap this line used
+    # to name is gone rather than restated.
+    (".pickcol-save", "Save all — writes the column's unsaved picks"),
     (".rcd-undo", "Undo — reverses a dismissal"),
 ]
 
@@ -651,7 +653,10 @@ def test_the_picked_columns_header_spends_the_same_two_rows_a_firms_does():
     invisible until measured.
     """
     here = pathlib.Path(__file__).resolve().parents[2] / "templates" / "directory"
-    picked = (here / "_results.html").read_text()
+    # `_pickcol.html` since 2026-09-02: the column moved into its own partial
+    # so a dismissal on a card elsewhere can swap it out of band. Same markup,
+    # same invariant, one file along.
+    picked = (here / "_pickcol.html").read_text()
     assert "fc-eyebrow" not in picked
     heading = picked.index('id="pickcol-h"')
     stats = picked.index('<div class="firmcol-stats">')
@@ -659,6 +664,11 @@ def test_the_picked_columns_header_spends_the_same_two_rows_a_firms_does():
     assert heading < stats < meta, (
         "the Picked column's count line moved out of the stats row; that is a "
         "third row in a header whose neighbours have two")
+    # "Save all" is the header's own control and belongs BELOW both rows, on
+    # its own auto-placed line. Inside `.firmcol-stats` it would be competing
+    # with the count line it acts on; above the name it would be a row this
+    # header has and its neighbours do not.
+    assert meta < picked.index("pickcol-save")
 
     firms = (here / "_columns.html").read_text()
     fstats = firms.index('<div class="firmcol-stats">')
