@@ -724,6 +724,38 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   @media (max-width: 1000px) { .firmcols { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 720px) { .firmcols { grid-template-columns: 1fr; } }
 
+  /* THE EMPTY BOARD, placed rather than merely classed (2026-09-03).
+
+     `_results.html` has written `empty--incol` since the two copies of the
+     empty state were merged into one, and its comment says what the modifier
+     is for: "the copy belongs next to the Picked column, not in place of
+     it". Nothing anywhere read the class. `git grep` found one hit, the line
+     that writes it, and no rule in this file or in coverage.css.
+
+     What that cost, measured on `?q=zzqqxx` at 1440px — the exact state the
+     modifier names, every pick filtered out but the column still drawing:
+     the Picked column at x=24 w=453, and the empty box at x=24 w=1392,
+     BELOW it and spanning the whole board, with 939px of dead paper beside
+     the column and `.empty`'s own `text-align: center` putting the sentence
+     939px from the thing it explains.
+
+     The box is a grid item now, so both cases are one declaration. Full
+     span is the default and reproduces exactly what an unpicked empty board
+     already drew; `--incol` starts at track 2, which is beside the Picked
+     column at three tracks and at two.
+
+     Written as `.empty.empty--incol`, not `.empty--incol`, for the reason
+     test_no_scope_line_modifier_is_left_to_lose_to_the_generic_rule states:
+     a single-class modifier of a single-class generic loses on source order,
+     silently, and stays lost until the two values have to disagree. */
+  .firmcols > .empty { grid-column: 1 / -1; }
+  .firmcols > .empty.empty--incol { grid-column: 2 / -1; }
+  /* One track wide is no longer "beside" anything: under 720px the grid is a
+     single column and the Picked column sits ABOVE, so track 2 does not
+     exist and the copy goes back to spanning what there is. */
+  @media (max-width: 720px) {
+    .firmcols > .empty.empty--incol { grid-column: 1 / -1; } }
+
   /* ---- Firm-page role rows: the ledger form again. One row per role,
      role-level facts only — the page header owns the firm-level ones. ---- */
   .frow-group { margin-top: var(--s5); }
@@ -1320,7 +1352,16 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     flex: none;
     transition: background-color var(--t-fast); }
   .rolerow:first-child { border-top: 0; }
-  .rolerow:hover { background: var(--paper); }
+  /* `:focus-within` joins `:hover` (2026-09-03). These two selectors already
+     appear together one rule apart — `.rolerow:hover .rr-act,
+     .rolerow:focus-within .rr-act` is what reveals the Save/Read group — so
+     the row had two ways to be entered and only one of them repainted it.
+     The group's own fill is `--paper`, chosen to match this line; on a Tab
+     it was landing on an unrepainted row, `rgba(0, 0, 0, 0)` over the
+     column's `--surface`, as a 191x20px grey rectangle. Either the fill
+     follows the row or the row follows the reveal, and the row is one
+     selector. */
+  .rolerow:hover, .rolerow:focus-within { background: var(--paper); }
   /* Offscreen rows still skip layout and paint, as the card did — the
      saving is bigger here because there are more rows per column.
      `auto` is load-bearing in the intrinsic size: the row's height now
@@ -1655,10 +1696,52 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      but opacity frees no layout, so it was reserving ~85px permanently to
      draw nothing. Lifting the group out of flow hands the meta the whole
      line, and the controls come back over the row's trailing end on hover,
-     where the reader has stopped reading it. */
+     where the reader has stopped reading it.
+
+     THE CUT IS MARKED NOW (2026-09-03). The sentence above assumes the
+     controls land in slack. Measured at 1440px over all 193 rows of the
+     default board, with `content-visibility` forced off so offscreen rows
+     reported real geometry, they land on TEXT on 180 of them (93%): a 191px
+     opaque block over at least one meta item, and on the worst row over
+     four of them at once — 336px of "No sponsorship", "Penultimate year",
+     "$100k" and the whole of "No date posted, first seen 39d ago". 69 rows
+     carry a single meta line, and 62 of those are covered, so on a third of
+     the board the line the block lands on is the only line there is.
+
+     Reserving the width instead would put the group back in flow on the
+     last line and is the change this rule already argues against, twice and
+     with numbers. What is NOT argued for anywhere is doing it INVISIBLY: a
+     flat `--paper` fill against a row whose hover background is the same
+     `--paper` does not read as a control passing over text, it reads as
+     text that ends there. `.rr-undated` is the span this file swears must
+     never be half-rendered ("a fragment of them is worse than a wrapped
+     line carrying all of them") and a hard edge through it is exactly a
+     fragment.
+
+     So the leading edge fades over `--s6` instead of butting. This is the
+     same call `.rr-loc` makes with `text-overflow: ellipsis` and the same
+     one `.firmcol-scroll` makes with its scrolling shadows, both of which
+     this file justifies in the same words: a cut with nothing to mark it
+     "looks like a layout bug rather than a scroll position — it was
+     reported as one". The controls still win the pixels; the reader can now
+     see that something is behind them.
+
+     THE FILL FOLLOWS THE ROW, and that is the second bug in one
+     declaration. `background: var(--paper)` was chosen to match
+     `.rolerow:hover`, but the rule below reveals this group on
+     `:focus-within` TOO, and focus does not repaint the row. Measured on a
+     Tab into a firm column's Save button with the pointer elsewhere: the
+     row's own background computed `rgba(0, 0, 0, 0)` — the column's
+     `--surface` #fcfdf9 showing through — under a 191x20px block of
+     `--paper` #f2f4ee. Every keyboard reader met a grey rectangle sitting
+     on the row, on every row they tabbed into. The row wears its interacted
+     skin for both verbs now (see `.rolerow:hover, .rolerow:focus-within`
+     above), which is the smaller fix and the honest one: a row being driven
+     by the keyboard is a row being driven. */
   .rr-act { position: absolute; right: 2px; bottom: var(--s3);
     display: inline-flex; align-items: center; gap: 6px;
-    padding-left: var(--s4); background: var(--paper);
+    padding-left: var(--s6);
+    background: linear-gradient(to right, transparent, var(--paper) var(--s6));
     opacity: 0; pointer-events: none; transition: opacity var(--t-fast); }
   .rolerow:hover .rr-act, .rolerow:focus-within .rr-act {
     opacity: 1; pointer-events: auto; }

@@ -19,6 +19,7 @@ catch the leak however it gets in.
 
 from __future__ import annotations
 
+import pathlib
 import re
 
 import pytest
@@ -964,6 +965,97 @@ def test_no_scope_line_modifier_is_left_to_lose_to_the_generic_rule():
         f"{bare}: a single-class modifier of `.scope-line`; the generic rule "
         "is later in the file and will out-order it, silently. Write it as "
         "`.scope-line.scope-line--x`.")
+
+
+# ---------------------------------------------------------------------------
+# EVERY MODIFIER THE MARKUP WRITES IS READ BY SOMETHING (2026-09-03).
+#
+# The test above guards a modifier that LOSES to its generic rule. This one
+# guards the step past that: a modifier no rule reads at all, which loses to
+# everything and says nothing, and which no amount of visual review finds
+# because a class that does nothing raises nothing.
+#
+# It shipped. `_results.html` wrote `empty--incol` on the empty board and
+# explained it at length -- "the copy belongs next to the Picked column, not
+# in place of it" -- through a refactor that merged two copies of the empty
+# state into one and took the styling with it. `git grep empty--incol`
+# returned exactly one hit, the line that writes it. Measured on
+# `?q=zzqqxx` at 1440px, the state the modifier exists for: the Picked
+# column at x=24 w=453, and the box the comment says sits beside it at x=24
+# w=1392, spanning the whole board UNDERNEATH, with 939px of dead paper next
+# to the column.
+#
+# SCOPED BY WHAT THE PAGE RENDERED, not by a hand-kept list of filenames:
+# `response.templates` is every template the Opportunities view actually
+# pulled in, so a new partial is covered the day it is included and no other
+# page's markup is dragged in here.
+#
+# SOURCE, not rendered HTML, and that is the point. A modifier inside an
+# `{% if %}` only appears in the output of the state that triggers it -- and
+# this one's state is an empty filtered board, which is exactly the kind of
+# page no screenshot is ever taken of. Reading the template catches it
+# without having to reproduce the state.
+# ---------------------------------------------------------------------------
+
+_CLASS_ATTR_RE = re.compile(r'class="([^"]*)"')
+# Django tags and variables live INSIDE these attributes, and they glue
+# themselves to the class beside them: the attribute that started this test
+# is `class="empty{% if pick_cluster %} empty--incol{% endif %}"`, whose
+# whitespace split yields the token `empty--incol{%`. Replacing each tag with
+# a space — rather than deleting it — is what keeps `empty{% if %}` from
+# fusing into one token from the other side.
+_DJANGO_TAG_RE = re.compile(r"\{[%{#].*?[%}#]\}", re.S)
+# A BEM-ish modifier: a class token carrying `--`. Bounded to class
+# attributes so the stylesheet's own custom properties (`--paper`, `--s4`)
+# are never mistaken for one.
+_MODIFIER_RE = re.compile(r"^[a-z][\w-]*--[\w-]+$")
+
+
+def _modifiers_written_by(templates) -> dict[str, str]:
+    """{modifier class: template that writes it} over the given templates."""
+    found: dict[str, str] = {}
+    for origin in templates:
+        try:
+            source = pathlib.Path(origin).read_text()
+        except OSError:
+            continue
+        for attr in _CLASS_ATTR_RE.findall(source):
+            for token in _DJANGO_TAG_RE.sub(" ", attr).split():
+                if _MODIFIER_RE.match(token):
+                    found.setdefault(token, origin)
+    return found
+
+
+def test_every_modifier_the_board_writes_is_read_by_a_rule():
+    """A class written by a template and named by no selector is a decision
+    that was documented and then lost. Nothing errors; the element simply
+    draws as if the modifier were not there."""
+    response = Client().get("/opportunities/")
+    origins = {t.origin.name for t in response.templates if t.origin}
+    written = _modifiers_written_by(origins)
+    assert written, "no modifier classes found — the scan stopped working"
+
+    html = response.content.decode()
+    css_file = (pathlib.Path(__file__).resolve().parents[2]
+                / "static" / "css" / "coverage.css")
+    readable = "\n".join(_STYLE_RE.findall(html)) + "\n" + css_file.read_text()
+    # COMMENTS STRIPPED FIRST, the same trap `_rules` above records and for
+    # the same reason: this stylesheet argues for its rules in prose directly
+    # above them, and the comment that explains why `.empty--incol` exists
+    # names `.empty--incol`. Searched raw, every dead modifier is kept alive
+    # by its own obituary — this test passed against the very defect it was
+    # written for until the strip went in.
+    readable = re.sub(r"/\*.*?\*/", "", readable, flags=re.S)
+
+    dead = sorted(f"{cls} (written by {pathlib.Path(src).name})"
+                  for cls, src in written.items()
+                  if f".{cls}" not in readable)
+    assert not dead, (
+        f"{dead}: written into a class attribute and read by no rule in the "
+        "page's own <style> blocks or in coverage.css. Either style it or "
+        "stop writing it — a modifier that draws nothing is a comment "
+        "pretending to be code."
+    )
 
 
 # ---------------------------------------------------------------------------

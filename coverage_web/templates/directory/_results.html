@@ -144,33 +144,54 @@ did not perform. See opportunities.html.
 firm still has a Picked column to draw — an empty one, saying every pick is
 hidden — and guarding the grid on `clusters` alone silently swallowed it at
 exactly the moment it had something to say.
-{% endcomment %}
-{% if clusters or pick_cluster %}
-  <div class="firmcols"{% if request.user.is_authenticated %} hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'{% endif %}>
-    {% include "directory/_pickcol.html" %}
-    {% include "directory/_columns.html" %}
-  </div>
-{% endif %}
 
-{% comment %}
-ONE empty state, whichever way the board came back empty. It used to be
-written twice — once beside the grid (when the Picked column still had
-something to say and only the firms came back empty) and once instead of it —
-and two copies of one sentence are two copies free to drift. The `--incol`
-modifier is the only thing that differed, and it still marks the beside-it
-case: the copy belongs next to the Picked column, not in place of it.
+THE GRID IS NOW UNCONDITIONAL, and the guard that used to wrap it is not lost
+— it was always duplicated inside the two partials it wrapped. `_pickcol.html`
+opens on `pick_cluster` and `_columns.html` is a loop over `clusters`, so with
+neither in hand this element renders empty and costs one div. What it buys is
+the empty state below: `--incol` cannot mean "beside the Picked column" while
+it sits OUTSIDE the only grid that has a column to sit beside.
 {% endcomment %}
-{% if not clusters %}
-  <div class="empty{% if pick_cluster %} empty--incol{% endif %}">
-    {% if has_filters %}
-      <h2>Nothing open under those filters.</h2>
-      <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>
-    {% else %}
-      <h2>Nothing open right now.</h2>
-      <p>We'll list roles here as soon as the next check finds any.</p>
-    {% endif %}
-  </div>
-{% endif %}
+<div class="firmcols"{% if request.user.is_authenticated %} hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'{% endif %}>
+  {% include "directory/_pickcol.html" %}
+  {% include "directory/_columns.html" %}
+
+  {% comment %}
+  ONE empty state, whichever way the board came back empty. It used to be
+  written twice — once beside the grid (when the Picked column still had
+  something to say and only the firms came back empty) and once instead of it —
+  and two copies of one sentence are two copies free to drift. The `--incol`
+  modifier is the only thing that differed, and it still marks the beside-it
+  case: the copy belongs next to the Picked column, not in place of it.
+
+  IT IS A GRID ITEM NOW (2026-09-03), because until today `--incol` marked
+  nothing. `git grep empty--incol` found exactly one hit — the line below that
+  writes it — and no rule anywhere in `coverage.css` or `_styles.html` ever
+  read it. Measured on `?q=zzqqxx` at 1440px, the state the modifier exists
+  for: the Picked column drew at x=24 w=453 saying "All 6 of your picks are
+  hidden by your filters", and this box drew at x=24 w=1392 — full board
+  width, UNDER the column rather than beside it, with 939px of dead paper to
+  the column's right and the centred copy 939px away from the thing it is
+  about. The comment above described a layout the stylesheet had never been
+  told to draw.
+
+  Moving it inside `.firmcols` is what makes the two cases expressible in one
+  declaration each, without the second copy of the sentence that the comment
+  above spent its whole argument refusing: `.empty` spans every track, and
+  `.empty--incol` starts at track 2. See `_styles.html`.
+  {% endcomment %}
+  {% if not clusters %}
+    <div class="empty{% if pick_cluster %} empty--incol{% endif %}">
+      {% if has_filters %}
+        <h2>Nothing open under those filters.</h2>
+        <p>Widen the filter, or <a href="{% url 'opportunities' %}">see everything open</a>.</p>
+      {% else %}
+        <h2>Nothing open right now.</h2>
+        <p>We'll list roles here as soon as the next check finds any.</p>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
 
 {% comment %}The subset sentence that used to live here now renders at the TOP
 of this file. Do not re-add a copy: it is one fact, and stating it twice on one
