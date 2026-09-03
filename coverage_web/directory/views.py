@@ -723,7 +723,10 @@ def _reason_key(r):
 #: know so…" — a fragment of a word is not a shorter fact, it is a rendering
 #: fault, and it was the fourth line of a four-line row.
 #:
-#: WHY 50. `.rr-main` measures ~316px in a 366px column and `.rr-why` is
+#: WHY 50 (and not the ~53 the row fits: the "+N" is appended AFTER this
+#: budget, so the last 3 characters are reserved for it, 2 of them now spent
+#: on the separator that keeps it from reading as part of the last reason).
+#: `.rr-main` measures ~316px in a 366px column and `.rr-why` is
 #: `--fs-xs` (12px), which is ~5.9px per character in Instrument Sans, so ~53
 #: characters reach the edge. 50 leaves room for the "+N" that replaces what
 #: did not fit. The cut is made on WHOLE reasons here rather than on
@@ -732,6 +735,12 @@ def _reason_key(r):
 #: WHAT WOULD CHANGE IT. A wider column, a different `--fs-xs`, or a decision
 #: to let this line wrap. All three are measurable the same way this was.
 _PICK_WHY_CHARS = 50
+
+#: What separates one reason from the next on `.rr-why`, and now also what
+#: separates the last reason from the "+N" that counts the rest. This line is
+#: plain text inside one span, so the separator is a real character here
+#: rather than `.rr-meta`'s drawn hairline.
+_PICK_WHY_SEP = " · "
 
 
 def _pick_why_line(reasons, verdict=None) -> dict:
@@ -754,6 +763,24 @@ def _pick_why_line(reasons, verdict=None) -> dict:
       * Whatever will not fit `_PICK_WHY_CHARS` is counted rather than
         printed. Counted, never silently dropped: the line ends "+2" and the
         title holds the two.
+
+    THE COUNT IS AN ITEM ON THE LINE, NOT A SUFFIX ON THE LAST REASON
+    (2026-09-02). It used to join with a bare space while every reason joined
+    with " · ", so the founder's own Picked rows read "Tier 1 · HK · 2027
+    intake, a year early for you +2" — four of his six — and the "+2" read as
+    the tail of the sentence it was stuck to rather than as a count of what
+    follows it. One separator, the line's own, is the whole fix: in a middot
+    list "A · B · C · +2" already means two more of the same kind.
+
+    IT IS STILL APPENDED AFTER THE BUDGET, AND THAT IS THE DESIGN. A first
+    pass here charged the suffix to `_PICK_WHY_CHARS` instead, which reads as
+    the more careful choice and is not: measured on the founder's board it
+    evicted "2027 intake, a year early for you" to make room, turning a
+    47-character line carrying three real reasons into "Tier 1 · HK · +3
+    more" — 21 characters, 29 of the budget unspent, and one fewer thing the
+    student is actually told. The constant's own note says it is set to 50
+    rather than the ~53 that reach the row's edge precisely so the count has
+    room outside it. Two of those three characters now go to the separator.
     """
     kind = (verdict or {}).get("kind") or ""
     title = " ".join(r.detail for r in reasons)
@@ -761,15 +788,15 @@ def _pick_why_line(reasons, verdict=None) -> dict:
                if not (kind.startswith("year_") and r.kind == "class")]
     shown, left = [], _PICK_WHY_CHARS
     for r in visible:
-        cost = len(r.text) + (3 if shown else 0)
+        cost = len(r.text) + (len(_PICK_WHY_SEP) if shown else 0)
         if shown and cost > left:
             break
         shown.append(r.text)
         left -= cost
-    line = " · ".join(shown)
+    line = _PICK_WHY_SEP.join(shown)
     hidden = len(visible) - len(shown)
     if hidden:
-        line = f"{line} +{hidden}" if line else f"+{hidden}"
+        line = f"{line}{_PICK_WHY_SEP}+{hidden}" if line else f"+{hidden}"
     return {"pick_why": line, "pick_why_title": title}
 
 

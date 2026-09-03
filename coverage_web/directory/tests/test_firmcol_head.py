@@ -124,19 +124,40 @@ def test_the_header_puts_the_name_in_a_row_nothing_below_it_can_move():
     assert "grid-row: 2" in stats, stats
 
 
-def test_the_logo_sits_in_the_name_row_and_nowhere_else():
-    """The founder's actual complaint, pinned. A tile centred against a
-    three-row text block lands beside the middle row, which on every firm
-    column was the category line rather than the firm name."""
+def test_the_logo_spans_the_header_and_stays_in_its_own_column():
+    """REWRITTEN 2026-09-02, because its premise was retired by the thing it
+    was guarding against.
+
+    It was `test_the_logo_sits_in_the_name_row_and_nowhere_else`, and row one
+    was the right answer to the question it was asked: the header had been a
+    tile beside a THREE-row text block, so a tile centred on the block landed
+    beside the middle row, which was the category line rather than the firm
+    name. Pinning the tile to row one fixed that.
+
+    The header lost its third row in the same pass that wrote this test, and
+    with two rows the original reasoning inverts. A tile centred on row one
+    now sits 13.6px above the centre of the block beside it — measured on all
+    13 columns of the founder's board at 1280px and 375px, and his own reading
+    of it was that the logo needed to come down. So the tile spans the header
+    and centres on the whole block, which is what the retired test's own
+    sentence was reaching for when only one row was worth centring against.
+
+    `grid-column: 1` is the half of the old assertion that never depended on
+    the row count, and it is kept verbatim."""
     css = _feed_css()
     rule = _rule(css, ".firmcol-logo")
-    assert "grid-row: 1" in rule, rule
+    assert "grid-row: 1 / -1" in rule, rule
     assert "grid-column: 1" in rule, rule
+    # Two rows, so "both of them" and "all of them" are the same span. A third
+    # row would silently change what `-1` means, and the header must not grow
+    # one — see `test_the_picked_columns_header_spends_the_same_two_rows_a_firms_does`.
+    assert "grid-template-rows: minmax(38px, auto) auto" in _rule(css, ".firmcol-head")
 
 
 def test_the_logo_tile_keeps_its_own_centring():
     """The tiles were already level; the fix must not move them. Under the
-    grid this centres the tile inside ROW ONE, against the name."""
+    grid this centres the tile inside the ROWS IT SPANS, which is both of
+    them — see the test above for why that stopped being row one alone."""
     assert "align-self: center" in _rule(_feed_css(), ".firmcol-logo")
 
 
