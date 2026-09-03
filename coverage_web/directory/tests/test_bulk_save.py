@@ -1,24 +1,49 @@
-"""The bulk-save banner ("N roles fit you and name your year... Save them
-all") and the four guardrails a customer-perspective walk found missing:
-one click used to dump 200+ roles into My Applications with no confirm, no
-undo, no way to remove them except one Remove click per row, and — the last
-one found, on 2026-09-02 — no test of FIT at all behind the number.
+"""The Picked for you column's "Save all", and the guardrails around it.
+
+THIS FILE USED TO PIN A BLUE BANNER. "N roles fit you and name your year...
+Save them all" sat above the board, offered a list of its own, and disclosed
+it through a "Which ones?" peek panel. On 2026-09-02 the founder merged the
+two surfaces — "merge the two into the pick for you widget and take away the
+blue banner on the top. Picked for you should have the function to save all"
+— and the banner, its peek and its year gate went with it.
+
+Nothing here was weakened for that. The three guarantees the banner earned
+the hard way are all still pinned; two of them are now asked of the column,
+and one of them (the peek showing you what you are agreeing to) is satisfied
+structurally rather than by a panel, because the column IS the list. Every
+rewritten test says which and why in its own docstring.
+
+WHAT "ALL" MEANS, and the measurement that decided it (see
+`directory.views.track_eligible` for the full argument). The banner's set was
+"every open role whose text names your class year". In a ranked column that
+test can no longer do the work it was written for: a stated WRONG year is
+`blocking`, and `recommend()` refuses blocked candidates outright, so the
+only thing the gate could still decide is whether SILENCE disqualifies — and
+`_eligibility`'s own contract is that a posting which states no window gets
+no verdict in either direction. Measured on the founder's column that day (6
+picks, all unsaved): 2 stated a year, 4 were silent, and the silent four were
+Nomura and HSBC investment banking and markets internships in Hong Kong,
+dead centre of his stated tracks and region. Keeping the gate would have put
+a "Save all" under a heading of six roles and written two.
 
 Pinned here:
 
-  * The offer is the intersection of eligibility and fit: a role has to name
-    the student's class year AND be one the recommender would rank (see
-    `_offer_fits`). Naming your year is what you may apply for; a bulk save
-    is what you intend.
-  * The offer counts JOBS, not requisitions: a programme a firm files once
-    per branch office is one row, folded on `_family_key` (the rule the feed
-    already groups its firm columns on), and the peek says how many places
-    that row stands for. Found the same day, once fit had stopped the offer
-    being irrelevant and left it repetitive.
-  * "Save them all" is offered only while the peek has shown every role in
-    the offer — `BULK_SAVE_PEEK_MAX`, the panel's own cap.
-  * `track_eligible` refuses to write without `confirmed=1` — the template's
-    `<details>` confirm is a UI affordance, not the actual gate.
+  * THE COUNT, THE LIST AND THE WRITE ARE ONE. The header's count, the
+    confirm sentence's count, and the ids `track_eligible` writes come from
+    one call. This is the 206/209/208 invariant and it is the reason this
+    file exists.
+  * THE BUTTON NEVER WRITES WHAT THE COLUMN IS NOT SHOWING. There is no
+    second list to disclose: every row "Save all" writes is a card the
+    student can read, save or dismiss on its own, directly below the button.
+  * THE COLUMN'S GATES ARE THE SAVE'S GATES — `recommend()`'s blocking-
+    verdict exclusion, its stated-class veto, its rung/study-level filter and
+    its passed-deadline exclusion. A role the column may not recommend is a
+    role this may not write.
+  * ONE ROW PER JOB. A programme a firm files once per branch office is one
+    card, folded on `_family_key` (the rule the feed already groups its firm
+    columns on), and the card says how many places it stands for.
+  * `track_eligible` refuses to write without `confirmed=1` — the `hx-confirm`
+    dialog is a UI affordance, not the actual gate.
   * `track_eligible_undo` reverses exactly the ids the triggering bulk save
     created, never a role the student saved by hand before or since, and
     never a role that has since moved past Saved.
@@ -39,6 +64,11 @@ User = get_user_model()
 
 
 def _eligible_opp(n, class_year="2027", firm=None):
+    """An open campus role whose own text names class year 2027.
+
+    A stated class match is `W_CLASS_STATED` (30) against a `MIN_SCORE` of 25,
+    so one of these is a PICK for a 2027 student on that alone — which is what
+    puts it in the column "Save all" writes."""
     firm = firm or Firm.objects.create(name=f"Firm {n}", slug=f"firm-{n}")
     return Opportunity.objects.create(
         firm=firm, url=f"https://x/{n}", title=f"Summer Analyst {n}",
@@ -56,13 +86,24 @@ def _student(class_year=2027, email="student@example.com"):
 def _confirm_bulk_save(client, *, follow=False):
     """Load the feed, then confirm — the sequence a real click makes.
 
-    The GET is not ceremony. `track_eligible` writes the exact ids the banner
-    OFFERED (stashed under `BULK_SAVE_OFFER_SESSION_KEY` when the feed
+    The GET is not ceremony. `track_eligible` writes the exact ids the column
+    OFFERED (stashed under `PICK_SAVE_OFFER_SESSION_KEY` when the feed
     rendered) rather than re-deriving a set of its own, because those two
     used to be different questions with different answers: the confirm said
     206, the write made 209. No render, no offer, nothing to honour."""
     client.get(reverse("opportunities"))
     return client.post(reverse("track_eligible"), {"confirmed": "1"}, follow=follow)
+
+
+def _column(client):
+    """`(body, pick_cluster, stashed ids)` off one feed render.
+
+    The three facts every count assertion in this file compares. They are
+    read from ONE response on purpose: the bug this file exists for was three
+    surfaces answering one question separately."""
+    resp = client.get(reverse("opportunities"))
+    return (resp.content.decode(), resp.context["pick_cluster"],
+            client.session.get("pick_save_offer") or [])
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +127,7 @@ def test_a_plain_post_without_confirmation_does_not_write(client):
 
 
 @pytest.mark.django_db
-def test_confirmed_post_saves_every_eligible_role(client):
+def test_confirmed_post_saves_every_picked_role(client):
     user = _student()
     _eligible_opp(1)
     _eligible_opp(2)
@@ -100,6 +141,9 @@ def test_confirmed_post_saves_every_eligible_role(client):
 
 @pytest.mark.django_db
 def test_confirmed_save_shows_an_undo_banner_naming_the_count(client):
+    """The message says "picked" rather than "that name your year" since
+    2026-09-02: the year gate went with the banner, so a message still
+    naming it would be describing a rule that no longer runs."""
     user = _student()
     _eligible_opp(1)
     _eligible_opp(2)
@@ -109,7 +153,7 @@ def test_confirmed_save_shows_an_undo_banner_naming_the_count(client):
     resp = _confirm_bulk_save(client, follow=True)
 
     body = resp.content.decode()
-    assert "Saved 3 roles that name your year." in body
+    assert "Saved 3 picked roles." in body
     assert "Undo" in body
 
 
@@ -118,7 +162,7 @@ def test_confirmed_save_shows_an_undo_banner_naming_the_count(client):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_the_confirm_saves_exactly_what_the_banner_counted(client):
+def test_the_confirm_saves_exactly_what_the_column_counted(client):
     """The drift, reproduced: one page load, three numbers.
 
     The banner counted the FEED's materialised rows — folded for duplicates
@@ -129,7 +173,7 @@ def test_the_confirm_saves_exactly_what_the_banner_counted(client):
 
     Here: one requisition listed twice by the same firm, same title, same
     location, different URLs — the shape a board scraped twice in one week
-    produces. The feed shows one row. The confirm must write one row."""
+    produces. The column shows one card. The confirm must write one row."""
     user = _student()
     firm = Firm.objects.create(name="Repeat Bank", slug="repeat-bank")
     for n in (1, 2):
@@ -139,17 +183,18 @@ def test_the_confirm_saves_exactly_what_the_banner_counted(client):
             location="New York")
     client.force_login(user)
 
-    body = client.get(reverse("opportunities")).content.decode()
-    assert "1 role fits you and names your year" in body
+    body, cluster, offered = _column(client)
+    assert cluster["save_count"] == len(offered) == 1
+    assert "Save 1" in body
 
     resp = _confirm_bulk_save(client, follow=True)
-    assert "Saved 1 role that names your year." in resp.content.decode()
+    assert "Saved 1 picked role." in resp.content.decode()
     assert UserOpportunity.objects.for_user(user).count() == 1
 
 
 @pytest.mark.django_db
 def test_a_confirm_with_no_offer_behind_it_writes_nothing(client):
-    """A POST that never rendered the banner has no number to honour. Same
+    """A POST that never rendered the column has no number to honour. Same
     posture as the `confirmed=1` gate: refuse, rather than fall back to a set
     the student was never shown — which is precisely how the write came to be
     three rows wider than the confirm."""
@@ -164,11 +209,11 @@ def test_a_confirm_with_no_offer_behind_it_writes_nothing(client):
 
 
 @pytest.mark.django_db
-def test_a_role_that_appeared_after_the_banner_rendered_is_not_swept_in(client):
+def test_a_role_that_appeared_after_the_column_rendered_is_not_swept_in(client):
     """The other half of "exactly what was shown": saving MORE than the
     confirm named is the product doing something the student never agreed
     to. A role that lands between the render and the click waits for the
-    next banner."""
+    next render."""
     user = _student()
     _eligible_opp(1)
     client.force_login(user)
@@ -180,6 +225,35 @@ def test_a_role_that_appeared_after_the_banner_rendered_is_not_swept_in(client):
     saved = set(UserOpportunity.objects.for_user(user)
                 .values_list("opportunity_id", flat=True))
     assert latecomer.id not in saved
+
+
+@pytest.mark.django_db
+def test_a_role_that_started_blocking_between_render_and_click_is_dropped(client):
+    """The per-row recheck can only ever REMOVE from the offered set, and
+    what it rechecks is the COLUMN's own gate rather than the retired year
+    test: a posting that began blocking this student between the render and
+    the click is one `recommend()` would no longer rank, so it is one this
+    must no longer write.
+
+    Saving fewer than the confirm said is a fact about the last thirty
+    seconds. Saving a role the product would now refuse to recommend is not.
+    """
+    user = _student()
+    keep = _eligible_opp(1)
+    turned = _eligible_opp(2)
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+    assert set(client.session["pick_save_offer"]) == {keep.id, turned.id}
+    # The scrape fills in a graduation window that excludes this student,
+    # which `_eligibility` reads as a blocking `year_out` verdict.
+    Opportunity.objects.filter(pk=turned.pk).update(class_year="2031")
+
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+
+    written = set(UserOpportunity.objects.for_user(user)
+                  .values_list("opportunity_id", flat=True))
+    assert written == {keep.id}
 
 
 @pytest.mark.django_db
@@ -230,6 +304,27 @@ def test_a_double_submit_does_not_re_run_the_batch(client):
     assert UserOpportunity.objects.for_user(user).count() == 1
 
 
+@pytest.mark.django_db
+def test_an_htmx_confirm_redirects_the_browser_rather_than_swapping(client):
+    """The button is an `hx-post`, because that is what makes `hx-confirm`
+    fire the site's styled dialog (see `base.html`). A 302 body would be
+    followed by the XHR and swapped into the page, so the response carries
+    `HX-Redirect` instead and the browser navigates — landing on My
+    Applications with the flash message and the Undo strip, exactly as the
+    old form submit did."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    client.get(reverse("opportunities"))
+    resp = client.post(reverse("track_eligible"), {"confirmed": "1"},
+                       HTTP_HX_REQUEST="true")
+
+    assert resp.status_code == 204
+    assert resp["HX-Redirect"] == reverse("my_applications")
+    assert UserOpportunity.objects.for_user(user).count() == 1
+
+
 # ---------------------------------------------------------------------------
 # Undo
 # ---------------------------------------------------------------------------
@@ -237,9 +332,9 @@ def test_a_double_submit_does_not_re_run_the_batch(client):
 @pytest.mark.django_db
 def test_undo_removes_only_the_batchs_rows_and_leaves_hand_saved_ones(client):
     user = _student()
-    hand_saved = _eligible_opp(1)  # not eligible-flow, just an ordinary save
-    bulk_a = _eligible_opp(2)
-    bulk_b = _eligible_opp(3)
+    hand_saved = _eligible_opp(1)  # not the bulk flow, just an ordinary save
+    _eligible_opp(2)
+    _eligible_opp(3)
     client.force_login(user)
 
     # A curated, hand-saved role from before the bulk action.
@@ -263,7 +358,7 @@ def test_undo_never_removes_a_row_the_student_has_since_advanced(client):
     Undo must not eat it just because it was in the batch."""
     user = _student()
     o1 = _eligible_opp(1)
-    o2 = _eligible_opp(2)
+    _eligible_opp(2)
     client.force_login(user)
 
     _confirm_bulk_save(client)
@@ -297,7 +392,7 @@ def test_a_second_bulk_save_only_offers_undo_for_the_newest_batch(client):
     # The first batch's undo banner is consumed by visiting My Applications.
     client.get(reverse("my_applications"))
 
-    o2 = _eligible_opp(2)
+    _eligible_opp(2)
     _confirm_bulk_save(client)
     resp = client.post(reverse("track_eligible_undo"), {}, follow=True)
 
@@ -381,26 +476,194 @@ def test_clear_saved_leaves_dismissed_rows_alone(client):
 
 
 # ---------------------------------------------------------------------------
-# FIT, not just eligibility
+# WHAT "ALL" MEANS: the column, and only the column
+# ---------------------------------------------------------------------------
+#
+# The retired banner's set was "the posting names your class year AND the
+# recommender would rank it" — a year gate plus a fit gate written for it
+# (`_offer_fits`, gone with the banner). That fit gate existed because the
+# banner had no ranking of its own: measured on the founder's board
+# 2026-09-02, it offered 56 roles in one click, of which 48 named a function
+# he does not recruit for or sat in a market he never named.
+#
+# The column has the ranking. `recommend()` applies the blocking-verdict
+# exclusion, the stated-class veto, the rung/study-level filter, the
+# passed-deadline exclusion, `MIN_SCORE` and `MAX_PER_FIRM`, then keeps six.
+# So the save's gates are the column's gates, stated once, and the tests
+# below pin exactly that rather than a second copy of the rules.
+
+
+@pytest.mark.django_db
+def test_a_pick_whose_posting_never_states_a_year_is_still_saved(client):
+    """THE DECIDING MEASUREMENT, as a test.
+
+    The banner would only ever write a `year_ok` verdict — the posting states
+    a graduation window and the student is in it. On the founder's column 4
+    of 6 picks stated no window at all (Nomura and HSBC Hong Kong internships
+    on his own tracks), so that gate would have written 2 of the 6 cards
+    under the button.
+
+    It is not protecting anything here either. A stated WRONG year is
+    `blocking` and `recommend()` refuses blocked candidates outright, so the
+    gate's only remaining job would be to treat SILENCE as disqualifying —
+    which contradicts `_eligibility`'s own contract, and contradicts the Save
+    button the card beside it already draws."""
+    user = _student()
+    firm = Firm.objects.create(name="Quiet Bank", slug="quiet-bank")
+    # Silent on the class year; a pick on the strength of the student's own
+    # target firm rather than on anything the posting says about cohorts.
+    from crm.models import UserFirm
+    UserFirm.all_objects.create(user=user, firm=firm, tier=1)
+    silent = Opportunity.objects.create(
+        firm=firm, url="https://x/silent", title="Summer Analyst",
+        bucket="internship", status="open")
+    client.force_login(user)
+
+    body, cluster, offered = _column(client)
+
+    assert [r["id"] for r in cluster["roles"]] == [silent.id]
+    assert offered == [silent.id]
+    assert "Save 1" in body
+
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    assert set(UserOpportunity.objects.for_user(user)
+               .values_list("opportunity_id", flat=True)) == {silent.id}
+
+
+@pytest.mark.django_db
+def test_a_role_stating_another_class_year_is_neither_picked_nor_saved(client):
+    """The gate that actually protects a bulk write, and it is the column's.
+
+    A posting naming a graduation window this student is not in carries a
+    blocking verdict, `recommend()` skips it, so it never reaches the column
+    — and what "Save all" writes is the column."""
+    user = _student()
+    mine = _eligible_opp(1)
+    other_year = _eligible_opp(2, class_year="2031")
+    client.force_login(user)
+
+    _, cluster, offered = _column(client)
+
+    assert [r["id"] for r in cluster["roles"]] == [mine.id]
+    assert offered == [mine.id]
+    assert other_year.id not in offered
+
+
+@pytest.mark.django_db
+def test_the_save_never_reaches_a_role_the_column_is_not_showing(client):
+    """THE PROPERTY THE MERGE BUYS, and the reason the peek panel is no
+    longer needed. The banner named a number and asked for a commitment
+    against it without saying which roles; a panel was built to disclose
+    them. The column cannot have that problem: what the button writes is what
+    is rendered underneath it, so the disclosure is the feature.
+
+    Asserted as a subset relation rather than by eye: every id the confirm
+    would write is an id with a card in the column."""
+    user = _student()
+    for n in range(1, 5):
+        _eligible_opp(n)
+    client.force_login(user)
+
+    _, cluster, offered = _column(client)
+
+    assert set(offered) <= {r["id"] for r in cluster["roles"]}
+    assert cluster["save_count"] == len(offered) == 4
+
+
+@pytest.mark.django_db
+def test_a_filter_that_hides_a_pick_takes_it_out_of_the_save(client):
+    """The column responds to the filter bar (see the `pick_cluster` block in
+    views.py), and the button sits inside the column. A save that reached a
+    role the filters had removed from the screen would be writing something
+    the student cannot see from the control they clicked."""
+    user = _student()
+    alpha = Firm.objects.create(name="Alpha", slug="alpha")
+    beta = Firm.objects.create(name="Beta", slug="beta")
+    kept = _eligible_opp(1, firm=alpha)
+    hidden = _eligible_opp(2, firm=beta)
+    client.force_login(user)
+
+    resp = client.get(reverse("opportunities"), {"firm": "alpha"})
+    cluster = resp.context["pick_cluster"]
+
+    assert [r["id"] for r in cluster["roles"]] == [kept.id]
+    assert cluster["hidden_by_filter"] == 1
+    assert client.session["pick_save_offer"] == [kept.id]
+
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    assert set(UserOpportunity.objects.for_user(user)
+               .values_list("opportunity_id", flat=True)) == {kept.id}
+
+
+@pytest.mark.django_db
+def test_a_role_already_tracked_or_dismissed_is_not_in_the_save(client):
+    """Two exclusions the banner's own count already made, kept: a role the
+    student already tracks has nothing to add, and a dismissed one they have
+    already answered. "Not for me" outranks "picked for you"."""
+    user = _student()
+    mine = _eligible_opp(1)
+    already = _eligible_opp(2)
+    dismissed = _eligible_opp(3)
+    client.force_login(user)
+    client.post(reverse("track_opportunity", args=[already.id]), {"status": "saved"})
+    client.post(reverse("track_opportunity", args=[dismissed.id]), {"status": "dismiss"})
+
+    _, cluster, offered = _column(client)
+
+    assert offered == [mine.id]
+    # The tracked role is still SHOWN — it is still one of the best things on
+    # the board for this student — it is simply not something to write again.
+    assert {r["id"] for r in cluster["roles"]} == {mine.id, already.id}
+    assert cluster["save_count"] == 1
+
+
+@pytest.mark.django_db
+def test_with_everything_saved_the_button_says_so_rather_than_vanishing(client):
+    """A control that disappears reads as breakage. One that states what it
+    would do and why it cannot is an answer — so at zero the button renders
+    disabled, saying "All saved"."""
+    user = _student()
+    _eligible_opp(1)
+    client.force_login(user)
+
+    _confirm_bulk_save(client)
+    body, cluster, offered = _column(client)
+
+    assert cluster["save_count"] == 0
+    assert offered == []
+    assert 'class="btn pickcol-save"' in body, "the control is still drawn"
+    assert "All saved" in body
+    # The MARKUP, not the words: this page ships its own <style> block and
+    # "Save all" appears in its comments, so a prose search reads the
+    # stylesheet and fails for reasons that have nothing to do with the
+    # feature (the same trap `.rr-places` carries a note about below). What
+    # matters is that the disabled button cannot issue the write.
+    assert reverse("track_eligible") not in body
+    assert "disabled" in body[body.index("pickcol-save"):
+                              body.index("</header>", body.index("pickcol-save"))]
+
+
+# ---------------------------------------------------------------------------
+# THE RUNG OF THE LADDER
 # ---------------------------------------------------------------------------
 #
 # THE MEASURED DEFECT (founder's live board, 2026-09-02; class 2029, tracks
-# ib+st, regions hk+us). The banner offered to write 56 roles in one click on
-# the strength of one test — "the posting names your class year" — which is a
-# fact about who may APPLY. Of those 56: 16 sat on one of his tracks and 18
-# named a function that was not one of them (16 outside the track vocabulary
-# entirely, 2 on a track he does not recruit for), 14 were in Hong Kong or the
-# US against 32 in a market he never named and 10 the product could not place
-# at all. The board's own recommender ranked none of the 40. The offer is
-# scored now: it is the intersection of the year verdict and `_offer_fits`.
+# ib+st, regions hk+us). Once the retired banner's offer was scored it came to
+# fourteen roles, and two of the fourteen were Wells Fargo PhD internships —
+# "2027 Quantitative Analytics Summer Internship Applied Computational
+# Intelligence (ACI PhD)" and its Capital Markets sibling. Both state his
+# graduation window, both sit in a market he named, both score in the
+# seventies, and neither is a job a sophomore can take.
+#
+# THIS GATE SURVIVED THE MERGE, and is applied harder than the banner applied
+# it: the banner ran `level_mismatch` alone, while `recommend()` runs
+# `role_matches_level` with the student's `study_level` and falls back to
+# `level_mismatch` only where the posting states its own window. So these
+# tests are unchanged in substance; only the surface they read moved.
 
 
 def _fit_student(email="fit@example.com"):
-    """A student who has said what they want: IB in the US, class of 2027.
-
-    The other `_student()` in this file states only a class year, which is
-    the thin profile P3 protects — every rule here has to degrade to the old
-    behaviour for them, and the tests above are what hold that."""
+    """A student who has said what they want: IB in the US, class of 2027."""
     u = _student(email=email)
     u.tracks = ["ib"]
     u.regions = ["us"]
@@ -416,149 +679,12 @@ def _titled_opp(n, title, *, region="us", class_year="2027"):
     )
 
 
-@pytest.mark.django_db
-def test_a_year_match_on_another_function_is_not_offered(client):
-    """Nomura's "2027 Operations Summer Analyst Program" states his year and
-    scored 70 on the founder's board. It is still not a role he is recruiting
-    for, and one click must not save it for him.
-
-    The role's own title is what decides it (`role_function_cached`, the
-    scorer's single definition), so the firm covering IB cannot lend its
-    coverage to an Operations req — the same rule `_track_fit` ranks with."""
-    user = _fit_student()
-    wanted = _titled_opp(1, "Investment Banking Summer Analyst")
-    ops = _titled_opp(2, "Operations Summer Analyst Program")
-    client.force_login(user)
-
-    resp = client.get(reverse("opportunities"))
-
-    assert set(client.session["bulk_save_offer"]) == {wanted.id}
-    assert ops.id not in client.session["bulk_save_offer"]
-    assert "1 role fits you and names your year" in resp.content.decode()
-
-
-@pytest.mark.django_db
-def test_a_year_match_in_a_market_he_never_named_is_not_offered(client):
-    """15 of the 56 were in the EU, 6 in China, 10 in a market Coverage does
-    not track. A stated wrong region is a stated non-fit — `role_matches_
-    regions`, the same function the feed's own region filter uses — and a
-    blank region fails it too, for the reason written there: this must not be
-    the one surface where "you said US" quietly includes rows nobody can
-    place."""
-    user = _fit_student()
-    here = _titled_opp(1, "Investment Banking Summer Analyst", region="us")
-    abroad = _titled_opp(2, "Investment Banking Summer Analyst", region="eu")
-    nowhere = _titled_opp(3, "Investment Banking Summer Analyst", region="")
-    client.force_login(user)
-
-    client.get(reverse("opportunities"))
-
-    offer = set(client.session["bulk_save_offer"])
-    assert offer == {here.id}
-    for gone in (abroad, nowhere):
-        assert gone.id not in offer
-
-
-@pytest.mark.django_db
-def test_a_global_role_is_offered_because_the_scorer_does_not_call_it_wrong(client):
-    """"Global" is the posting saying it has no single location, not the
-    posting naming somewhere else. `_region_fit` scores it zero rather than
-    penalising it (it is outside `_STATED_MARKETS`), so the offer treats it
-    the same way — the gate must not be stricter than the ranker it claims
-    to speak for."""
-    user = _fit_student()
-    everywhere = _titled_opp(1, "Investment Banking Summer Analyst",
-                             region="global")
-    client.force_login(user)
-
-    client.get(reverse("opportunities"))
-
-    assert set(client.session["bulk_save_offer"]) == {everywhere.id}
-
-
-@pytest.mark.django_db
-def test_a_role_under_the_recommenders_bar_does_not_fit(client):
-    """The third test is the scorer's own floor, asked of `_offer_fits`
-    directly.
-
-    Directly, because on the offer's own path this floor cannot currently be
-    the deciding test and a feed-level fixture would be pinning a coincidence.
-    A role only reaches the gate by carrying a `year_ok` verdict, which means
-    the posting STATED this student's class — worth `W_CLASS_STATED` (30) on
-    its own, already past `MIN_SCORE` (25) before any other axis speaks.
-    Measured on the founder's board 2026-09-02, all four tests in order:
-    track took 72 rows to 41, region took 41 to 11, the rung took 11 to 9,
-    and the bar took 9 to 9, the lowest survivor scoring 56.
-
-    That is a fact about today's weights, not a reason to leave the bar out.
-    It is the same number the ranker applies before ordering anything, so
-    while it is here the offer cannot drift below the column it sits above
-    — whatever the weights become. Pinned on the function that owns it."""
-    from directory.recommend import MIN_SCORE, Profile
-    from directory.views import _offer_fits
-
-    user = _fit_student()
-    firm = Firm.objects.create(name="Unlisted Bank", slug="unlisted-bank")
-    # A silent title, so the track test passes without scoring anything (the
-    # firm covers nothing either), and no stated class year, so `_class_fit`
-    # is silent too.
-    o = Opportunity.objects.create(
-        firm=firm, url="https://x/thin", title="Summer Programme",
-        bucket="internship", status="open", region="us")
-
-    # Track and region both pass; the region is his, and nothing else about
-    # the row scores. `W_REGION_TARGET` (16) alone is under the bar.
-    thin = Profile.from_user(user)
-    assert _offer_fits(thin, o) is False
-
-    # The same row for a student who targets the firm: tier 1 (26) plus the
-    # region (16) clears it, and the offer follows the scorer up as well as
-    # down.
-    targeted = Profile.from_user(user, {firm.id: 1})
-    assert _offer_fits(targeted, o) is True
-    assert MIN_SCORE == 25, "the bar moved; re-read this test's arithmetic"
-
-
-@pytest.mark.django_db
-def test_a_student_who_stated_no_tracks_or_regions_is_filtered_on_neither(client):
-    """P3, degrade to today's behaviour on thin data. A profile holding only
-    a class year has named no desk for a title to be outside of and no market
-    for a location to be wrong about, so the two axes filter nothing and the
-    offer is what it always was."""
-    user = _student()
-    ops = _eligible_opp(1)
-    abroad = _eligible_opp(2)
-    Opportunity.objects.filter(pk=abroad.pk).update(region="eu")
-    client.force_login(user)
-
-    client.get(reverse("opportunities"))
-
-    assert set(client.session["bulk_save_offer"]) == {ops.id, abroad.id}
-
-
-# ---------------------------------------------------------------------------
-# THE RUNG OF THE LADDER (added 2026-09-02)
-# ---------------------------------------------------------------------------
-#
-# THE MEASURED DEFECT, same board and same student as above. Once the offer
-# was scored it came to fourteen roles, and two of the fourteen were Wells
-# Fargo PhD internships — "2027 Quantitative Analytics Summer Internship
-# Applied Computational Intelligence (ACI PhD)" and its Capital Markets
-# sibling. Both state his graduation window, both sit in a market he named,
-# both score in the seventies, and neither is a job a sophomore can take. The
-# gate's own note had called that a boundary and left it for the next
-# measurement. `_offer_fits` now applies the rung test `recommend()` applies
-# to a stated-class row, and the offer went 14 -> 12; the retail
-# financial-planning fix below took it to 9.
-
-
 def _undergrad(email="rung@example.com"):
     """A student who has stated the rung as well as the desk and the market.
 
     `study_level` is what turns the rung test on at all. Without it
     `student_level` falls back to reading the target cycles, and with neither
-    stated it answers "" — which filters nothing, which is `_fit_student`'s
-    world and the reason the tests above are unaffected by any of this."""
+    stated it answers "" — which filters nothing."""
     u = _fit_student(email=email)
     u.study_level = "undergrad"
     u.save(update_fields=["study_level"])
@@ -566,24 +692,22 @@ def _undergrad(email="rung@example.com"):
 
 
 @pytest.mark.django_db
-def test_a_phd_internship_is_not_offered_to_an_undergraduate(client):
+def test_a_phd_internship_is_not_picked_for_an_undergraduate(client):
     """The posting's own title says who it is for, and it is not him.
 
-    `role_level` reads the rung out of the title and `level_mismatch` refuses
-    the pair — both `recommend`'s, neither re-derived here (P5). A bulk save
-    is a decision made once for every row in it, so a role the student cannot
-    take is not a row to be scrolled past, it is clutter committed to his own
-    pipeline."""
+    A bulk save is a decision made once for every row in it, so a role the
+    student cannot take is not a row to be scrolled past, it is clutter
+    committed to his own pipeline."""
     user = _undergrad()
     wanted = _titled_opp(1, "Investment Banking Summer Analyst")
     phd = _titled_opp(2, "Quantitative Analytics Summer Internship (PhD)")
     client.force_login(user)
 
-    resp = client.get(reverse("opportunities"))
+    body, cluster, offered = _column(client)
 
-    assert set(client.session["bulk_save_offer"]) == {wanted.id}
-    assert phd.id not in client.session["bulk_save_offer"]
-    assert "1 role fits you and names your year" in resp.content.decode()
+    assert offered == [wanted.id]
+    assert phd.id not in {r["id"] for r in cluster["roles"]}
+    assert "Save 1" in body
 
 
 @pytest.mark.django_db
@@ -591,23 +715,22 @@ def test_the_advanced_degree_rung_is_refused_under_its_other_name(client):
     """"Summer Associate" is the banks' name for the same rung, and the
     reason `role_level` reads shapes rather than the word "Associate" alone
     (bare "Associate" is the undergraduate entry title at PwC and Deloitte).
-    An undergraduate is not offered either spelling."""
+    An undergraduate is offered neither spelling."""
     user = _undergrad()
     analyst = _titled_opp(1, "Investment Banking Summer Analyst")
-    associate = _titled_opp(2, "Investment Banking Summer Associate")
+    _titled_opp(2, "Investment Banking Summer Associate")
     client.force_login(user)
 
-    client.get(reverse("opportunities"))
+    _, _, offered = _column(client)
 
-    assert set(client.session["bulk_save_offer"]) == {analyst.id}
+    assert offered == [analyst.id]
 
 
 @pytest.mark.django_db
 def test_a_rung_nobody_stated_filters_nothing(client):
-    """P3 again, on the new axis. `level_mismatch` is False the moment either
-    side is silent, so a student who never stated a study level and a title
-    that names no rung are both filtered on nothing — exactly the behaviour
-    that existed before this test was added.
+    """P3, degrade to the old behaviour on thin data. The rung test is silent
+    the moment either side is silent, so a student who never stated a study
+    level and a title that names no rung are both filtered on nothing.
 
     Two halves, because either one alone would pass for the wrong reason: a
     student with no level sees the PhD row, and a student WITH a level still
@@ -615,70 +738,60 @@ def test_a_rung_nobody_stated_filters_nothing(client):
     silent_student = _fit_student(email="nolevel@example.com")
     phd = _titled_opp(1, "Quantitative Analytics Summer Internship (PhD)")
     client.force_login(silent_student)
-    client.get(reverse("opportunities"))
-    assert set(client.session["bulk_save_offer"]) == {phd.id}
+    assert _column(client)[2] == [phd.id]
 
     client.logout()
     stated = _undergrad(email="stated@example.com")
     quiet = _titled_opp(2, "Investment Banking Summer Programme")
     client.force_login(stated)
-    client.get(reverse("opportunities"))
-    assert set(client.session["bulk_save_offer"]) == {quiet.id}
+    assert _column(client)[2] == [quiet.id]
 
 
 @pytest.mark.django_db
-def test_retail_financial_planning_is_not_a_track_anyone_picked(client):
-    """KeyBank's "Key Investment Services Internship (Certified Financial
-    Planner Track)" is retail financial planning, and three of them — in
-    Bellingham WA, Chagrin Falls OH and Vandalia OH — were in the founder's
-    fourteen-role offer on 2026-09-02.
+def test_a_passed_deadline_is_never_picked_and_so_never_saved(client):
+    """`recommend()` skips a candidate whose deadline is already behind it,
+    and that exclusion is what makes the abandoned-posting check the banner
+    carried unnecessary here (see `pick_save_ids`): a pick's deadline is
+    always future or absent, so there is no row for "the firm left this up
+    and nobody took it down" to be true of."""
+    import datetime as _dt
 
-    They got there through a hole in `recommend._NON_TRACK_FUNCTION`, which
-    named `\\bfinancial advisor\\b` and not the planner: the title answered
-    SILENT, and a silent title inherits the bank's own ib/st coverage. Fixed
-    in the vocabulary rather than in the gate, because a second answer to
-    "what function is this?" living inside a bulk-save offer is the defect
-    `_offer_fits` is otherwise built to avoid (P5) — and because the same
-    hole put those rows in the track facet and the picks rail too."""
-    user = _fit_student()
-    wanted = _titled_opp(1, "Investment Banking Summer Analyst")
-    planner = _titled_opp(
-        2, "Summer 2027 Key Investment Services Internship "
-           "(Certified Financial Planner Track) - Bellingham, WA")
+    user = _student()
+    live = _eligible_opp(1)
+    stale = _eligible_opp(2)
+    Opportunity.objects.filter(pk=stale.pk).update(
+        deadline=_dt.date(2020, 1, 1))
     client.force_login(user)
 
-    client.get(reverse("opportunities"))
+    _, cluster, offered = _column(client)
 
-    assert set(client.session["bulk_save_offer"]) == {wanted.id}
-    assert planner.id not in client.session["bulk_save_offer"]
+    assert offered == [live.id]
+    assert stale.id not in {r["id"] for r in cluster["roles"]}
 
 
 @pytest.mark.django_db
-def test_the_count_the_peek_and_the_write_agree_across_the_rung_gate(client):
-    """The one property every change to this gate has to keep: the banner's
-    number, the roles the peek names, and the rows the confirm writes are one
-    list from one call.
+def test_the_count_the_column_and_the_write_agree_across_the_rung_gate(client):
+    """THE INVARIANT the whole file exists for, asked where a gate is
+    actually doing something.
 
-    A new gate is exactly where that breaks — the 206/209/208 incident was a
-    count and a write asking two slightly different questions — so this pins
-    all four figures on a board where the gate is actually doing something,
-    with a PhD row and a financial-planning row present and excluded."""
+    The header's count, the cards the column renders, the ids stashed for the
+    confirm and the rows it creates are one list from one call. A new gate is
+    exactly where that breaks — 206/209/208 was a count and a write asking
+    two slightly different questions — so all four are read here on a board
+    with a PhD row present and excluded."""
     user = _undergrad()
     keep = {_titled_opp(1, "Investment Banking Summer Analyst").id,
             _titled_opp(2, "Investment Banking Off-Cycle Analyst").id}
     _titled_opp(3, "Quantitative Analytics Summer Internship (PhD)")
-    _titled_opp(4, "Key Investment Services Internship "
-                   "(Certified Financial Planner Track)")
     client.force_login(user)
 
-    resp = client.get(reverse("opportunities"))
-    ctx = resp.context
+    body, cluster, offered = _column(client)
 
-    assert ctx["eligible_unsaved"] == 2
-    assert ctx["bulk_save_peek"]["total"] == 2
-    assert {r["id"] for r in ctx["bulk_save_peek"]["rows"]} == keep
-    assert set(client.session["bulk_save_offer"]) == keep
-    assert "2 roles fit you and name your year" in resp.content.decode()
+    assert cluster["save_count"] == 2
+    assert {r["id"] for r in cluster["roles"]} == keep
+    assert set(offered) == keep
+    assert "Save all 2" in body
+    assert "Save 2 picked roles to My Applications?" in body
 
     client.post(reverse("track_eligible"), {"confirmed": "1"})
     assert set(UserOpportunity.objects.for_user(user)
@@ -686,288 +799,12 @@ def test_the_count_the_peek_and_the_write_agree_across_the_rung_gate(client):
 
 
 # ---------------------------------------------------------------------------
-# One click commits only to what the peek has shown
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.django_db
-def test_the_bulk_button_disappears_above_what_the_peek_can_show(client):
-    """A commitment to more roles than the panel prints is a commitment to
-    roles the student has not looked at. One over the cap and the button is
-    gone; the sentence and the peek stay, because every one of those roles is
-    still named and still savable one at a time."""
-    from directory.views import BULK_SAVE_PEEK_MAX
-
-    user = _student()
-    for n in range(BULK_SAVE_PEEK_MAX + 1):
-        _eligible_opp(n)
-    client.force_login(user)
-
-    resp = client.get(reverse("opportunities"))
-    body = resp.content.decode()
-
-    assert resp.context["eligible_unsaved"] == BULK_SAVE_PEEK_MAX + 1
-    assert resp.context["bulk_save_all"] is False
-    # The confirm's own markup, not the word "save": `.scope-act` is styled in
-    # the page's <style> block on every render, button or no button.
-    assert 'class="scope-confirm"' not in body
-    assert 'name="confirmed"' not in body
-    # The review path is untouched.
-    assert "Which ones?" in body
-    assert "+ 1 more not shown" in body
-
-
-@pytest.mark.django_db
-def test_the_bulk_button_is_there_at_the_cap(client):
-    """Exactly at the threshold the panel names the whole offer, so the
-    button is honest and renders. This is the founder's own board: his offer
-    measured 8 on 2026-09-02, and 8 is the cap."""
-    from directory.views import BULK_SAVE_PEEK_MAX
-
-    user = _student()
-    for n in range(BULK_SAVE_PEEK_MAX):
-        _eligible_opp(n)
-    client.force_login(user)
-
-    resp = client.get(reverse("opportunities"))
-    body = resp.content.decode()
-
-    assert resp.context["eligible_unsaved"] == BULK_SAVE_PEEK_MAX
-    assert resp.context["bulk_save_all"] is True
-    assert 'class="scope-confirm"' in body
-    assert 'name="confirmed"' in body
-    assert resp.context["bulk_save_peek"]["more"] == 0
-
-
-@pytest.mark.django_db
-def test_the_threshold_is_the_peeks_own_cap_and_not_a_second_number(client):
-    """Two constants that agree today would not agree after the first edit to
-    either. The button renders exactly while the panel has nothing left over
-    to count."""
-    from directory.views import BULK_SAVE_PEEK_MAX
-
-    user = _student()
-    client.force_login(user)
-    for n in range(BULK_SAVE_PEEK_MAX + 2):
-        _eligible_opp(n)
-        resp = client.get(reverse("opportunities"))
-        assert resp.context["bulk_save_all"] is (
-            resp.context["bulk_save_peek"]["more"] == 0), (
-            f"offer of {resp.context['eligible_unsaved']} disagrees with the "
-            f"peek's own remainder")
-
-
-@pytest.mark.django_db
-def test_what_the_offer_stashes_is_still_what_the_confirm_writes(client):
-    """The 206/209/208 invariant, asked again now that a second filter stands
-    between the rows and the offer. The banner's number, the panel's rows,
-    the stashed ids and the created rows are one list resolved once — a fit
-    rule applied in the view but not in the stash would put them back out of
-    agreement by a new route."""
-    user = _fit_student()
-    offered = [_titled_opp(n, "Investment Banking Summer Analyst")
-               for n in (1, 2, 3)]
-    # Same year, same region, wrong desk: counted by the old banner, and it
-    # must be absent from all four places now.
-    ops = _titled_opp(4, "Internal Audit Summer Analyst")
-    client.force_login(user)
-
-    resp = client.get(reverse("opportunities"))
-    stashed = set(client.session["bulk_save_offer"])
-    peeked = {r["id"] for r in resp.context["bulk_save_peek"]["rows"]}
-
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
-    written = set(UserOpportunity.objects.for_user(user)
-                  .values_list("opportunity_id", flat=True))
-
-    assert resp.context["eligible_unsaved"] == 3
-    assert stashed == peeked == written == {o.id for o in offered}
-    assert ops.id not in written
-
-
-# ---------------------------------------------------------------------------
-# The peek — which roles the banner is offering, before you agree to it
-# ---------------------------------------------------------------------------
-#
-# The banner named a number and asked for a commitment against it without ever
-# saying WHICH roles. These pin the one property that makes the panel worth
-# having: it is a view of the SAME id list the confirm writes
-# (`BULK_SAVE_OFFER_SESSION_KEY`), not a second answer to the same question.
-# A count that disagrees is a bug; a role named in the panel and then not
-# saved would be a promise broken by name.
-
-
-def _peek(client):
-    """The peek context off a fresh feed render, with the live offer beside
-    it — the two facts every test in this section compares."""
-    resp = client.get(reverse("opportunities"))
-    return resp, resp.context["bulk_save_peek"], client.session["bulk_save_offer"]
-
-
-@pytest.mark.django_db
-def test_the_peek_lists_exactly_the_roles_in_the_offer(client):
-    user = _student()
-    offered = [_eligible_opp(n) for n in (1, 2, 3)]
-    client.force_login(user)
-
-    resp, peek, offer = _peek(client)
-
-    assert set(offer) == {o.id for o in offered}
-    assert {r["id"] for r in peek["rows"]} == set(offer)
-    assert peek["total"] == resp.context["eligible_unsaved"] == 3
-    body = resp.content.decode()
-    for o in offered:
-        assert o.title in body
-
-
-@pytest.mark.django_db
-def test_the_peek_never_names_a_role_the_offer_excludes(client):
-    """Three exclusions the banner's own count already makes, held to the
-    same standard now that the roles are named on screen: a role whose text
-    names another class year, one the student already tracks, and one they
-    dismissed. "Not for me" outranks "your year" in the panel too."""
-    user = _student()
-    mine = _eligible_opp(1)
-    other_year = _eligible_opp(2, class_year="2031")
-    already = _eligible_opp(3)
-    dismissed = _eligible_opp(4)
-    client.force_login(user)
-    client.post(reverse("track_opportunity", args=[already.id]), {"status": "saved"})
-    client.post(reverse("track_opportunity", args=[dismissed.id]), {"status": "dismiss"})
-
-    resp, peek, offer = _peek(client)
-
-    assert [r["id"] for r in peek["rows"]] == [mine.id]
-    assert set(offer) == {mine.id}
-    body = resp.content.decode()
-    for gone in (other_year, already, dismissed):
-        assert f'class="peek-title">{gone.title}<' not in body
-
-
-@pytest.mark.django_db
-def test_the_peek_caps_its_rows_and_says_how_many_it_left_out(client):
-    """A 200-row offer is a page, not a peek. The cap is fine; a cap that
-    read as the whole offer would not be — so the remainder is stated."""
-    from directory.views import BULK_SAVE_PEEK_MAX
-
-    user = _student()
-    extra = 4
-    for n in range(BULK_SAVE_PEEK_MAX + extra):
-        _eligible_opp(n)
-    client.force_login(user)
-
-    resp, peek, offer = _peek(client)
-
-    assert len(peek["rows"]) == BULK_SAVE_PEEK_MAX
-    assert peek["total"] == len(offer) == BULK_SAVE_PEEK_MAX + extra
-    assert peek["more"] == extra
-    assert f"+ {extra} more not shown" in resp.content.decode()
-
-
-@pytest.mark.django_db
-def test_a_peek_that_fits_says_nothing_about_more(client):
-    user = _student()
-    for n in (1, 2):
-        _eligible_opp(n)
-    client.force_login(user)
-
-    resp, peek, _ = _peek(client)
-
-    assert peek["more"] == 0
-    assert "more not shown" not in resp.content.decode()
-
-
-@pytest.mark.django_db
-def test_the_peek_puts_the_soonest_deadline_first(client):
-    """The cap only stays honest if the rows it keeps are the ones with the
-    most to say about acting today. Dated roles lead, soonest first; undated
-    ones follow, because "no date posted" is the least urgent thing a row
-    can say."""
-    from datetime import timedelta
-
-    from django.utils import timezone
-
-    user = _student()
-    today = timezone.localdate()
-    undated = _eligible_opp(1)
-    far = _eligible_opp(2)
-    near = _eligible_opp(3)
-    Opportunity.objects.filter(pk=far.pk).update(deadline=today + timedelta(days=30))
-    Opportunity.objects.filter(pk=near.pk).update(deadline=today + timedelta(days=2))
-    client.force_login(user)
-
-    _, peek, _ = _peek(client)
-
-    assert [r["id"] for r in peek["rows"]] == [near.id, far.id, undated.id]
-
-
-@pytest.mark.django_db
-def test_the_peek_folds_a_repeat_listing_exactly_as_the_confirm_does(client):
-    """The 206/209/208 defect, asked of the panel. One requisition listed
-    twice is one role: the feed folds it, the confirm writes one row, and the
-    panel must name it once — otherwise the student reads two promises and
-    gets one."""
-    user = _student()
-    firm = Firm.objects.create(name="Repeat Bank", slug="repeat-bank")
-    for n in (1, 2):
-        Opportunity.objects.create(
-            firm=firm, url=f"https://repeat/{n}", title="Summer Analyst",
-            bucket="internship", status="open", class_year="2027",
-            location="New York")
-    client.force_login(user)
-
-    resp, peek, offer = _peek(client)
-
-    assert len(peek["rows"]) == peek["total"] == len(offer) == 1
-    assert resp.content.decode().count('class="peek-title"') == 1
-
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
-    written = set(UserOpportunity.objects.for_user(user)
-                  .values_list("opportunity_id", flat=True))
-    assert written == {r["id"] for r in peek["rows"]}
-
-
-@pytest.mark.django_db
-def test_what_the_panel_named_is_what_the_click_saves(client):
-    """The whole invariant in one assertion, for an offer small enough that
-    the panel names all of it: panel contents == offer set == what gets
-    written."""
-    user = _student()
-    for n in (1, 2, 3):
-        _eligible_opp(n)
-    client.force_login(user)
-
-    _, peek, offer = _peek(client)
-    client.post(reverse("track_eligible"), {"confirmed": "1"})
-
-    written = set(UserOpportunity.objects.for_user(user)
-                  .values_list("opportunity_id", flat=True))
-    assert {r["id"] for r in peek["rows"]} == set(offer) == written
-
-
-@pytest.mark.django_db
-def test_the_peek_is_a_disclosure_a_keyboard_can_reach(client):
-    """Hover is not an interface for everyone. The toggle is a real button
-    wired to the panel it opens, so focus and a tap both work and a screen
-    reader is told what the control does."""
-    user = _student()
-    _eligible_opp(1)
-    client.force_login(user)
-
-    body = client.get(reverse("opportunities")).content.decode()
-
-    assert ('class="peek-toggle" aria-expanded="false" '
-            'aria-controls="bulk-save-peek"') in body
-    assert 'id="bulk-save-peek"' in body
-
-
-# ---------------------------------------------------------------------------
 # One row per JOB, not one per branch office
 # ---------------------------------------------------------------------------
 #
 # THE MEASURED DEFECT (founder's live offer, 2026-09-02; user 6, class 2029,
-# tracks ib+st, regions hk+us). The offer had just been narrowed from 56 roles
-# to 20 by `_offer_fits`, which fixed relevance and did nothing about
+# tracks ib+st, regions hk+us). The retired banner's offer had just been
+# narrowed from 56 roles to 20, which fixed relevance and did nothing about
 # repetition: 9 of those 20 rows were one KeyBank programme filed as one
 # requisition per branch — Bellingham, Toledo, Cleveland, Erie, Goshen,
 # Cicero, Dayton, Boise, Pottstown — and five of the peek panel's eight
@@ -977,15 +814,16 @@ def test_the_peek_is_a_disclosure_a_keyboard_can_reach(client):
 # `fold_duplicates` cannot reach this and must not: it keys on the normalized
 # title (nine titles naming nine cities are nine strings) and then treats a
 # stated city as a hard divider, deliberately, because folding London into New
-# York on a BOARD deletes a job from the catalogue. A bulk-save offer is a
-# shortlist of decisions rather than a catalogue, so it folds — on
-# `_family_key`, the rule the feed's firm columns already group on, because
-# one page may not hold two answers to "is this the same programme in another
-# city?" (P5).
+# York on a BOARD deletes a job from the catalogue. A shortlist of six
+# decisions is not a catalogue, so it folds — on `_family_key`, the rule the
+# feed's firm columns already group on, because one page may not hold two
+# answers to "is this the same programme in another city?" (P5).
 #
-# Pinned here: the fold happens, it happens AFTER the eligibility and fit
-# gates, what gets saved is the survivor alone, the peek says how many places
-# a folded row stands for, and the count/peek/write invariant survives a fold.
+# THE FOLD MOVED WITH THE SAVE (2026-09-02) from the banner's offer to the
+# column itself, which is what keeps it true of the thing the button writes.
+# Pinned here: the fold happens, it happens AFTER the ranking, what gets saved
+# is the survivor alone, the card says how many places it stands for, and the
+# count/column/write invariant survives a fold.
 
 
 def _branch_opp(firm, base, city, *, class_year="2027", region="us",
@@ -1004,7 +842,7 @@ def _branch_opp(firm, base, city, *, class_year="2027", region="us",
 
 
 @pytest.mark.django_db
-def test_one_programme_in_six_cities_is_one_offer_row(client):
+def test_one_programme_in_six_cities_is_one_card(client):
     """The founder's complaint, at test scale: "this is still showing me so
     many of the same role from different locations from the same bank"."""
     user = _student()
@@ -1013,17 +851,17 @@ def test_one_programme_in_six_cities_is_one_offer_row(client):
         _branch_opp(firm, "Summer Analyst Programme", city)
     client.force_login(user)
 
-    body = client.get(reverse("opportunities")).content.decode()
+    body, cluster, offered = _column(client)
 
-    assert len(client.session["bulk_save_offer"]) == 1
-    assert "1 role fits you and names your year" in body
+    assert len(cluster["roles"]) == len(offered) == 1
+    assert "Save 1" in body
 
 
 @pytest.mark.django_db
 def test_the_confirm_writes_the_survivor_and_not_the_whole_family(client):
     """The fold has to mean the same thing to the write that it means to the
-    number. Saving all six because the banner counted one would be the
-    206/209/208 defect rebuilt from the other end — the banner naming a
+    number. Saving all six because the column counted one would be the
+    206/209/208 defect rebuilt from the other end — the button naming a
     commitment smaller than the one the click makes."""
     user = _student()
     firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
@@ -1032,7 +870,7 @@ def test_the_confirm_writes_the_survivor_and_not_the_whole_family(client):
     client.force_login(user)
 
     client.get(reverse("opportunities"))
-    offered = set(client.session["bulk_save_offer"])
+    offered = set(client.session["pick_save_offer"])
     client.post(reverse("track_eligible"), {"confirmed": "1"})
 
     written = set(UserOpportunity.objects.for_user(user)
@@ -1042,21 +880,22 @@ def test_the_confirm_writes_the_survivor_and_not_the_whole_family(client):
 
 
 @pytest.mark.django_db
-def test_the_peek_says_how_many_places_a_folded_row_stands_for(client):
-    """Fold, but never silently (P4). Six branch offices behind one row is a
+def test_the_card_says_how_many_places_a_folded_row_stands_for(client):
+    """Fold, but never silently (P4). Six branch offices behind one card is a
     fact the student needs in order to know the choice exists and that the
-    board is where to make it — the alternative is a panel that reads as if
-    the other five addresses were never posted."""
+    firm's own column is where to make it — the alternative is a column that
+    reads as if the other five addresses were never posted, and a "Save all"
+    that quietly commits to one of six towns."""
     user = _student()
     firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
     for city in ("Boise", "Toledo", "Goshen", "Cicero", "Erie", "Pottstown"):
         _branch_opp(firm, "Summer Analyst Programme", city)
     client.force_login(user)
 
-    resp, peek, offer = _peek(client)
+    body, cluster, _ = _column(client)
 
-    assert [r["places"] for r in peek["rows"]] == [6]
-    assert "6 cities" in resp.content.decode()
+    assert [r["places"] for r in cluster["roles"]] == [6]
+    assert "6 cities" in body
 
 
 @pytest.mark.django_db
@@ -1068,26 +907,26 @@ def test_a_row_standing_only_for_itself_says_nothing_about_places(client):
     _eligible_opp(1)
     client.force_login(user)
 
-    resp, peek, _ = _peek(client)
+    body, cluster, _ = _column(client)
 
-    assert [r["places"] for r in peek["rows"]] == [None]
-    # The chip's rendered ATTRIBUTE, not the word and not the bare class: both
-    # "cities" and `.peek-places-n` appear in this page's own stylesheet, and
+    assert [r["places"] for r in cluster["roles"]] == [None]
+    # The chip's rendered ATTRIBUTE, not the word and not the bare class name:
+    # both "cities" and `.rr-places` appear in this page's own stylesheet, and
     # a test that reads prose out of a CSS block fails for reasons that have
     # nothing to do with the feature.
-    assert 'class="peek-places-n"' not in resp.content.decode()
+    assert 'class="rr-places"' not in body
 
 
 @pytest.mark.django_db
-def test_the_count_the_peek_and_the_write_still_agree_over_a_fold(client):
-    """THE INVARIANT, asked of the surface that just started folding.
+def test_the_count_the_column_and_the_write_still_agree_over_a_fold(client):
+    """THE INVARIANT, asked of the surface that folds.
 
     206/209/208 happened because three surfaces answered one question
     separately. A fold is exactly the kind of change that reintroduces it —
     it is easy to fold the number and not the list, or the list and not the
-    write. All four numbers here come from the single `_bulk_save_offer`
-    call: the banner's count, the peek's total, the ids the peek names, and
-    the rows the confirm creates."""
+    write. All four figures here come from the single `picked_roles` call:
+    the header's count, the cards rendered, the ids stashed, and the rows the
+    confirm creates."""
     user = _student()
     firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
     for city in ("Boise", "Toledo", "Goshen", "Cicero"):
@@ -1102,28 +941,33 @@ def test_the_count_the_peek_and_the_write_still_agree_over_a_fold(client):
         bucket="internship", status="open", class_year="2027")
     client.force_login(user)
 
-    resp, peek, offer = _peek(client)
-    body = resp.content.decode()
+    body, cluster, offered = _column(client)
 
-    assert len(offer) == 3
-    assert "3 roles fit you and name your year" in body
-    assert peek["total"] == len(offer)
-    assert {r["id"] for r in peek["rows"]} == set(offer)
-    assert "Save 3 roles to My Applications?" in body
+    assert len(offered) == 3
+    assert cluster["save_count"] == 3
+    assert {r["id"] for r in cluster["roles"]} == set(offered)
+    assert "Save all 3" in body
+    assert "Save 3 picked roles to My Applications?" in body
 
     client.post(reverse("track_eligible"), {"confirmed": "1"})
     written = set(UserOpportunity.objects.for_user(user)
                   .values_list("opportunity_id", flat=True))
-    assert written == set(offer)
+    assert written == set(offered)
 
 
 @pytest.mark.django_db
 def test_two_different_roles_at_one_firm_are_not_folded_together(client):
     """The fold reads a city, not a firm. Moelis runs five different Virtual
     Discovery Series events — Ask the Analysts, Acing the Interview, Life
-    Sciences, Capital Markets, Moelis 101 — all on the founder's live offer
+    Sciences, Capital Markets, Moelis 101 — all on the founder's live board
     and every one of them a different thing to attend. A per-firm cap would
-    have eaten four of them; this must not."""
+    have eaten four of them; this fold must not.
+
+    `MAX_PER_FIRM` still caps the COLUMN at two per firm, which is a
+    different and deliberate rule (a shortlist of six from one bank is a
+    correct ranking and a useless shortlist). What this pins is that the fold
+    itself is not doing the eating: two distinct titles survive it, where a
+    title-blind fold would have left one."""
     user = _student()
     firm = Firm.objects.create(name="Series Bank", slug="series-bank")
     for n, topic in enumerate(("Ask the Analysts", "Acing the Interview",
@@ -1134,9 +978,60 @@ def test_two_different_roles_at_one_firm_are_not_folded_together(client):
             bucket="internship", status="open", class_year="2027")
     client.force_login(user)
 
-    client.get(reverse("opportunities"))
+    _, cluster, offered = _column(client)
 
-    assert len(client.session["bulk_save_offer"]) == 4
+    assert len(offered) == 2
+    assert [r["places"] for r in cluster["roles"]] == [None, None]
+
+
+@pytest.mark.django_db
+def test_one_programme_in_two_markets_is_two_cards(client):
+    """THE REGRESSION THIS TERM WAS ADDED FOR, measured on the founder's own
+    column 2026-09-02 while the merge was being built.
+
+    Nomura runs its 2027 Global Markets programme in Hong Kong (6293) and
+    Singapore (6292), and its Investment Banking programme in the same two.
+    The retired bulk-save offer folded AFTER a hard region gate, so a family
+    could never span two markets; this column has no hard region gate — the
+    scorer charges a wrong market and lets a strong row survive it — so the
+    first version of the fold saw one four-city family, `_survivor_rank`
+    (blind to this student) kept the Singapore copy, Singapore is a market he
+    never named, and a Hong Kong Global Markets internship he had been shown
+    all week dropped out of his column.
+
+    A false fold costs a job never seen. So the market is part of the family:
+    within one market the members differ only by town and score identically,
+    across markets they are different decisions."""
+    user = _student()
+    firm = Firm.objects.create(name="Two Market Bank", slug="two-market-bank")
+    hk = _branch_opp(firm, "Global Markets Summer Internship", "Hong Kong",
+                     region="hk")
+    sg = _branch_opp(firm, "Global Markets Summer Internship", "Singapore",
+                     region="sg")
+    client.force_login(user)
+
+    _, cluster, offered = _column(client)
+
+    assert set(offered) == {hk.id, sg.id}
+    # Neither is standing for the other, so neither claims a city count.
+    assert [r["places"] for r in cluster["roles"]] == [None, None]
+
+
+@pytest.mark.django_db
+def test_branches_inside_one_market_still_fold(client):
+    """The other side of the same term, so it cannot be widened into "never
+    fold". Four towns in ONE market is one decision, and the card says four.
+    """
+    user = _student()
+    firm = Firm.objects.create(name="One Market Bank", slug="one-market-bank")
+    for city in ("Boise", "Toledo", "Goshen", "Cicero"):
+        _branch_opp(firm, "Summer Analyst Programme", city, region="us")
+    client.force_login(user)
+
+    _, cluster, offered = _column(client)
+
+    assert len(offered) == 1
+    assert [r["places"] for r in cluster["roles"]] == [4]
 
 
 @pytest.mark.django_db
@@ -1156,33 +1051,30 @@ def test_a_family_with_two_stated_deadlines_is_left_whole(client):
                 deadline=_dt.date(2099, 9, 1))
     client.force_login(user)
 
-    client.get(reverse("opportunities"))
-
-    assert len(client.session["bulk_save_offer"]) == 2
+    assert len(_column(client)[2]) == 2
 
 
 @pytest.mark.django_db
-def test_the_fold_runs_after_the_gates_and_not_before(client):
+def test_the_fold_runs_after_the_ranking_and_not_before(client):
     """ORDER OF OPERATIONS, and it is load-bearing.
 
-    Fold first and a family's survivor can be a row the student's own filters
-    would have rejected, which then takes the qualifying sibling down with it.
-    Here the London copy would win `_survivor_rank` outright — it states a
-    deadline and New York does not — and London is in a market this student
-    never named. Gates first means only qualifying rows ever reach the fold,
-    so the survivor is always a role that could have been offered on its own.
-    """
+    Fold first and a family's survivor can be a row the ranker would have
+    rejected, which then takes the qualifying sibling down with it. Here the
+    2031 copy would win `_survivor_rank` outright — it states a deadline and
+    the other does not — and it names a class year this student is not in, so
+    `recommend()` refuses it. Ranking first means only qualifying rows ever
+    reach the fold, so the survivor is always a role that could have been
+    picked on its own."""
     import datetime as _dt
 
-    user = _fit_student()
+    user = _student()
     firm = Firm.objects.create(name="Branch Bank", slug="branch-bank")
-    abroad = _branch_opp(firm, "Investment Banking Summer Analyst", "London",
-                         region="eu", deadline=_dt.date(2099, 3, 1))
-    here = _branch_opp(firm, "Investment Banking Summer Analyst", "New York",
-                       region="us")
+    wrong = _branch_opp(firm, "Summer Analyst Programme", "London",
+                        class_year="2031", deadline=_dt.date(2099, 3, 1))
+    here = _branch_opp(firm, "Summer Analyst Programme", "New York")
     client.force_login(user)
 
-    client.get(reverse("opportunities"))
+    offered = _column(client)[2]
 
-    assert set(client.session["bulk_save_offer"]) == {here.id}
-    assert abroad.id not in client.session["bulk_save_offer"]
+    assert offered == [here.id]
+    assert wrong.id not in offered

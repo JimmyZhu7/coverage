@@ -35,7 +35,6 @@ from coverage_domain.pipeline import (
 )
 from directory.classify import TARGET_BUCKETS
 from directory.deadlines import closing_soon_filter
-from directory.dupes import fold_duplicates
 from directory.models import Firm, FirmDate, Opportunity
 from directory.open_runs import firm_open_runs
 
@@ -4550,32 +4549,22 @@ def _dashboard_context(user) -> dict:
     below was 0 — the fact this page never said.
 
     Replaced with two personal numbers already computed for Opportunities:
-    open roles at the firms this user actually targets, and how many of
-    those name their own class year and are still unsaved. The board-wide
-    figures still exist for the founder view at /instrument/.
+    open roles at the firms this user actually targets, and how many of the
+    roles picked for them are still unsaved. The board-wide figures still
+    exist for the founder view at /instrument/.
     """
     today = timezone.localdate()
 
-    # `select_related("firm")` IS LOAD-BEARING, not a tidy-up. The rows this
-    # queryset materialises are handed to `_eligible_unsaved_count` below,
-    # which asks `directory.views._eligibility` for a verdict on each one, and
-    # the visa branch of that verdict reads `directory.sponsorship.
-    # effective_sponsorship` -> `opp.firm.sponsors` for every row whose own
-    # posting is silent on sponsorship. Unjoined, that is one `SELECT ... FROM
-    # firms WHERE id = ?` per row: measured on the founder's live board
-    # (2026-09-01) 1,332 of the 1,866 folded rows were silent, and Today ran
-    # 1,397 queries for one page load. With the join the same block costs 2
-    # queries. Both counts below drop the join again on their own — Django
-    # clears `select_related` for an aggregate — so this buys the row fetch
-    # nothing it does not need.
-    #
-    # NOT `.defer("raw")` on top of it. `_eligibility` reads `raw.facts` for
-    # the graduation-window branch, so deferring the column trades 1,332 firm
-    # fetches for 647 deferred-field loads and measured SLOWER (531 ms against
-    # the 373 ms it was meant to fix). The row is wide on purpose here.
+    # `select_related("firm")` was LOAD-BEARING here while this function
+    # handed its own materialised rows to the eligibility count. It no longer
+    # does — `picked_roles` builds and joins its own queryset, and carries the
+    # same note for the same reason — so what is left of this one only ever
+    # feeds `.count()` aggregates, which drop the join anyway (Django clears
+    # `select_related` for an aggregate). Kept for the two `closing` counts
+    # below, which are aggregates on it and nothing more.
     campus = Opportunity.objects.filter(
         status="open", bucket__in=TARGET_BUCKETS
-    ).select_related("firm")
+    )
     # THE WINDOW COMES FROM `directory.deadlines`, NOT FROM HERE. This line
     # used to spell `deadline__range=(today, today + timedelta(days=9))` — a
     # second, inline copy of the arithmetic that module exists to own, and the
@@ -4626,23 +4615,26 @@ def _dashboard_context(user) -> dict:
     # rows. Reading the label instead of restating it is what stops it
     # drifting again.
     from directory.views import (
-        _FUNNEL_STATES, _STAGE_LABELS, _eligibility_profile,
-        _eligible_unsaved_count,
+        _FUNNEL_STATES, _STAGE_LABELS, _eligibility_profile, _pick_card,
+        pick_save_ids, picked_roles,
     )
 
     elig_profile = _eligibility_profile(user)
-    # FOLDED FIRST, like the feed. This chip and the Opportunities banner
-    # answer one question ("how many open roles name your year and aren't
-    # saved") and gave two answers to it — 209 here against the feed's 206 —
-    # because the feed counts its materialised rows AFTER `fold_duplicates`
-    # and this counted the raw queryset. A board scraped twice in one week
-    # carries the same requisition twice; it is one role to a student, and
-    # the number that leads them to the "Save them all" banner has to be the
-    # number that banner then states.
-    eligible_unsaved = 0
-    if elig_profile and elig_profile.get("class_year"):
-        folded, _ = fold_duplicates(campus)
-        eligible_unsaved = _eligible_unsaved_count(user, folded, elig_profile)
+    # THE PICKED COLUMN, not a second question about the same board. This chip
+    # used to count the retired bulk-save banner's set (open roles naming the
+    # user's class year, unranked), and the two surfaces disagreed by
+    # construction — measured on the founder's board 2026-09-02, 2 of the 9
+    # roles the banner offered were among his 6 picks. Worse, they had already
+    # disagreed about their own shared definition once: this counted the raw
+    # queryset while the feed counted its rows AFTER `fold_duplicates`, and
+    # one page load said 209 here against the feed's 206.
+    #
+    # So this calls the feed's own functions rather than restating anything.
+    # `picked_roles` builds its own queryset (the same one, dismissals
+    # dropped) and its own profiles, because this page holds neither — four
+    # queries, once, for a number that cannot drift from the column it names.
+    picks = [_pick_card(r) for r in picked_roles(user, elig_profile=elig_profile)[0]]
+    picked_unsaved = len(pick_save_ids(user, picks))
 
     uo = UserOpportunity.objects.for_user(user)
     funnel = {
@@ -4656,13 +4648,13 @@ def _dashboard_context(user) -> dict:
             "at_your_firms": at_your_firms,
             "closing_10": closing_10,
             "closing_10_reported": closing_10_reported,
-            "eligible_unsaved": eligible_unsaved,
-            # Whether the eligibility check RAN. Zero eligible-unsaved means
-            # two very different things — "you saved them all" versus "you
-            # never told us your year, so nothing was checked" — and the
-            # ribbon cell must not say "caught up" about a check that never
-            # happened.
-            "has_year": bool(elig_profile and elig_profile.get("class_year")),
+            "picked_unsaved": picked_unsaved,
+            # Whether the scorer had anything to say at all. Zero unsaved
+            # picks means two very different things — "you saved every one of
+            # them" versus "nothing on the board clears the bar for you yet"
+            # — and the ribbon cell must not say "caught up" about a column
+            # that is empty.
+            "has_picks": bool(picks),
             "funnel": funnel,
             "funnel_label": funnel_label,
         },

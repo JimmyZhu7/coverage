@@ -17,7 +17,7 @@ CLOSING THIS WEEK
 .ics feed puts it in the SUMMARY rather than the DESCRIPTION
 (crm/calendar_views.py): the surface has no hover. Every OTHER surface marks a
 prose-read date with a dotted underline plus a `title` carrying
-`item.reported.why` (_card.html, _rolecard.html, _role_drawer.html, _scope.html,
+`item.reported.why` (_card.html, _rolecard.html, _role_drawer.html,
 _apps_body.html, _calendar_event.html); in an inbox both of those convey exactly
 nothing, and a mail client's sanitizer would strip the styling anyway. So the
 marker is words, in both halves of this pair.

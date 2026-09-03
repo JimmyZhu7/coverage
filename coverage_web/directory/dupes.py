@@ -539,9 +539,9 @@ def fold_families(
     where the surface is a SHORTLIST rather than a catalogue — where a folded
     row is still one click away on a page the student can reach, and where the
     cost of naming one job six times is higher than the cost of naming it once.
-    `directory.views._bulk_save_offer` is that surface and carries the argument
-    for its own use of it. A board is not, and must keep using
-    `fold_duplicates`.
+    `directory.views.picked_roles` is that surface — the ranked six a bulk
+    "Save all" writes — and carries the argument for its own use of it. A
+    board is not, and must keep using `fold_duplicates`.
 
     THE SURVIVOR AND THE VETOES ARE THE SAME ONES. `_survivor_rank` picks the
     copy to keep and `_competing_claims` refuses to fold a family holding two

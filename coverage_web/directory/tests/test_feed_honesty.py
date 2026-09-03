@@ -830,35 +830,55 @@ def test_the_noscript_cols_link_renders_the_full_page(client):
 
 
 # ---------------------------------------------------------------------------
-# THE LENS→PIPELINE BRIDGE: one click saves the roles that name your year.
+# THE LENS→PIPELINE BRIDGE: one click saves the roles picked for you.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.django_db
-def test_save_your_year_saves_exactly_the_year_ok_roles(client, student):
-    """The banner's sentence changed on 2026-09-02 and this asserts the new
-    one: the offer is no longer "roles that name your year" but roles that
-    name your year AND that the recommender would rank (`_offer_fits`), so
-    the number reads as a recommendation rather than a raw count. What this
-    test is actually here for is unchanged — a stated year that is not this
-    student's, and a posting silent on the question, are both outside the
-    offer."""
+def test_the_bulk_save_writes_the_picked_column_and_nothing_else(client, student):
+    """REWRITTEN 2026-09-02, and the half that changed is the half whose
+    premise was retired.
+
+    It used to end `tracked == {mine.id}, "year_ok only — silence saves
+    nothing"`. Silence disqualifying a role was the blue banner's rule, and
+    the banner is gone: the save is the Picked for you column's own button
+    now, and a posting that states no graduation window gets no verdict in
+    either direction (`_eligibility`'s own contract). On the founder's live
+    column 4 of his 6 picks were silent on the year and all four were roles
+    on his stated tracks in his stated region; the retired rule would have
+    written 2 of the 6 cards under the button. See
+    `directory.views.track_eligible`.
+
+    The other half is untouched and is what this test is really for: a
+    posting stating a graduation window that EXCLUDES this student carries a
+    blocking verdict, `recommend()` refuses blocked candidates outright, so it
+    is neither picked nor written. That is the gate that protects a bulk
+    write, and it still holds.
+
+    The write is asserted against the column itself rather than a literal set,
+    which is the invariant the whole feature turns on: what the button writes
+    is what the column was showing."""
     from analytics.models import UserOpportunity
 
     firm = Firm.objects.create(slug="gs", name="Goldman Sachs")
     mine = _grad_role(firm, ["2029"], "2029", title="Mine Intern")
-    _grad_role(firm, ["2027"], "2027", title="Not Mine Intern")
+    not_mine = _grad_role(firm, ["2027"], "2027", title="Not Mine Intern")
     Opportunity.objects.create(firm=firm, title="Silent Intern", bucket="internship",
                                status="open", url="https://gs.com/silent-b")
 
     client.force_login(student)
-    body = client.get("/opportunities/").content.decode()
-    assert "1 role fits you and names your year" in body
+    resp = client.get("/opportunities/")
+    shown = {r["id"] for r in resp.context["pick_cluster"]["roles"]}
+    offered = set(client.session["pick_save_offer"])
+
+    assert mine.id in shown
+    assert not_mine.id not in shown, "a stated wrong year is blocking"
+    assert offered == shown
 
     resp = client.post("/opportunities/track-eligible/", {"confirmed": "1"})
     assert resp.status_code == 302
     tracked = set(UserOpportunity.all_objects.filter(user=student)
                   .values_list("opportunity_id", flat=True))
-    assert tracked == {mine.id}, "year_ok only — silence saves nothing"
+    assert tracked == offered
 
 
 @pytest.mark.django_db

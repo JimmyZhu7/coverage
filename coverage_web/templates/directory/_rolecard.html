@@ -175,6 +175,19 @@ only reintroduce the clipping bug this file's history is full of.
       but only in the Picked column, where nothing else names the firm.
       {% endcomment %}
       {% if r.show_firm %}<span class="rr-firm">{{ r.firm_name|smart_title }}</span>{% endif %}
+      {% comment %}
+      WHAT THE CITY-VARIANT FOLD DID, said out loud. The Picked column keeps
+      one card per distinct JOB, so a firm running one programme in nine
+      branch offices is one card here rather than nine (`picked_roles`, via
+      `dupes.fold_families`). Folding them and saying nothing would make the
+      column read as if the other eight addresses did not exist, and "Save
+      all" would then write one address of a job the student picked once
+      without ever admitting there were others. The chip names the count, so
+      a student who wants a particular town knows to open the firm's own
+      column and pick it. `places` is set only on a survivor that stands for
+      two or more STATED places (P4).
+      {% endcomment %}
+      {% if r.places %}<span class="rr-places" title="One card per role. This one is open in {{ r.places }} places; the firm's own column lists them all.">{{ r.places }} cities</span>{% endif %}
       {% if r.verdict %}<span class="rr-vd vd-{{ r.verdict.kind }}" title="{{ r.verdict.why }}">{{ r.verdict.label }}</span>{% endif %}
       {% comment %}
       HOW THIS FIRM HIRES. Directly after the verdict and before the

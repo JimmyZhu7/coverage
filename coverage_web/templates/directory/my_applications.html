@@ -240,9 +240,11 @@
   .apps-undo-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
 
   /* "Clear saved" — Saved only, see the template's own note on why no other
-     stage gets one. Same disclosed-confirm mechanism as the feed's bulk-save
-     banner (`.scope-confirm` in directory/_styles.html): a `<details>` whose
-     visible control only opens a stated count and a second, explicit button.
+     stage gets one. A `<details>` whose visible control only opens a stated
+     count and a second, explicit button. The feed's bulk save used the same
+     mechanism until 2026-09-02 and now uses `hx-confirm` and the site's
+     styled dialog instead (see `_pickcol.html`); this one keeps the
+     disclosure, because it must also work for a reader with JS off.
      Danger-toned like `.apps-remove` above, because unlike the undo strip
      this one IS a warning — it is about to delete rows. The stage heading
      wraps (see `.apps-stage > h2` above) so this control can drop to its own

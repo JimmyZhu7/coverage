@@ -1455,27 +1455,44 @@ def test_a_seventh_event_today_still_gets_its_dot_and_its_prep():
     assert len(ctx["chat_prep"]) == 7, "every chat gets its prep"
 
 
-def test_the_eligibility_cell_never_congratulates_an_unchecked_user(client):
-    """Zero eligible-unsaved means two different things: "you saved them all"
-    and "you never stated a year, so nothing was checked". The day-zero
+def test_the_picks_cell_never_congratulates_an_unchecked_user(client):
+    """Zero unsaved means two different things: "you saved them all" and
+    "nothing was picked for you, so there was nothing to save". The day-zero
     walkthrough caught the ribbon telling a ten-minute-old account it was
     "all caught up on your year" when the check had never run. Three states:
-    a count, a genuine all-clear, and an honest pointer to Settings."""
+    a count, a genuine all-clear, and an honest pointer to Settings.
+
+    REWRITTEN 2026-09-02 for the surface, not the rule. The cell reads the
+    Picked column's unsaved count now rather than the retired bulk-save
+    banner's year-gated one, so the state that earns the all-clear is "picks
+    exist and are all saved" rather than "you stated a year and nothing
+    names it". The failure mode it guards is identical."""
+    from directory.models import Firm, Opportunity
+
     user = _user(weekly_touch_goal=10)
     client.force_login(user)
 
-    user.class_year = None
-    user.save(update_fields=["class_year"])
+    # Nothing on the board, so nothing can be picked: the check never ran.
     body = client.get(reverse("crm:week")).content.decode()
-    assert "Add your class year" in body
-    assert "Caught up for Class of" not in body
+    assert "Fill in Settings to get picks" in body
+    assert "Every pick saved" not in body
 
+    # A role this student is picked for, and then saved: the all-clear is
+    # EARNED, because there was something to be caught up on.
     user.class_year = 2029
     user.save(update_fields=["class_year"])
+    firm = Firm.objects.create(slug="picks-firm", name="Picks Bank")
+    Opportunity.objects.create(
+        firm=firm, url="https://picks/1", title="Summer Analyst",
+        bucket="internship", status="open", class_year="2029")
     body = client.get(reverse("crm:week")).content.decode()
-    # No open roles name 2029 in this fixture, so the all-clear is EARNED.
-    assert "Caught up for Class of 2029" in body
-    assert "Add your class year" not in body
+    assert "Picked for you, not saved yet" in body
+
+    client.get(reverse("opportunities"))
+    client.post(reverse("track_eligible"), {"confirmed": "1"})
+    body = client.get(reverse("crm:week")).content.decode()
+    assert "Every pick saved" in body
+    assert "Fill in Settings to get picks" not in body
 
 
 # ---------------------------------------------------------------------------
@@ -2026,13 +2043,33 @@ def test_today_does_not_run_more_queries_as_the_board_grows(client):
     )
 
 
-def test_the_eligible_unsaved_cell_still_counts_what_it_should(client):
-    """The join must not change the answer. Fifty roles, all stating the
-    user's own class year, none of them saved."""
+def test_the_ribbons_unsaved_count_is_the_picked_columns_own(client):
+    """REWRITTEN 2026-09-02. It read `eligible_unsaved == 50` — the retired
+    bulk-save banner's count, which was every open role naming the user's
+    class year, unranked and uncapped. The banner is gone (merged into the
+    Picked for you column, the founder's call), and a ribbon still reading a
+    deleted function would be a number with nothing on the other end.
+
+    The cell counts the COLUMN's unsaved picks now, so 50 eligible roles is
+    not 50: `recommend()` keeps at most `MAX_PER_FIRM` per firm and
+    `DEFAULT_LIMIT` overall. What the number has to be is whatever the column
+    is showing, which is what this asserts — the chip and the column read one
+    function (`directory.views.picked_roles`), so they cannot disagree the way
+    this chip and the banner once did (209 here against the feed's 206).
+
+    Both halves are asserted: the count is the column's, and the column is
+    capped rather than silently equal to the board."""
+    from directory.recommend import DEFAULT_LIMIT
+
     user = _user("q-roles-count@example.com", weekly_touch_goal=14)
     _today_query_count_for_roles(client, user, 50)
+
     ctx = _dashboard_context(user)
-    assert ctx["dash"]["eligible_unsaved"] == 50
+    client.force_login(user)
+    column = client.get(reverse("opportunities")).context["pick_cluster"]
+
+    assert ctx["dash"]["picked_unsaved"] == column["save_count"]
+    assert ctx["dash"]["picked_unsaved"] == DEFAULT_LIMIT
     assert ctx["dash"]["at_your_firms"] == 50
 
 
