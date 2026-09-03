@@ -143,7 +143,22 @@
     than reordered with CSS `order`, so the visual order, the focus order,
     and the serialized order all agree. It is open-ended, so it carries no
     count.{% endcomment %}
-    <label class="filters-search"><span class="f-cap">Search</span>
+    {% comment %}
+    `is-set` — the class that separates a filter the student narrowed from one
+    still reading "Any X". Six controls drawn identically is what it fixes;
+    see the THREE WEIGHTS block in _styles.html for the weights it keys.
+
+    Rendered here rather than derived in script, for the two reasons the
+    disclosure's `open` attribute is: a deep-linked filter must be lit on
+    first paint, and the bar must still say what it is doing with JS off.
+
+    It does NOT survive an htmx swap — this bar sits outside `#cov-results`,
+    so nothing re-renders these labels — which is why there is also a sync at
+    the bottom of this file. Server render is the source of truth on arrival;
+    the script keeps it true for the rest of the session.
+    {% endcomment %}
+    <label class="filters-search{% if selected.q %} is-set{% endif %}"><span class="f-cap">Search</span>
+      <svg class="filters-search-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.4 10.4L14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
       <input type="search" name="q" value="{{ selected.q }}" placeholder="Search firm, role, city" autocomplete="off">
     </label>
 
@@ -167,7 +182,7 @@
       DOM — screen readers still get "Programme Year", and the string is
       pinned by test_the_programme_year_hint_ships_verbatim.
       {% endcomment %}
-      <label><span class="f-cap">Programme Year</span>
+      <label{% if selected.year %} class="is-set"{% endif %}><span class="f-cap">Programme Year</span>
         <select name="year" id="f-year">{% include "directory/_facet_options.html" with options=year_facet current=selected.year %}</select>
       </label>
 
@@ -178,11 +193,11 @@
       including unstated. See views.py's REGION_NONE for why the label is not
       "No Region".
       {% endcomment %}
-      <label><span class="f-cap">Region</span>
+      <label{% if selected.region %} class="is-set"{% endif %}><span class="f-cap">Region</span>
         <select name="region" id="f-region">{% include "directory/_facet_options.html" with options=facets.regions current=selected.region %}</select>
       </label>
 
-      <label><span class="f-cap">Track</span>
+      <label{% if selected.track %} class="is-set"{% endif %}><span class="f-cap">Track</span>
         <select name="track" id="f-track">{% include "directory/_facet_options.html" with options=facets.tracks current=selected.track %}</select>
       </label>
 
@@ -195,7 +210,7 @@
       Region its "Other / Unstated" option after a filter silently deleted 297
       rows.
       {% endcomment %}
-      <label><span class="f-cap">Sponsorship</span>
+      <label{% if selected.sponsorship %} class="is-set"{% endif %}><span class="f-cap">Sponsorship</span>
         <select name="sponsorship" id="f-sponsorship">{% include "directory/_facet_options.html" with options=facets.sponsorship current=selected.sponsorship %}</select>
       </label>
 
@@ -257,7 +272,7 @@
       result count would be a promise made about a list nobody reads
       exhaustively. Deliberately uncounted, per the bar's consistency rule.
       {% endcomment %}
-      <label><span class="f-cap">Companies</span>
+      <label{% if selected.firm %} class="is-set"{% endif %}><span class="f-cap">Companies</span>
         <div class="cmulti" data-cmulti>
           <button type="button" class="cmulti-btn" aria-haspopup="true" aria-expanded="false">
             <span class="cmulti-label">All Companies</span>
@@ -461,5 +476,56 @@ else is htmx and the platform.
       sel.dispatchEvent(new Event("change"));
     });
   });
+
+  // `is-set` — the class that separates a filter you narrowed from one still
+  // reading "Any X". The server renders it (see the labels above), and that
+  // is the source of truth on load, with JS off, and on a deep link.
+  //
+  // THIS KEEPS IT TRUE FOR THE REST OF THE SESSION, and it has to exist:
+  // the bar sits OUTSIDE `#cov-results`, so an htmx filter change never
+  // re-renders the label carrying the class. Without this, picking "Hong
+  // Kong" would filter the board and leave Region drawn as untouched — the
+  // stale-count bug in a different currency, and on the one control whose
+  // whole job is to say what it is doing.
+  //
+  // Derived from the controls' live VALUES rather than mirrored from the
+  // server, because the values are what the student just changed and what
+  // the next GET will serialize. `.fit-toggle` is deliberately excluded: it
+  // is a checkbox and states its own engaged state in CSS
+  // (`:has(input:checked)`), so giving it a second mechanism would be two
+  // rules for one fact.
+  (function () {
+    var form = document.querySelector(".filters");
+    if (!form) return;
+    // The bar's OWN labels only. A bare `label` selector would also reach the
+    // 100+ `.cmulti-opt` rows inside the Companies panel and stamp the class
+    // on every firm the student ticks — invisible (nothing styles a set
+    // `.cmulti-opt`) and exactly the kind of quiet DOM litter that becomes a
+    // real bug the day someone writes a rule for `.is-set` alone.
+    var SCOPE = ":scope > label, :scope > details > label";
+    function sync() {
+      form.querySelectorAll(SCOPE).forEach(function (label) {
+        if (label.classList.contains("fit-toggle")) return;
+        var on = false;
+        label.querySelectorAll("select, input").forEach(function (el) {
+          // The enhancer's own filter box is NOT a filter. Programme Year has
+          // 13 options and base.html's SEARCH_THRESHOLD is 12, so `.csel`
+          // builds it a type-to-filter input INSIDE this label — and without
+          // this guard, typing "2027" to find the option would light Year up
+          // as engaged while the actual selection was still "Any Year".
+          // `.cmulti-menu`'s checkboxes are deliberately NOT excluded: those
+          // are the Companies value, not chrome.
+          if (el.closest(".csel-panel")) return;
+          if (el.type === "checkbox" || el.type === "radio") on = on || el.checked;
+          else on = on || el.value.trim() !== "";
+        });
+        label.classList.toggle("is-set", on);
+      });
+    }
+    form.addEventListener("change", sync);
+    form.addEventListener("input", sync);
+    document.body.addEventListener("htmx:afterSettle", sync);
+    sync();
+  })();
 {% endscript %}
 {% endblock %}

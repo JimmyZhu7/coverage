@@ -49,6 +49,39 @@ def test_no_django_comment_leaks_into_a_style_block(path):
 
 
 @pytest.mark.parametrize("path", PAGES)
+def test_no_comment_delimiter_survives_outside_a_comment(path):
+    """An orphan `*/` is the OTHER way this file kills its own rules, and the
+    brace count above cannot see it.
+
+    It happens when prose is appended to a comment that already ended: the
+    closing `*/` stays where it was, the new lines sit in open CSS, and the
+    parser reads them plus the trailing `*/` as the next rule's SELECTOR.
+    That selector matches nothing, so the declarations behind it are dropped
+    silently — the braces still balance, the page still returns 200, and the
+    only symptom is one component with no styling.
+
+    Caught for real on 2026-09-03, twice. Five lines appended after the
+    `.seg-all` comment's `*/` would have shipped "Everything" as the one
+    segment with no checked fill, in a control whose whole job is to say which
+    mode you are in. And the same mistake was ALREADY on the page, above
+    `.scope-foot`, from 2026-09-02: `.scope-foot { margin: 0 }` had never
+    reached a browser, so the footnote kept the 12px bottom margin the generic
+    `.scope-line` rule gives it — while the test written to pin `margin: 0`
+    passed, because that test reads the rule out of the source text and the
+    source text was fine. A rule can be present and unreachable, and only a
+    check on the residue tells the two apart.
+    """
+    for block in _style_blocks(path):
+        residue = re.sub(r"/\*.*?\*/", "", block, flags=re.S)
+        for delim in ("*/", "/*"):
+            assert delim not in residue, (
+                f"an orphan {delim!r} sits outside a comment in {path}'s "
+                "<style> block. Everything from there to the next `{` is "
+                "read as a selector, and the rule behind it is dropped."
+            )
+
+
+@pytest.mark.parametrize("path", PAGES)
 def test_style_block_braces_balance(path):
     """Balanced braces are the cheap proxy for 'a parser can read all of it'.
     An unbalanced block means some rules are unreachable even without a
@@ -175,6 +208,22 @@ def _rule_all(css: str, selector: str) -> str:
     bodies = [m.group(1) for m in re.finditer(
         r"^\s*" + re.escape(selector) + r"\s*\{(.*?)\}", css, re.S | re.M)]
     assert bodies, f"no rule found for {selector}"
+    return "\n".join(bodies)
+
+
+def _grouped_rule(css: str, selector: str) -> str:
+    """The declarations of every rule that LISTS `selector` in its prelude.
+
+    `_rule` and `_rule_all` anchor on the start of a line, so neither can see
+    a selector that is the second or third entry in a comma-separated list —
+    and a tier that has to say the same thing about a <select>, a `.csel-btn`
+    and a `.cmulti-btn` is written as exactly that, once, so the three cannot
+    drift. Split on the comma and compare whole entries: a substring match
+    would conflate `... select` with `... select:hover`.
+    """
+    bodies = [decls for prelude, decls in _rules(css)
+              if any(" ".join(p.split()) == selector for p in prelude.split(","))]
+    assert bodies, f"no rule lists {selector!r} in the rendered CSS"
     return "\n".join(bodies)
 
 
@@ -797,6 +846,75 @@ def test_the_stat_strip_divider_is_out_of_flow_so_a_wrapped_line_can_clip_it():
     item = _rule(css, ".stat-strip .ss-item")
     assert "position: relative" in item, (
         "the divider is positioned against its own item, not against the strip")
+
+
+# ---------------------------------------------------------------------------
+# ROW 2'S THREE WEIGHTS, AND THE SHORTHAND THAT WOULD SILENTLY UNDO ONE
+# (2026-09-03).
+#
+# The bar drew six controls identically, so it could not say which of them
+# the student had actually narrowed. The fix is a resting tier and an engaged
+# tier, keyed on a server-rendered `is-set` class — which means most of these
+# rules set a background, and a background on a <select> in this codebase is
+# a trap: coverage.css draws the native select's caret with
+# `background-image` (L1311), and the `background` SHORTHAND resets it to
+# `none`. The failure is invisible in the enhanced page (a `.csel-btn` stands
+# in for the select) and shows only with JS off, or in the frames before the
+# enhancer runs — i.e. exactly where nobody looks.
+# ---------------------------------------------------------------------------
+
+def test_no_filter_rule_wipes_the_native_selects_caret_with_a_shorthand():
+    """`background-color`, never `background`, anywhere a `select` is styled.
+
+    Written as a sweep over every rule rather than as an assertion about the
+    three that exist today, because the next tier added to this bar is the
+    one that will reach for the shorthand.
+    """
+    offenders = [
+        sel for sel, decls in _rules(_feed_css())
+        if "select" in sel and re.search(r"(?:^|;)\s*background\s*:", decls)
+    ]
+    assert not offenders, (
+        f"{offenders}: the `background` shorthand resets the caret's "
+        "`background-image` to none. Use `background-color`.")
+
+
+def test_the_bar_draws_three_weights_and_they_differ():
+    """Search, engaged, at rest — and the tiers must not collapse into each
+    other, which is the state this fixes.
+
+    Asserted as three DIFFERENT ground colours rather than three named
+    values, so restyling the bar is free and flattening it is not.
+    """
+    css = _feed_css()
+    grounds = {}
+    for name, selector in (
+        ("search", '.filters-search input[type="search"]'),
+        ("rest", ".filters label:not(.is-set) select"),
+        ("set", ".filters label.is-set select"),
+    ):
+        decls = _grouped_rule(css, selector)
+        m = re.search(r"background-color:\s*([^;]+)", decls)
+        assert m, f"the {name} tier states no ground of its own ({decls})"
+        grounds[name] = m.group(1).strip()
+    assert len(set(grounds.values())) == 3, (
+        f"two of the three weights draw the same ground: {grounds}")
+    # And the engaged tier is the accent — the same one the checked segment
+    # wears, so one colour means "you chose this" the length of the bar.
+    assert grounds["set"] == "var(--accent-soft)", grounds
+    assert "var(--accent-soft)" in _rule(css, ".seg-input:checked + .seg-campus")
+
+
+def test_a_quiet_control_still_answers_the_mouse():
+    """The resting tier gives up its shadow, so the affordance has to be
+    carried on hover instead — and the plain `:hover` rules cannot do it,
+    because `.filters label:not(.is-set) select` (0,3,0) out-specifies
+    `.filters select:hover` (0,2,1) and would pin the flat ground through the
+    hover. A tier that removes an affordance owes a replacement."""
+    css = _feed_css()
+    hover = _grouped_rule(css, ".filters label:not(.is-set) select:hover")
+    assert "background-color: var(--surface)" in hover, hover
+    assert "box-shadow: var(--shadow-1)" in hover, hover
 
 
 # ---------------------------------------------------------------------------

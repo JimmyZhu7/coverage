@@ -357,6 +357,136 @@ def test_the_everything_segment_states_its_own_count_honestly(client, bar):
 
 
 # ---------------------------------------------------------------------------
+# ROW 2 SAYS WHAT IT IS DOING (2026-09-03).
+#
+# Six controls were drawn at one weight, and four of them read "Any X" whether
+# or not the student had chosen anything — so a bar filtered to Hong Kong
+# looked exactly like a bar filtered to nothing. `is-set` is the class that
+# separates them, and it is rendered SERVER-side (not derived in script) for
+# the same three reasons the mobile disclosure's `open` attribute is: first
+# paint, no-JS, and surviving the htmx swap.
+# ---------------------------------------------------------------------------
+
+_SET_CASES = [
+    ("q", "analyst", "Search"),
+    ("year", "2027", "Programme Year"),
+    ("region", "hk", "Region"),
+    ("track", "ib", "Track"),
+    ("sponsorship", "yes", "Sponsorship"),
+    ("firm", "evercore", "Companies"),
+]
+
+
+def _bar(html):
+    """The filter form's own markup.
+
+    Scoped, and that is not fussiness. `_styles.html` renders into a <style>
+    block on this page and its comments discuss `is-set` in prose, so a
+    document-wide search for the class matches the page's own documentation
+    of it and no assertion about the bar can ever fail.
+    """
+    return html[html.index('<form class="filters"'):html.index("</form>")]
+
+
+def _label_classes(html):
+    """Every filter <label>'s class attribute, keyed by the caption inside it.
+
+    Anchored on the caption rather than on position, because the row is
+    reordered whenever a control's priority changes and a positional test
+    would then pin last week's layout. Search is keyed "Search" like the rest:
+    its `.f-cap` is the caption a screen reader reads, so it is the one name
+    the control has in both trees.
+    """
+    return {m.group(2): m.group(1) for m in re.finditer(
+        r'<label([^>]*)>\s*<span class="f-cap">([^<]*)</span>', _bar(html))}
+
+
+@pytest.mark.parametrize("param,value,caption", _SET_CASES)
+def test_an_engaged_filter_says_so_on_the_control_that_caused_it(
+        client, bar, param, value, caption):
+    """A control the student narrowed carries `is-set`; the five beside it
+    do not. Both halves matter: a class that is always on is not a signal."""
+    html = _get(client, **{param: value}).content.decode()
+    labels = _label_classes(html)
+    assert "is-set" in labels[caption], (
+        f"{caption} is narrowed to {value!r} and does not say so")
+    for other, cls in labels.items():
+        if other != caption:
+            assert "is-set" not in cls, (
+                f"{other} is untouched but drawn as engaged")
+
+
+def test_a_bar_with_nothing_chosen_lights_nothing(client, bar):
+    """The default view. Every control is at "Any X", so nothing is engaged
+    and nothing claims to be — which is what makes the lit state readable at
+    all."""
+    assert "is-set" not in _bar(_get(client).content.decode())
+
+
+def test_the_engaged_state_is_rendered_not_scripted(client, bar):
+    """It ships in the HTML of the FIRST response, so a deep-linked filter is
+    lit before any script runs and stays lit with JS off. The bar's other
+    server-rendered state (`filters_more_active`, the checked radio) is
+    server-side for the same reason, and this is measured the same way: read
+    off the response body, with no JS in the loop."""
+    assert 'class="is-set"' in _bar(_get(client, region="hk").content.decode())
+
+
+def test_the_engaged_state_has_a_script_because_the_swap_cannot_reach_it(
+        client, bar):
+    """AND WHY THE SERVER RENDER IS NOT ENOUGH ON ITS OWN.
+
+    The bar sits OUTSIDE `#cov-results`. An htmx filter change swaps the
+    results and refreshes the facet counts out of band; it never re-renders
+    the <label> that carries `is-set`. So the first render is correct and
+    every render after it is stale unless something client-side keeps up —
+    the stale-count bug (defect 2 in this file's header) in a different
+    currency, on the one control whose job is to say what it is doing.
+
+    Measured the way that defect was: the htmx response is the swap target
+    and the out-of-band spans, and the class is in NEITHER. That is the
+    licence for the sync in `opportunities.html`, and this test is what stops
+    someone deleting it as redundant with the server render.
+    """
+    swap = _hx(client, region="hk").content.decode()
+    assert "is-set" not in swap, (
+        "if the swap ever does carry the class, delete the script instead of "
+        "running two mechanisms for one fact")
+    assert 'id="cnt-role-campus"' in swap, "the OOB fragment is what does ship"
+    # And the sync really is wired to the swap, not only to user input: a
+    # `change` listener alone misses the settle after a Search keystroke has
+    # re-rendered the facets.
+    page = _get(client).content.decode()
+    assert 'classList.toggle("is-set"' in page
+    assert page.count('htmx:afterSettle') >= 2, (
+        "the re-settle handler and the is-set sync both hang off it")
+    # And it reads the FILTER's value, not any input that happens to sit in
+    # the label. Programme Year has 13 options against base.html's
+    # SEARCH_THRESHOLD of 12, so `.csel` builds a type-to-filter box inside
+    # that label; counting it would light Year up for typing "2027" into a
+    # dropdown the student then closed without choosing anything.
+    assert 'closest(".csel-panel")' in page, (
+        "the enhancer's own filter box is chrome, not a filter value")
+
+
+def test_search_leads_the_band_and_is_the_only_control_carrying_a_glyph(
+        client, bar):
+    """Search is row 2's loudest control: it is the one used on every visit,
+    the only one that takes typing, and it is FIRST in the DOM so the visual
+    order, the focus order and the serialized order agree.
+
+    The magnifier is inline SVG in the markup rather than a background-image
+    data URI, so it follows `currentColor` into dark mode and into the
+    engaged state — a data URI has no access to the cascade and would have to
+    hardcode a light-mode ink. Five controls carry a caret; exactly one
+    carries this."""
+    bar_html = _bar(_get(client).content.decode())
+    assert bar_html.count('class="filters-search-icon"') == 1
+    assert 'stroke="currentColor"' in bar_html
+    assert bar_html.index("filters-search") < bar_html.index('name="year"')
+
+
+# ---------------------------------------------------------------------------
 # Load-bearing strings and live-region wiring.
 # ---------------------------------------------------------------------------
 
