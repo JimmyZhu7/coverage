@@ -23,24 +23,31 @@
      ====================================================================== */
 
   /* ---- Funnel rail ------------------------------------------------------
-     All five stages, always, including the empty ones. Two jobs: it is the
+     All five stages, always, including the empty ones. ONE job now: it is the
      shape of the pipeline (a stage holding three gets a bar three times the
-     one holding one — hierarchy by size, not by colour), and it is the jump
-     nav down to each section. A stage with nothing in it prints "0" and says
-     so rather than disappearing, because a silently absent stage is
-     indistinguishable from a stage that does not exist.
+     one holding one — hierarchy by size, not by colour). A stage with nothing
+     in it prints "0" and says so rather than disappearing, because a silently
+     absent stage is indistinguishable from a stage that does not exist.
+
+     IT IS NOT A NAV, and this comment used to say it was. Each segment was an
+     anchor to its stage section until those sections went (2026-09-03,
+     `_apps_body.html`); the markup is `<span>` now, and the three rules that
+     dressed the anchor — `a.apps-fseg`, its hover and its focus ring — went
+     with it. The anchor's own href is NOT quoted here, and that is not
+     fussiness: this stylesheet is inlined into the page, so a comment naming
+     a string is a comment that puts the string back in the rendered body —
+     `test_each_lens_row_carries_the_control_that_sets_its_stage` asserts
+     exactly that string's absence, and caught this comment doing it.
+     Counted in the rendered page before deleting them:
+     `a.apps-fseg` matched 0 elements while `.apps-fseg` matched 5. A hover
+     lift and a focus ring on a thing that cannot be hovered-to or focused is
+     the tell that a control's CSS outlived the control.
      ---------------------------------------------------------------------- */
   .apps-funnel { display: grid; grid-template-columns: repeat(5, 1fr);
     gap: var(--s2); margin-top: var(--s5); }
   .apps-fseg { display: flex; flex-direction: column; gap: 5px;
     padding: var(--s2) var(--s3) var(--s3); border-radius: 10px;
-    border: 1px solid var(--line); background: var(--surface); min-width: 0;
-    text-decoration: none; transition: border-color var(--t-med),
-      box-shadow var(--t-med), background-color var(--t-med); }
-  a.apps-fseg { cursor: pointer; }
-  a.apps-fseg:hover { border-color: var(--accent-line); background: var(--accent-soft);
-    box-shadow: var(--shadow-1); text-decoration: none; }
-  a.apps-fseg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    border: 1px solid var(--line); background: var(--surface); min-width: 0; }
   .apps-fseg.is-empty { background: var(--paper); border-style: dashed; }
   .apps-fseg-n { font-family: var(--font-mono); font-size: var(--fs-l);
     font-variant-numeric: tabular-nums; font-weight: var(--w-med);
@@ -132,7 +139,24 @@
      controls at their natural widths. Every row now starts its role at the
      same x and hangs its controls off the same right edge, which is what
      lets the eye run down one column instead of re-finding it each row. */
-  .apps-lens-row { display: grid; align-items: center; gap: var(--s3);
+  /* `align-items: start`, NOT `center`, and this is the vertical half of the
+     same argument the four tracks make horizontally.
+     A row's height is set by its role cell, and that cell is wildly variable:
+     it carries the people block, which is 156.6px on a firm the student knows
+     someone at and 28.2px on one they do not. Centred, every other track
+     floated to the middle of whatever height that produced. Measured over the
+     eighteen rows of a seeded board at 1440px: the role title's centre sat
+     19.0px from its row's top on ALL EIGHTEEN — a real column — while the
+     countdown, the stage control and Remove took SIX different offsets
+     (29.8, 33.5, 44.1, 80.1, 88.9, 97.7), a 67.9px spread. On a row with a
+     people block the control sat 78.7px BELOW the title it acts on, level
+     with the second person's name; on the row under it, 14.5px below. So the
+     eye had to re-find the controls on every row, and a control drifted away
+     from its own title exactly when the row got interesting.
+     Starting them all instead puts the countdown, the title, the stage
+     control and Remove on one line at the top of every row, and lets the
+     people block hang below the title inside the cell it belongs to. */
+  .apps-lens-row { display: grid; align-items: start; gap: var(--s3);
     grid-template-columns: 9.5rem minmax(0, 1fr) 8.75rem auto;
     padding: var(--s2) var(--s3); border-radius: 10px;
     background: var(--paper); border: 1px solid var(--line);
@@ -148,10 +172,18 @@
      hover language for every row-shaped thing on the product. */
   .apps-lens-row:hover { background: var(--surface); border-color: var(--line-strong);
     box-shadow: var(--shadow-1); transform: translateX(2px); }
+  /* `min-height: 1.5rem` and centre inside it: that 24px is the height of the
+     tallest thing on the row's first line (the stage control, restated
+     below), so the countdown's one line of mono centres on the same band the
+     control does instead of hugging the top of the row. `flex: none` and
+     `min-width: 8.5rem` came off with it — this is a grid item in a 9.5rem
+     track, so the flex shorthand never applied and a 8.5rem floor could never
+     bind under a 9.5rem track. */
   .apps-lens-row .lens-when { display: inline-flex; align-items: center; gap: 5px;
+    min-height: 1.5rem;
     font-family: var(--font-mono); font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums;
-    font-weight: var(--w-med); white-space: nowrap; flex: none; min-width: 8.5rem;
+    font-weight: var(--w-med); white-space: nowrap;
     color: var(--ink-2); }
   .lens-gl { flex: none; }
   /* Urgency is carried by TWO channels beyond colour — a distinct glyph
@@ -166,7 +198,25 @@
   .apps-lens-row.u-soon { border-left-color: var(--stale-t); }
   .apps-lens-row.u-soon .lens-when { color: var(--stale-t); }
   .apps-lens-row .lens-when.lens-rolling { color: var(--ok); }
-  .lens-role { flex: 1 1 14rem; min-width: 0; font-size: var(--fs-s); }
+  /* The role cell's own line box is 1.5rem — the same 24px band the countdown
+     and the two controls are given above and below — so the title, the firm,
+     the chips and Read all centre on the line those controls centre on. Title
+     and firm already share one line (measured: title 228-545, firm from
+     547.6), so this buys the alignment without adding a line to the cell.
+     `flex: 1 1 14rem` came off: this is a grid item in the `minmax(0, 1fr)`
+     track, and the flex shorthand has been inert since the row stopped being
+     a flex box. */
+  .lens-role { min-width: 0; font-size: var(--fs-s); line-height: 1.5rem; }
+  /* And 1.5rem is an ABSOLUTE 24px, so it inherits down as 24px rather than
+     as a ratio — which is fine for the one line it was written for and wrong
+     for everything under it. The two blocks that hang below that line are put
+     back on `--lh-body`, the unitless value they inherited from `body` before
+     this rule existed, so each of their own font sizes computes its own
+     leading again. Measured cost of getting this wrong, before the reset: the
+     people block grew 156.6px to 183.0px (six line boxes x ~4.4px) and the
+     whole page 3505px to 3745px — a line-height fix for the first line
+     silently re-leading the CRM block underneath it. */
+  .lens-role .rp, .lens-shut-note { line-height: var(--lh-body); }
   .lens-role a { color: var(--ink); }
   .lens-role a:hover { color: var(--accent-ink); }
   .lens-firm { color: var(--ink-3); font-size: var(--fs-xs);
@@ -187,34 +237,70 @@
   .lens-shut-note { display: block; margin-top: 2px; font-size: var(--fs-xs);
     color: var(--ink-2); text-transform: none; letter-spacing: 0; }
   .lens-read { margin-left: var(--s2); }
-  .apps-read { align-self: flex-start; }
-  /* The funnel cards' own countdown and chips. Compact, because these cards
-     are a grid and a stage section can hold a dozen of them. */
-  .apps-when { display: inline-flex; align-items: center; align-self: flex-start;
-    font-size: var(--fs-xs); font-weight: var(--w-med); color: var(--accent-ink); }
-  .apps-when.is-past { color: var(--ink-3); }
-  .apps-when.is-reported { text-decoration: underline dotted currentColor;
-    text-underline-offset: 3px; text-decoration-thickness: 1px; }
-  .apps-facts { display: flex; flex-wrap: wrap; gap: 4px; }
+  {% comment %}
+  FIVE MORE RULES OF THE DELETED STAGE CARDS STOOD HERE and the deletion note
+  further down already claimed them: `.apps-read`, `.apps-when` with its
+  `.is-past` and `.is-reported` variants, and `.apps-facts`. They were the
+  card's countdown, its chip strip and its Read button. Counted in the
+  rendered page before deleting, on a board seeded to draw every group: each
+  of the three class names matched 0 elements. `.lens-when .is-reported`
+  below is a different rule on a different element and stays — the band's own
+  countdown still carries the dotted provenance underline, 3 of 18 rows.
+  {% endcomment %}
   /* Provenance, same dotted rule the feed and firm pages use. */
   .lens-when .is-reported { text-decoration: underline dotted currentColor;
     text-underline-offset: 3px; text-decoration-thickness: 1px; }
-  /* The stage pill, and the load-bearing bit of the whole overlap story: it is
-     an anchor down to the one section this row is actually counted in. Prose
-     can claim the row appears twice; a link that jumps you there settles it. */
-  /* The pill is a control now, not a link. Same size, weight and casing it
-     had as an anchor — it should still read as the row's little stage tag —
-     but it is a real <select>, so it carries a caret and it is what the
-     student changes the stage with. `-webkit-appearance: none` because the
-     native control paints an OS chrome that fights every other pill on the
-     page; the caret below is drawn back in as a background image so the
-     thing still announces itself as a menu rather than a text badge.
+  /* ---- The stage control ------------------------------------------------
+     WHAT IS ON THE SCREEN IS `.csel-btn`, NOT `.lens-stage`. Every rule below
+     was written for the native <select>, and base.html's csel enhancer takes
+     every non-`[data-no-csel]` <select> on the site, hides it
+     (`.csel-native`: `opacity: 0; clip: rect(0 0 0 0); pointer-events: none`)
+     and draws `.csel-btn` in its place. Read live off the rendered row: the
+     <select> measures 140x10 at opacity 0 while the thing under the cursor is
+     a 140x41 `.csel-btn`. So `.lens-stage` is not the control — it is the
+     control's NO-JS FALLBACK, and it had drifted away from the one people
+     actually use in three ways at once. Both are stated here now, on purpose,
+     and they are stated the same.
+
+     WHAT WAS WRONG WITH BOTH.
+     1. 999px. `docs/design-spec.md`: "full-round is reserved for things that
+        REPORT state ... `--r-ctl` (10px) is the shape of a thing you press."
+        This control WRITES the row's stage, so it is squared, the same call
+        `test_a_thing_you_press_is_ten_pixels` already holds `.btn` and
+        `.csel-btn` to. The old comment called it a "little stage tag", which
+        is the reading the pill invited and the wrong one — the read-only
+        `.track-chip` is the tag, and it is pilled for that reason.
+     2. Scale. The visible control was `--fs-m` (15px) in a 41px box on a row
+        whose ROLE TITLE is `--fs-s` (13px): the metadata was set larger than
+        the thing it describes, and it was the loudest object on a 67px row.
+        Both renderings are `--fs-xs` in a 24px box now, which is the same
+        band the countdown and Remove sit in. 24 is not an arbitrary floor:
+        it is WCAG 2.2 AA's minimum target size, and it is the height Remove
+        beside it has always had — so the shrink lands the two controls on
+        one size instead of giving the row a big control and a small one.
+        No `<= 640px` exception, deliberately: the mobile note at the foot of
+        this block already argues that the control must be the same object on
+        both layouts.
+     3. Casing. `.lens-stage` uppercased its closed value; csel's open panel
+        lists "Saved"/"Applied" as written. So the fallback shouted a word the
+        menu whispered. Sentence case in both.
+
      8.75rem, not 8: at 8rem the widest of the five values rendered as
-     "Interview…" — a control that ellipsises its own current state is worse
+     "Interview..." — a control that ellipsises its own current state is worse
      than one that is 12px wider.
-     `text-transform` on a <select> styles the closed value only — the open
-     option list is OS-rendered — which is exactly the split this page
-     already lives with elsewhere (see base.html's `.csel` enhancer). */
+     ---------------------------------------------------------------------- */
+  /* Size and colour only. The border is NOT restated: `.csel-btn`'s base rule
+     already takes `var(--line-strong)`, and coverage.css's own note on the
+     filter-bar override says a line that only ever agreed with the base rule
+     is where the next divergence gets in unnoticed. `--ink-2` is a real
+     change — the row's title is the ink on this row, and its stage is the
+     annotation. Measured 7.83:1 light, 7.92:1 dark. */
+  .apps-lens-row .csel-btn { min-height: 1.5rem; gap: var(--s1);
+    padding: 2px 8px; font-size: var(--fs-xs); line-height: 1.4;
+    color: var(--ink-2); }
+  .apps-lens-row .csel-btn:hover { border-color: var(--accent-line);
+    background: var(--accent-soft); color: var(--accent-ink); }
+  .apps-lens-row .csel-caret { width: 11px; height: 11px; }
   .lens-act { display: contents; }
   /* `display: block` and a track of its own, NOT `inline-flex` in an `auto`
      track. A <select> laid out as a flex box stops reporting its own text in
@@ -224,16 +310,19 @@
      different x positions (1009 to 1058) across ten rows while all measuring
      the same 33px. A fixed track plus `width: 100%` makes the control the
      same size and the same place on every row, which is the point of a
-     column, and 8rem is sized for "Interviewing" plus its caret. */
+     column, and 8.75rem is sized for the longest value plus its caret. (Two
+     comments in this block said "8rem" against a track that has read 8.75rem
+     since the widest value was found to ellipsise; corrected rather than left
+     to be trusted next time.) */
   .lens-stage { display: block; width: 100%;
-    font-size: 10px; font-weight: var(--w-med);
-    text-transform: uppercase; letter-spacing: 0.05em;
-    padding: 4px 22px 4px 9px;
+    min-height: 1.5rem; box-sizing: border-box;
+    font-size: var(--fs-xs); font-weight: var(--w-med);
+    padding: 2px 22px 2px 8px;
     -webkit-appearance: none; appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23666a5e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5 8 10l3.5-3.5'/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: right 6px center;
     background-size: 11px 11px;
-    border-radius: 999px; border: 1px solid var(--line-strong);
+    border-radius: var(--r-ctl); border: 1px solid var(--line-strong);
     color: var(--ink-2); white-space: nowrap;
     cursor: pointer; text-decoration: none;
     transition: border-color var(--t-med), color var(--t-med),
@@ -256,35 +345,100 @@
   }
   /* `background-color`, never the `background` shorthand: the shorthand
      resets `background-image` and would silently wipe the caret drawn above,
-     which is the one thing telling a reader this pill opens. */
+     which is the one thing telling a reader this control opens. */
   .lens-stage { background-color: var(--surface); }
   /* Remove is the destructive verb on this row, so it is the quietest thing
      on it until you go looking: `--ink-3` on no ground at all, taking the
      danger colour only on hover and focus. It is always in the DOM and
      always tabbable rather than hover-revealed — a control that only exists
-     under a mouse is a control a phone cannot reach. */
-  .lens-remove { flex: none; border: 1px solid transparent; background: transparent;
-    padding: 4px 6px; border-radius: var(--r-ctl, 8px);
+     under a mouse is a control a phone cannot reach.
+     `min-height` matches the stage control's and the countdown's, so all
+     three of the row's short tracks share one 24px band. `flex: none` came
+     off (a grid item, not a flex one) and `var(--r-ctl, 8px)` lost its
+     fallback: `--r-ctl` is defined site-wide at 10px, so the 8px could only
+     ever fire in a page that had lost the token — and would then be the one
+     control on the row rounding differently from the rest. */
+  .lens-remove { border: 1px solid transparent; background: transparent;
+    padding: 2px 6px; min-height: 1.5rem; border-radius: var(--r-ctl);
     font-size: var(--fs-xs); color: var(--ink-3); cursor: pointer;
     white-space: nowrap; transition: color var(--t-med), border-color var(--t-med); }
   .lens-remove:hover { color: var(--danger); border-color: var(--danger-line); }
   .lens-remove:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  /* At phone width four tracks cannot hold: the countdown and the role stack,
-     and the two controls sit together on a line of their own under them. */
+  {% comment %}A two-line stub of the note below stood here, saying the same
+  thing in fewer words — the first draft of the rule, left above its own
+  rewrite. Two comments on one rule is one comment too many to keep true.
+  {% endcomment %}
   /* At phone width four tracks cannot hold. The countdown and the role each
      take the full width, and the two controls share a line under them — but
      the status control KEEPS A FIXED TRACK, which the first version of this
      rule forgot: dropping it into an `auto` column put the control straight
      back to being sized by its own label, and measured at 375px it came out
      five different widths (88 to 137px) at five different left edges, which
-     is the exact raggedness the desktop grid was added to remove. Same 8rem
-     here, so the control is the same object on both layouts. */
+     is the exact raggedness the desktop grid was added to remove. Same
+     8.75rem here, so the control is the same object on both layouts — and
+     since 2026-09-03 the same 24px height too, which is why this block adds
+     no size exception of its own. Re-measured at 375px after that change:
+     both controls at one x (52 and 204), one width (140), one height (24),
+     on one line, on all nine rows. */
   @media (max-width: 640px) {
     .apps-lens-row { grid-template-columns: 8.75rem minmax(0, 1fr); }
     .apps-lens-row .lens-when,
     .apps-lens-row .lens-role { grid-column: 1 / -1; }
     .lens-remove { justify-self: start; }
   }
+
+  /* ---- The people block, at band width ---------------------------------
+     `_role_people.html`'s compact form was sized for one cell of the deleted
+     card grid — about 300px. The cards went and the block moved onto a band
+     row, where its cell is the `minmax(0, 1fr)` role track: measured at
+     1440px it drew 926.9px wide, three times what it was drawn for, and the
+     stretch broke it in two ways.
+
+     THE DAY COUNT LOST ITS PERSON. `.rp-person` is a flex row with the name
+     at the left and its day count pushed to the right edge. At 927px that put
+     the number some 700px of white away from the name it belongs to, and its
+     right edge landed at x=1154.9 — twelve pixels short of the stage
+     control's left edge at 1166.9. A near-miss is worse than either
+     alternative: it read as a fifth column that had failed to line up, when
+     it was not a column at all.
+
+     20rem, A FIXED WIDTH, NOT `max-content`. Both bring the number back to
+     its person; only the fixed one gives the numbers a column. Measured over
+     the eight rows of a seeded board that draw people: sized to content the
+     blocks came out 156.1, 179.3 and 234.7px wide and their day counts
+     stopped at three different x (384.1, 407.3, 462.7); at 20rem every block
+     is 320px and every day count ends at 548. That is the same argument the
+     four tracks make above — a reader runs down a column instead of
+     re-finding it each row — and 320px is 85px clear of the widest name this
+     board has, with `.rp-id b`'s own ellipsis to catch anything longer.
+
+     THE NULL COST A WHOLE LINE. On a firm the student knows nobody at, the
+     block is one grey sentence — and 9 of 18 rows on a seeded board printed
+     it, seven of them consecutively. Boxed, with its own hairline and 8px of
+     padding, it took 40.2px of a 67px row: 60% of the row spent restating
+     that there is nothing to say. It keeps its words, its link and its
+     `rp-empty` hook and gives up only its box, trailing the firm on the
+     role's own line. */
+  .apps-lens-row .rp-compact { width: min(100%, 20rem); padding-top: var(--s1); }
+  /* BOTH the block and the <p> inside it: a `display: inline` div whose only
+     child is a block-level <p> still generates a block box, so the first pass
+     at this measured exactly the 24px line it was meant to remove.
+     `width: auto` because the empty form is a sentence, not the 20rem column
+     above it — the one declaration of that rule it has to undo. */
+  .apps-lens-row .rp-empty,
+  .apps-lens-row .rp-empty .rp-none { display: inline; width: auto;
+    padding: 0; border-top: 0; }
+  /* `nowrap` so the prompt moves as ONE THING. Inline and wrappable, it broke
+     mid-sentence on the rows whose title, place and chips had already filled
+     the line: on 3 of 9 rows its last word hung alone under the title. It now
+     either finishes the line it starts on or takes the next line whole,
+     measured as one line box on all 8 rows that draw it.
+     Its wording is NOT quoted in this comment, for the reason the funnel note
+     above gives at length — this stylesheet is inlined, and
+     `test_a_done_row_gets_no_networking_prompt_but_keeps_real_names` asserts
+     that sentence never reaches a Done row's page. Quoting it here put it
+     back in the body and failed that test from a CSS comment. */
+  .apps-lens-row .rp-empty { margin-left: var(--s2); white-space: nowrap; }
 
   /* Empty lens: a sentence AND a way out, never a bare region
      (ux: empty-states). */
@@ -349,6 +503,24 @@
   .apps-hidden-id { display: flex; flex-wrap: wrap; align-items: baseline;
     gap: 2px var(--s2); min-width: 0; }
   .apps-hidden-title { color: var(--ink); }
+  /* FIRM AND PLACE, TOLD APART FROM THE ROLE. `.apps-firm` had no rule
+     anywhere — not here, not in coverage.css — so all three spans on this row
+     rendered identically: measured, firm, title and location were each
+     #191b16, 13px, weight 400, no transform, no letter-spacing, separated by
+     nothing but an 8px gap: firm, then role, then city ran together as one
+     240px stretch in which the reader cannot see where the firm stops. (No
+     example row is transcribed here — this stylesheet is inlined, and a
+     comment quoting a firm's name would put that name in every rendered
+     page, where tests COUNT firm-name prints per row.) And the
+     page had already answered this question two feet above — `.lens-firm`
+     gives exactly this pair of facts `--ink-3`, `--fs-xs`, caps and 0.04em on
+     every band row — so the reversal list was not missing a decision, it was
+     missing the decision's CSS. Same treatment, so "firm - place" looks like
+     one thing on both lists and the role title is the only ink on the row.
+     `--ink-3` on this row's ground measures 5.00:1. */
+  .apps-hidden-row .apps-firm,
+  .apps-hidden-row .apps-loc { color: var(--ink-3); font-size: var(--fs-xs);
+    text-transform: uppercase; letter-spacing: 0.04em; }
   /* 205px, the number `.rr-loc` carries in directory/_styles.html: it holds
      about 95% of locations whole and bites only on the multi-city dumps. */
   .apps-hidden-row .apps-loc { flex: none; max-width: 205px; overflow: hidden;
