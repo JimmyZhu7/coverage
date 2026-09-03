@@ -12,6 +12,7 @@ therefore cannot see uncommitted rows.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -1096,6 +1097,22 @@ def test_the_funnel_label_is_read_from_the_one_stage_vocabulary(client):
     assert expected in _login_and_get(client, user)
 
 
+def _funnel_figure(html):
+    """The funnel cell's figure as a reader sees it.
+
+    The chevrons carry their own span since 2026-09-03 (they were inheriting
+    the digits' size and weight, so a separator drew as loudly as a count),
+    which broke a plain `"1 › 1 › 0" in html`. Stripping the markup back off
+    and comparing the whole figure is the stronger check anyway: the old
+    substring would have passed on a page that printed those numbers
+    ANYWHERE, this one reads them out of the funnel cell itself and fails on
+    a stray fourth figure or a lost separator."""
+    m = re.search(r'class="ribbon-num ribbon-funnel-num">(.*?)</span>\s*'
+                  r'<span class="ribbon-lbl"', html, re.S)
+    assert m, "no funnel figure on the page"
+    return " ".join(re.sub(r"<[^>]+>", " ", m.group(1)).split())
+
+
 def test_the_funnel_counts_still_match_the_stage_the_label_names(client):
     """The wording changed; the arithmetic must not. Two submitted rows have
     to reach the ribbon as 2, the number My Applications' Applied tile shows
@@ -1105,7 +1122,7 @@ def test_the_funnel_counts_still_match_the_stage_the_label_names(client):
     _tracked(user, "interview")
     ctx = _dashboard_context(user)
     assert ctx["dash"]["funnel"] == {"submitted": 1, "interview": 1, "offer": 0}
-    assert "1 › 1 › 0" in _login_and_get(client, user)
+    assert _funnel_figure(_login_and_get(client, user)) == "1 › 1 › 0"
 
 
 # ---------------------------------------------------------------------------

@@ -722,9 +722,32 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     line-height: 1; letter-spacing: -0.01em; transition: color var(--t-fast); }
   .ribbon-lbl { font-size: var(--fs-micro); color: var(--ink-2);
     display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-  /* A live deadline count earns the warning colour; a zero is just a zero. */
+  /* COLOUR ON THIS ROW IS A LEGEND, and it only works while each hue means
+     one thing. Until 2026-09-03 `is-urgent` painted both the deadline cell
+     and the picked-roles cell, so the strip showed two amber figures side by
+     side saying different things: one is time running out on you, the other
+     is a stack of roles waiting for you. Amber that means "hurry" in one
+     cell and "here you go" in the next means neither.
+     So: ink is the state of the world, amber is time pressure, accent is
+     something addressed to you. The hairline that wipes in under a cell on
+     hover takes the same colour as that cell's figure, so the two never
+     disagree about which kind of cell you are pointing at. */
   .ribbon-stat.is-urgent .ribbon-num { color: var(--stale-t); }
   .ribbon-stat.is-urgent::after { background: var(--stale-t); }
+  .ribbon-stat.is-invite .ribbon-num { color: var(--accent-ink); }
+  .ribbon-stat.is-invite::after { background: var(--accent); }
+  /* The funnel's punctuation and its not-yets. Both step back one level
+     rather than disappearing: `--ink-3` against the figure's `--ink`, and
+     the separator at 0.68em, which also tightens the group — the two spaces
+     around each chevron are the mono face's own advance width, so shrinking
+     the character shrinks them with it, about 30% narrower than the single
+     text node used to draw. Those spaces stay in the MARKUP (inside the
+     span, where `spaceless` cannot reach them) rather than being replaced by
+     a margin: the figure's text content has to keep reading "1 › 0 › 0" for
+     a screen reader and for anyone who copies it. */
+  .ribbon-funnel-num .fn-sep { color: var(--ink-3); font-size: 0.68em;
+    font-weight: var(--w-med); vertical-align: 0.06em; }
+  .ribbon-funnel-num .fn-zero { color: var(--ink-3); }
   /* 13rem is sized for the populated label ("Applied › Interviewing › Offer").
      Empty, that made the one cell with no number the WIDEST on the strip,
      which read as a broken cell rather than a quiet one. The empty variant
@@ -2471,7 +2494,17 @@ moved-flag all live in static/css/coverage.css (the animation contract for
     display: flex; align-items: center; gap: var(--s4); flex-wrap: wrap;
     margin-bottom: var(--s4); padding: var(--s4);
     border: 1px solid var(--accent-line); border-radius: var(--r-panel);
-    background: linear-gradient(135deg, var(--surface) 0%, var(--accent-soft) 100%);
+    /* The tint runs top-left to bottom-right, and it used to run the other
+       way: `--surface` at the head, full `--accent-soft` at 100%. That put
+       the strongest colour in the bottom-right corner, which is exactly
+       where this card keeps the two things that most want a plain ground —
+       the provenance note and the Talk button, the button being a bordered
+       `--surface` pill that then had to sit on the busiest part of its own
+       card. Reversed, the colour now starts where the card's voice is (the
+       mark and the eyebrow) and is gone by 70%, so the sentence begins on
+       tint and the action ends on clean surface. Same motif, same two
+       tokens, anchored to something. */
+    background: linear-gradient(135deg, var(--accent-soft) 0%, var(--surface) 70%);
     box-shadow: var(--shadow-1);
   }
   .daily-brief-body { position: relative; flex: 1; min-width: 260px; }
@@ -2498,8 +2531,12 @@ moved-flag all live in static/css/coverage.css (the animation contract for
   @media (prefers-reduced-motion: reduce) { .daily-brief::after { animation: none; } }
   .daily-brief-head { position: relative; display: flex; align-items: center;
     gap: var(--s2); margin-bottom: var(--s2); }
+  /* `--surface` and a ring, not `--accent-soft`: the tint above now starts
+     at full strength in this exact corner, and a disc filled with the same
+     token as the ground behind it is not a disc. */
   .daily-brief-icon { flex: none; width: 26px; height: 26px; border-radius: 50%;
-    background: var(--accent-soft); color: var(--accent);
+    background: var(--surface); border: 1px solid var(--accent-line);
+    color: var(--accent);
     display: flex; align-items: center; justify-content: center; }
   .daily-brief-icon svg { width: 14px; height: 14px; }
   .daily-brief-eyebrow { display: flex; align-items: center; gap: 6px;

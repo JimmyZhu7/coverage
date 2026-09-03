@@ -150,7 +150,7 @@
       bare "0" that reads like the feature is broken.
       {% endcomment %}
       {% if dash.picked_unsaved %}
-        <a class="ribbon-stat kin-reveal is-urgent" style="--i: 2" href="{% url 'opportunities' %}">
+        <a class="ribbon-stat kin-reveal is-invite" style="--i: 2" href="{% url 'opportunities' %}">
           <span class="ribbon-num">{{ dash.picked_unsaved }}</span>
           <span class="ribbon-lbl">Picked for you, not saved yet</span>
         </a>
@@ -177,7 +177,29 @@
       {% endcomment %}
       {% if dash.funnel.submitted or dash.funnel.interview or dash.funnel.offer %}
         <span class="ribbon-stat ribbon-funnel kin-reveal" style="--i: 3">
-          <span class="ribbon-num">{{ dash.funnel.submitted }} › {{ dash.funnel.interview }} › {{ dash.funnel.offer }}</span>
+          {% comment %}
+          THREE FIGURES AND TWO MARKS OF PUNCTUATION, drawn as such. Rendered
+          as one text node the chevrons inherited the digits' size, weight and
+          colour, so "6 › 0 › 0" put five glyphs of equal loudness in a cell
+          that holds three facts, and the separator read as a fourth. The
+          spans below change no text: the figure a reader sees is the same
+          string, and `test_the_funnel_counts_still_match_the_stage_the_label_names`
+          now strips this markup back off and asserts on it.
+
+          A zero is dimmed rather than hidden. "6 › 0 › 0" is a true and
+          useful sentence — six out, nothing back yet — but only if the six
+          is what the eye lands on; at equal weight the row reads as three
+          measurements rather than one number and two not-yets. This is the
+          same argument the cell above it already makes for the all-zero case
+          ("a diagram of nothing"), one step further in.
+          {% endcomment %}
+          <span class="ribbon-num ribbon-funnel-num">{% spaceless %}
+            <span class="fn{% if not dash.funnel.submitted %} fn-zero{% endif %}">{{ dash.funnel.submitted }}</span>
+            <span class="fn-sep"> › </span>
+            <span class="fn{% if not dash.funnel.interview %} fn-zero{% endif %}">{{ dash.funnel.interview }}</span>
+            <span class="fn-sep"> › </span>
+            <span class="fn{% if not dash.funnel.offer %} fn-zero{% endif %}">{{ dash.funnel.offer }}</span>
+          {% endspaceless %}</span>
           {% comment %}
           The stage names come from directory.views._STAGE_LABELS, not from
           this template. Hardcoded here they read "Submitted › Interview ›
