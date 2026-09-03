@@ -44,6 +44,15 @@ data rather than instructions. And no date arithmetic is left to the model:
 `_dated` computes every day count in Python, because this is the surface a
 student reads before they have asked anything.
 
+TWO THINGS THE MODEL IS NOT ASKED TO GET RIGHT, both done in Python on the
+finished sentence: em dashes (`_no_em_dashes`) and the bold on every person
+and firm the sentence names (`_bold_known_names`). Both were prompt rules
+first and both leaked, because a rule stated to a sample is obeyed most of
+the time and "most of the time" on a card a student reads every morning is a
+defect with a date on it. The brief is built from typed rows, so its names
+are known strings before the call is made; wrapping a known string is not a
+judgement call.
+
 THE ONE EXCEPTION: a SECOND call, same day, if `_is_stale` finds that a
 contact the cached text actually named has since left the queue entirely
 (parked, campaign-excluded, recruitment-hidden or archived after the
@@ -64,6 +73,8 @@ import re
 from datetime import date as _date, datetime as _datetime
 
 from django.utils import timezone
+
+from core.templatetags.textstyle import smart_person_name, smart_title
 
 from .client import get_client, is_configured
 from .models import DailyBrief
@@ -109,6 +120,10 @@ def _fact(value, limit: int = _MAX_FACT_CHARS) -> str:
 # must survive the rewrite. The second catches whatever is left — a dash
 # against punctuation, or a trailing one — which is not a sentence break and
 # must not be turned into one.
+#
+# The `**` here is the model's own span only. `_bold_known_names` runs AFTER
+# this function, never before, so this pattern never has to reason about
+# markers Python itself put on.
 _DASH_CLAUSE = re.compile(r"\s*[—–]\s*(\*{0,2})([0-9A-Za-z])")
 _DASH_OTHER = re.compile(r"\s*[—–]\s*")
 
@@ -428,6 +443,184 @@ def _age_phrase(first_seen, today: _date) -> str:
     return f" {days} days ago"
 
 
+# ---------------------------------------------------------------------------
+# BOLDING, DONE IN PYTHON RATHER THAN ASKED FOR IN THE PROMPT.
+#
+# THE RULE: every person's name and every firm's name in the sentence is
+# bold. The founder's own card, 2026-09-02: "Keep Katy Chen warm at Nomura.
+# You've already connected and the role closes **Sep 30**. Bank of America
+# just opened Global Capital Markets Summer Analyst roles including one in
+# Hong Kong" — one bold span, on the date, because that is exactly what the
+# prompt asked for (ONE span, "whichever single detail matters most"). Three
+# names, none of them bold, on the line a student scans in two seconds.
+#
+# WHY NOT REPROMPT. "Bold every name" is a rule stated to a sample: a cheap
+# model writing freeform prose will get four names right and the fifth wrong,
+# on some student's Tuesday, with nothing downstream able to tell that it
+# happened. Same argument `_no_em_dashes` makes for its own rewrite, and the
+# same answer: the brief is BUILT from typed rows, so the names are known
+# strings before the model is even called. Wrapping a known string is a
+# `str.replace`, not a judgement call, and it is right every time.
+#
+# WHAT COUNTS AS KNOWN, and nothing looser. Only a string this module can
+# point at a field for:
+#
+#   - a contact's `name`, off the very actions the caller handed in;
+#   - the firm name each action resolved to (`firm_name`, falling back to
+#     `firm_text` — the SAME precedence `_summarize_actions` prints, so the
+#     string searched for is the string the model was shown);
+#   - the `firm` on each situation event.
+#
+# and only from the slices that actually reached the prompt (the first
+# MAX_ACTIONS_SUMMARIZED actions, the first MAX_SITUATION_SUMMARIZED events).
+# A contact ranked 9th was never in front of the model, so their name turning
+# up in the prose is a coincidence, not a citation.
+#
+# Never a posting title, never `reason` text, and never a rule of the shape
+# "a capitalized word is probably a name". "Global Capital Markets Summer
+# Analyst" is a job title, "Hong Kong" is a place, and both sit in the
+# founder's own sentence one clause away from the three real names. A
+# heuristic that catches those would be wrong on the card he complained
+# about, which is the whole point.
+#
+# TWO SPELLINGS PER NAME, both derived, neither guessed: the string as
+# stored (what the prompt printed) and the string as the PAGE prints it
+# (`smart_person_name`/`smart_title`, the exact filter chain on every act
+# card — see crm/_act_card.html). A `firm_text` a student typed as "goldman
+# sachs" reads "Goldman Sachs" on the card next to the brief, and that is
+# the spelling a model echoes. Both are functions of the same stored field,
+# so neither one invents a name that is not in this student's data.
+#
+# NO FUZZY MATCHING, deliberately. A paraphrase ("BofA" for "Bank of
+# America", "the bank") is left plain. A near-match is a guess about which
+# firm the model meant, and a wrong bold on a name is worse than a missing
+# one: it asserts the sentence is talking about a row the student has.
+# Silence beats a guess, same posture `_dated` takes on a date it cannot
+# parse.
+_MIN_BOLDABLE_CHARS = 2
+
+# The spans the model bolded itself. Skipped wholesale rather than searched:
+# a name inside one is already bold, and re-wrapping it would emit `****`,
+# which `chat_format`'s single inline rule renders as literal asterisks.
+_MODEL_BOLD_SPAN = re.compile(r"\*\*.+?\*\*", re.DOTALL)
+
+
+def _boldable(name: str) -> bool:
+    """Whether a known string is safe to wrap.
+
+    THE ASTERISK IS THE ONE THAT MATTERS. `chat_format` (assistant/
+    templatetags/assistant_extras.py) is a single inline rule,
+    `\\*\\*(.+?)\\*\\*` -> `<strong>`, run over already-escaped text. Every
+    other character a name can carry is inert by the time it gets there: `&`
+    and `<` are escaped BEFORE the bold pass, so a firm called "Baird & Co."
+    or a contact called "<redacted>" wraps and renders exactly as stored. An
+    asterisk is the only character that means something to that rule, and a
+    name carrying one turns `**` markers into an ambiguous run the non-greedy
+    match closes in the wrong place. Such a name is left unbolded rather than
+    rendered broken.
+
+    The length floor is the other half: a one-character "name" (a stray
+    initial, a typo in `firm_text`) matches all over ordinary prose, and the
+    alphanumeric test drops a field holding nothing but punctuation."""
+    return (
+        len(name) >= _MIN_BOLDABLE_CHARS
+        and "*" not in name
+        and any(ch.isalnum() for ch in name)
+    )
+
+
+def _spellings(value, *, person: bool) -> list[str]:
+    """A stored name and the spelling the page prints for it. See the
+    TWO SPELLINGS note above. `_fact` first, because that is what the prompt
+    was given: a name long enough to be truncated reached the model with an
+    ellipsis on it, and that is the string to look for."""
+    stored = _fact(value, 120)
+    if not stored:
+        return []
+    shown = smart_title(smart_person_name(stored) if person else stored)
+    return [stored] if shown == stored else [stored, shown]
+
+
+def _known_names(
+    actions: list[dict], situation: list[dict] | None = None
+) -> list[str]:
+    """Every person and firm name this brief was built from — the fields, in
+    the slices, that `_summarize_actions` and `_summarize_situation` put in
+    front of the model. Placeholders ("someone", "no firm on file", "a firm")
+    are absent by construction: they are what those functions print when the
+    field is EMPTY, and an empty field contributes no name here."""
+    names: list[str] = []
+    for a in (actions or [])[:MAX_ACTIONS_SUMMARIZED]:
+        contact = a.get("contact") or {}
+        names += _spellings(contact.get("name"), person=True)
+        names += _spellings(
+            _fact(a.get("firm_name"), 120) or contact.get("firm_text"),
+            person=False,
+        )
+    for e in (situation or [])[:MAX_SITUATION_SUMMARIZED]:
+        names += _spellings(e.get("firm"), person=False)
+    return names
+
+
+def _bold_known_names(text: str, names: list[str]) -> str:
+    """Wrap every occurrence of every known name in `**`.
+
+    EVERY occurrence, not just the first. The rule is a property of the
+    string ("names are bold"), not of its position, and a second mention left
+    plain reads as a different, lesser person than the bold one three words
+    earlier. It also keeps this function free of the one judgement call the
+    prompt was making badly.
+
+    LONGEST FIRST, so a student who knows people at both "Bank of America"
+    and "Bank of America Merrill Lynch" gets the whole longer name bolded
+    rather than its first three words plus a plain tail.
+
+    WHOLE NAMES ONLY: a match must not have a word character on either side,
+    so "Chen" inside "Chenoweth" is left alone while "Chen's" and "Chen," are
+    matched (an apostrophe and a comma are not word characters, and the name
+    really is the whole word there).
+
+    A NAME STRADDLING A SPAN THE MODEL ALREADY BOLDED (`**Katy** Chen`) comes
+    out as it went in. Nothing this function can do to it is safe: the fix
+    would mean rewriting the model's own markers, and the prompt now asks it
+    not to bold names at all so the case stops arising at the source."""
+    if not text or not names:
+        return text
+    ordered = sorted({n for n in names if _boldable(n)}, key=lambda n: (-len(n), n))
+    if not ordered:
+        return text
+    pattern = re.compile(
+        "|".join(rf"(?<!\w){re.escape(n)}(?!\w)" for n in ordered)
+    )
+    out: list[str] = []
+    end = 0
+    for span in _MODEL_BOLD_SPAN.finditer(text):
+        out.append(pattern.sub(r"**\g<0>**", text[end:span.start()]))
+        out.append(span.group(0))
+        end = span.end()
+    out.append(pattern.sub(r"**\g<0>**", text[end:]))
+    return "".join(out)
+
+
+def _capped(text: str) -> str:
+    """`MAX_BRIEF_CHARS`, which is `DailyBrief.text`'s own column width, with
+    no half-written bold marker left at the cut.
+
+    The markers go on BEFORE this rather than after, because the column is
+    600 characters and bolding after the cut could push a row past it. That
+    makes the cut able to land inside a `**`, which `chat_format` would then
+    render as literal asterisks trailing the sentence. So an odd number of
+    markers means the last one opened a span the cut swallowed, and the whole
+    partial span goes with it: a sentence one name shorter beats a sentence
+    with `**Nomur` printed on the end of it."""
+    if len(text) <= MAX_BRIEF_CHARS:
+        return text
+    out = text[:MAX_BRIEF_CHARS]
+    if out.count("**") % 2:
+        out = out[: out.rindex("**")].rstrip()
+    return out
+
+
 def _live_contact_ids(actions: list[dict]) -> set[int]:
     """Every contact id still standing in a (fresh, already-filtered) action
     list. `_build_actions`/`_gate_and_rank` in crm/today.py have already done
@@ -720,11 +913,13 @@ def get_or_build(
         f"Today's date is {today.isoformat()}. In 1-2 SHORT sentences, tell "
         "this student what matters most today — lead with the single "
         "highest-priority thing, name it specifically. No greeting, no "
-        "summary of everything in the list, no hedging.\n\nWrap exactly ONE "
-        "short span in **bold** — whichever single detail matters most to "
-        "act on right now: a person's name, or the exact deadline or day "
-        "count if that is the real urgency. Never bold more than one span, "
-        "never a whole sentence, and use no other markdown at all."
+        "summary of everything in the list, no hedging.\n\nNever put "
+        "**bold** on a person's name or a firm's name; those are bolded for "
+        "you after you write, and doing it yourself only gets in the way. "
+        "You may bold AT MOST ONE other short span: the exact deadline or "
+        "day count, when a date is the real urgency today. Never bold more "
+        "than one span, never a whole sentence, and use no other markdown "
+        "at all."
     )
     prompt += "\n\n" + _BEGIN_DATA
     if queue_summary:
@@ -776,10 +971,31 @@ def get_or_build(
     if not text:
         return None
     # House style, applied to the finished sentence rather than requested in
-    # the prompt — see `_no_em_dashes`. It runs BEFORE the length cap, so a
-    # rewrite can never be cut in half by the truncation, and before the
-    # cache write, so a brief is stored the way it will be read.
-    text = _no_em_dashes(text)[:MAX_BRIEF_CHARS]
+    # the prompt — see `_no_em_dashes` and `_bold_known_names`. Both run
+    # BEFORE the length cap, so a rewrite can never be cut in half by the
+    # truncation, and before the cache write, so a brief is stored the way it
+    # will be read.
+    #
+    # DASHES FIRST, THEN NAMES. `_no_em_dashes` moves characters around and
+    # capitalises the word after a break it makes, so running it over text
+    # that already carried `**` markers would be asking it to reason about
+    # two rewrites at once (it already carries one carve-out for the model's
+    # own bold span, and that is one more than a rewrite should need).
+    # Bolding never moves a character, only wraps one, so it is safe to be
+    # second and unsafe to be first.
+    #
+    # WRITE-TIME ONLY, unlike the dash rewrite, which `get_cached` also
+    # applies on the way out. The known-name set is the PROMPT's own input
+    # set — queue plus situation — and only the generating call holds all of
+    # it: `crm.today.week` reads the cache with the queue alone and no
+    # situation events, and `get_cached(user)` with neither. Bolding on read
+    # would mean the same stored sentence rendering with different names bold
+    # depending on which caller asked for it, so a card would visibly change
+    # between the htmx swap that generated it and the next load of the page.
+    # The row expires at midnight; a sentence that changes shape under the
+    # reader does not.
+    text = _bold_known_names(_no_em_dashes(text), _known_names(actions, situation))
+    text = _capped(text)
     # The queue slice `_summarize_actions` actually read from, capped the
     # same way — the staleness fingerprint `_is_stale` compares against later
     # today, and (since it is now the cockpit's own ordered plan, not the
