@@ -1116,12 +1116,21 @@
       // Group into rows by rendered top, not by counting children per row —
       // `auto-fill` puts a different number of cards in a row depending on
       // viewport width, so the row boundaries have to come off the layout.
-      var gridTop = grid.getBoundingClientRect().top;
+      //
+      // Layout offsets, not rects, and for the reason spelled out in
+      // `capOneBand` below: a rect carries the `translateY(10px)` that
+      // `rise-in` holds every `.kin-reveal` at, so a rect-based cap comes
+      // out 10px low and lands a few pixels INTO row three instead of in
+      // the gap above it — which is the one thing this function exists to
+      // prevent. The `animationend` recompute further down papered over it
+      // whenever the entrance actually played; it cannot when the grid is
+      // below the fold and the animation never advances. Offsets ignore
+      // transforms, so the number is right on the first pass either way.
+      var gridTop = grid.offsetTop;
       var rows = [];
       cards.forEach(function (card) {
-        var rect = card.getBoundingClientRect();
-        var top = Math.round(rect.top - gridTop);
-        var bottom = Math.round(rect.bottom - gridTop);
+        var top = Math.round(card.offsetTop - gridTop);
+        var bottom = top + Math.round(card.offsetHeight);
         var row = rows.length && Math.abs(rows[rows.length - 1].top - top) < 2
           ? rows[rows.length - 1] : null;
         if (!row) { row = { top: top, bottom: bottom }; rows.push(row); }
@@ -1153,8 +1162,76 @@
       );
     }
 
+    // ---- The contact bands take the same cap, for the same reason.
+    //
+    // `.contact-scroll` carried a flat `max-height: 416px`. Measured on the
+    // founder's board at 1440px with the card at its post-2026-09-03 height:
+    // rows start at 0, 170 and 340, the card is 154 tall, and 416 lands 76px
+    // into row three — half a card, cut through the firm line. That is the
+    // exact failure `capOneGrid` above was written to avoid, on a sibling
+    // scroller, so it gets the same treatment rather than a second idea.
+    //
+    // It also gets what the tier grid gets and this never had: a tab stop, a
+    // role and a name. Two of the five bands overflow on this board (494px
+    // and 1004px of content in 416px of box), and until now the only way to
+    // reach what they hid was a mouse wheel.
+    function capOneBand(scroll) {
+      var grid = scroll.querySelector(".contact-grid");
+      if (!grid) return;
+      scroll.style.removeProperty("--band-cap");
+      scroll.removeAttribute("tabindex");
+      scroll.removeAttribute("role");
+      scroll.removeAttribute("aria-label");
+
+      // `offsetParent` is null for a card inside a closed <details> and for
+      // one the search filter has hidden (`.is-csearch-hidden` is
+      // `display: none`), and a card with no box would report row 0 and
+      // collapse every row on to it.
+      var cards = Array.prototype.slice.call(grid.children).filter(function (el) {
+        return el.classList.contains("contact-card") && el.offsetParent !== null;
+      });
+      if (!cards.length) return;
+
+      // `offsetTop`/`offsetHeight`, NOT `getBoundingClientRect()`, and that
+      // is the whole difference between this and `capOneGrid` above. A rect
+      // includes transforms, and every card here is a `.kin-reveal` that
+      // `rise-in` holds at `translateY(10px)` until it plays. These bands
+      // sit below the fold, so on a page nobody scrolls their animation
+      // never advances and the hold never lifts: measured 8s after load,
+      // 49 of 49 cards still reported `translateY(10px)` and a running
+      // animation. A rect-based cap is 10px short on every one of them, and
+      // no `animationend` ever arrives to correct it. Layout offsets ignore
+      // transforms, so this reads the same numbers before, during and after
+      // the entrance, and needs no timing hook at all.
+      var gridTop = grid.offsetTop;
+      var rows = [];
+      cards.forEach(function (card) {
+        var top = Math.round(card.offsetTop - gridTop);
+        var bottom = top + Math.round(card.offsetHeight);
+        var row = rows.length && Math.abs(rows[rows.length - 1].top - top) < 2
+          ? rows[rows.length - 1] : null;
+        if (!row) { row = { top: top, bottom: bottom }; rows.push(row); }
+        row.bottom = Math.max(row.bottom, bottom);
+      });
+      if (rows.length <= 2) return; // Fits already — no cap, no tab stop.
+
+      var gapPx = parseFloat(getComputedStyle(grid).rowGap) || 0;
+      var cap = rows[1].bottom + gapPx / 2;
+      scroll.style.setProperty("--band-cap", cap + "px");
+      scroll.setAttribute("tabindex", "0");
+      scroll.setAttribute("role", "region");
+      var band = scroll.closest(".warmth-row");
+      var label = band && band.querySelector(".warmth-row-label");
+      scroll.setAttribute(
+        "aria-label",
+        (label ? label.textContent.trim() : "Contacts") + ", " +
+        cards.length + " contacts. Scroll for more."
+      );
+    }
+
     function capAllGrids() {
       document.querySelectorAll(".tier-grid").forEach(capOneGrid);
+      document.querySelectorAll(".contact-scroll").forEach(capOneBand);
     }
 
     // Measured once immediately (covers reduced-motion, where the cards
@@ -1169,6 +1246,23 @@
       grid.addEventListener("animationend", recomputeAfterReveal);
     });
     window.addEventListener("resize", debounce(capAllGrids, 150));
+    // A closed band has no laid-out cards to measure, and the search filter
+    // (`_contact_search.html`) both hides cards and opens or closes bands as
+    // its result count changes. A ResizeObserver on the grid catches every
+    // one of those without this having to know which caused it.
+    var recapBand = debounce(function () {
+      document.querySelectorAll(".contact-scroll").forEach(capOneBand);
+    }, 60);
+    document.querySelectorAll(".warmth-row").forEach(function (band) {
+      band.addEventListener("toggle", recapBand);
+    });
+
+    if (window.ResizeObserver) {
+      var bandWatch = new ResizeObserver(recapBand);
+      document.querySelectorAll(".contact-grid").forEach(function (g) {
+        bandWatch.observe(g);
+      });
+    }
     // A tab opened in the background never plays `.kin-reveal` (browsers
     // pause it while hidden), so its `animationend` recompute never fires
     // either — recheck once the tab is actually looked at.

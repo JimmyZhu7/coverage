@@ -1942,7 +1942,27 @@ moved-flag all live in static/css/coverage.css (the animation contract for
      below" affordance. The card's own height is not the knob here: it is
      the fixed skeleton's sum, and shortening the cap to hide the sliver
      would cost a whole row of contacts. */
-  .contact-scroll { max-height: 416px; overflow-y: scroll; }
+  /* 416px is now only the FALLBACK, and what it falls back from is the
+     reason: at the card's measured 154px and a 16px row gap it cut 76px
+     into row three — half a card, sliced through the middle of the firm
+     line. `.tier-grid` a few hundred lines up already states the rule this
+     breaks ("lands the cut between rows two and three exactly in the gap,
+     never through a card") and already ships the machinery, so
+     `capOneBand()` (foot of contact_list.html) now measures these the same
+     way and writes `--band-cap`.
+     The sliver this removes was deliberate — a "there is more below"
+     affordance — but it is the SECOND one this element carries: the
+     `::-webkit-scrollbar` rules below force a permanently visible bar
+     precisely so macOS cannot hide the fact that the band scrolls. One
+     signal is enough, and the one that costs a bisected card is the one to
+     drop. No row of contacts is lost either way: two full rows show before
+     and after.
+     The fallback stays a NUMBER rather than `none` (which is what the tier
+     grids fall back to). A tier holds at most a couple of dozen firms; a
+     warmth band holds 93 on the founder's own board, and uncapped that is
+     the "pushes Covered Firms a full screen down" failure
+     `test_the_grid_height_cap_is_not_on_the_grid` exists to prevent. */
+  .contact-scroll { max-height: var(--band-cap, 416px); overflow-y: scroll; }
   .contact-scroll { scrollbar-width: thin; scrollbar-color: var(--line-strong) var(--paper); }
   .contact-scroll::-webkit-scrollbar { width: 12px; }
   .contact-scroll::-webkit-scrollbar-track { background: var(--paper);

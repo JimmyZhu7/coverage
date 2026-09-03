@@ -373,9 +373,23 @@ def test_the_grid_height_cap_is_not_on_the_grid():
         "of it and clips the cards."
     )
     scroll = _rule(css, ".contact-scroll")
-    assert "max-height: 416px" in scroll and "overflow-y: scroll" in scroll, (
+    assert "overflow-y: scroll" in scroll, "the wrapper stopped scrolling"
+    # The literal 416 became `var(--band-cap, 416px)` on 2026-09-03, when
+    # `capOneBand()` started writing a row-aligned cap the way the tier grids
+    # already did: a flat 416 cut 76px into a 154px card. What this test is
+    # really protecting is unchanged and still asserted — the cap lives here
+    # rather than on the grid, and it FALLS BACK TO A NUMBER. `none` is what
+    # the tier grids fall back to, and it is wrong here: a tier holds a
+    # couple of dozen firms, a warmth band holds 93, and uncapped that is
+    # exactly the "pushes Covered Firms a full screen down" this guards.
+    cap = re.search(r"max-height:\s*var\(--band-cap,\s*(\d+)px\)", scroll)
+    assert cap, (
         "the wrapper stopped capping the group, so a 93-card warmth row "
-        "pushes Covered Firms a full screen down again."
+        f"pushes Covered Firms a full screen down again. Got: {scroll}"
+    )
+    assert 200 <= int(cap.group(1)) <= 600, (
+        f"the no-JS fallback is {cap.group(1)}px, which does not bound the "
+        "band to roughly two rows of cards"
     )
     assert '<div class="contact-scroll">' in _page_with_a_contact(), (
         "the wrapper is not rendered, so the cap and the grid are the same "
