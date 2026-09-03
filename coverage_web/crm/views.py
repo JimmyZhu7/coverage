@@ -1006,11 +1006,11 @@ def _stale_window_days(c, params) -> int:
 # forced off), at 375 where the phone's one-column card has 283px of content
 # against a foot wanting 281.1px, i.e. 1.9px of headroom:
 #
-#     41d    106.4px   the widest count the board realistically holds
+#     43d    109.0px   the oldest touch the board actually holds
 #     364d   116.4px   the widest this function can now produce
 #     999d   117.2px   still inside the floor
 #     1234d  120.2px   outgrows it
-#     3650d  124.1px   foot 117.8 on 11 cards, 149 on 38, in ONE grid
+#     3650d  124.1px   foot 101.8 on 11 cards, 125 on 38, in ONE grid
 #
 # Not live today. Counted the same day: the demo board's oldest real touch is
 # 43 days back and the founder's own 323 contacts top out at 52, so no card
@@ -1019,11 +1019,11 @@ def _stale_window_days(c, params) -> int:
 # is the only reason this is worth spending a branch on.
 #
 # Bounding the string beats widening the floor, and not narrowly. 8rem also
-# fixes it, and charges 31.2px to every phone card forever: measured, card
-# height 171.2 -> 202.4 at 375, the foot wrapping on all 49 to hold headroom
+# fixes it, and charges 23.2px to every phone card forever: measured, card
+# height 156.2 -> 179.4 at 375, the foot wrapping on all 49 to hold headroom
 # for a number no card is showing. This costs nothing at any width. With a
-# four-digit count planted on every fifth card the board measures 171.2 x49
-# and foot 117.8 x49, which is what it measures with no long counts at all.
+# four-digit count planted on every fifth card the board measures 156.2 x49
+# and foot 101.8 x49, which is what it measures with no long counts at all.
 #
 # It also reads better. Nobody counts to 1234 days; "3y since last touch" is
 # the sentence a person actually says about a contact they have lost.
