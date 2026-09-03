@@ -132,12 +132,80 @@ def test_the_segment_pill_states_the_number_the_strip_states(client, dupes):
     The original defect was never about context keys: it was "All Campus
     (2723)" sitting eight pixels above "2596 Open Roles". This asserts the
     fix where the defect was — in the HTML.
+
+    Re-anchored 2026-09-03 on `.ss-total` instead of `style="--i:0"`. The
+    premise is unchanged and the promise is unweakened — the two numbers must
+    still be one number — but the strip's total is no longer the first thing
+    in its own item, and pinning a figure by its animation-stagger index tied
+    this test to the strip's drawing order rather than to which figure it is.
+    A class says which one; an `--i` says where it happens to sit.
     """
     body = client.get(reverse("opportunities")).content.decode()
     pill = re.search(r'id="cnt-role-campus"[^>]*>(\d+)<', body)
-    strip = re.search(r'<b class="dash-num" style="--i:0">(\d+)</b>', body)
+    strip = re.search(r'<b class="[^"]*\bss-total\b[^"]*"[^>]*>(\d+)</b>', body)
     assert pill and strip
     assert pill.group(1) == strip.group(1) == "2"
+
+
+def test_the_strip_states_the_board_total_once_and_quietly(client, dupes):
+    """WHICH SURFACE CARRIES THE COUNT (2026-09-03).
+
+    "All Campus (3026)" sat directly above "3026 Open Roles", both in bold,
+    eight pixels apart. The counts agreeing was the fix that shipped hours
+    earlier; the visible redundancy is what it left behind.
+
+    The decision: THE SEGMENT PILL carries it. It is the only surface where
+    the number has a comparison set beside it, so it is the only one where the
+    number is a decision rather than trivia, and it is the surface that
+    survives an htmx swap (refreshed out of band) rather than being rebuilt on
+    every keystroke.
+
+    `total` is demoted here, not deleted — it is still the only figure that can
+    reconcile against `board_count` when "Eligible only" is on, and
+    `.scope-foot` still accounts for the difference. So this pins three things:
+    the figure is printed exactly once in the strip; it lives in the board tier
+    rather than the time tier; and the board tier is drawn at the strip's own
+    text size while the time tier keeps the figure size.
+    """
+    body = client.get(reverse("opportunities")).content.decode()
+    assert len(re.findall(r'\bss-total\b', body)) == 1, (
+        "the board total is one figure on this line, not two")
+    # The board pair is ONE item carrying both figures, so the coverage clause
+    # says something the pill cannot.
+    assert re.search(
+        r'class="[^"]*\bss-board\b[^"]*".*?\bss-total\b.*?Open Role.*?across.*?Firm',
+        body, re.S), "the total and the firm count are one clause, not two tiles"
+    css = _css()
+    board = _rule(css, ".stat-strip .ss-board b")
+    assert "font-size: var(--fs-xs)" in board, (
+        f"the board tier is text-sized, not figure-sized ({board})")
+    figure = _rule(css, ".stat-strip b")
+    assert "font-size: var(--fs-m)" in figure, (
+        "the time tier keeps the figure size the board tier gave up")
+
+
+@pytest.mark.parametrize("tier,colour", [
+    (".stat-strip .ss-warn b", "var(--stale-t)"),
+    (".stat-strip .ss-fresh b", "var(--ok)"),
+    (".stat-strip .ss-board b", "var(--ink-2)"),
+])
+def test_every_strip_tier_settles_on_the_colour_it_declares(tier, colour):
+    """`ss-settle` ends on `--ink` and runs with `animation-fill-mode: both`,
+    so the keyframe's landing colour WINS over whatever the tier's own rule
+    said. A tier that declares a colour and borrows the shared keyframe is
+    repainted neutral 380ms after it renders.
+
+    This generalises the rule `.ss-warn` already had its own keyframe for:
+    every tier that states a colour must name a keyframe that lands on it.
+    """
+    css = _css()
+    assert f"color: {colour}" in _rule(css, tier), tier
+    name = re.search(r"animation-name:\s*([\w-]+)", _rule(css, f"{tier}.dash-num"))
+    assert name, f"{tier} declares a colour but borrows the shared settle"
+    frames = re.search(
+        r"@keyframes\s+" + re.escape(name.group(1)) + r"\s*\{(.*?\}\s*)\}", css, re.S)
+    assert frames and f"color: {colour}" in frames.group(1), (
+        f"{name.group(1)} must land on {colour}")
 
 
 def test_the_fold_is_silent_because_there_is_nothing_left_to_say(client, dupes):
@@ -266,6 +334,12 @@ SQUARED = [
     # to name is gone rather than restated.
     (".pickcol-save", "Save all — writes the column's unsaved picks"),
     (".rcd-undo", "Undo — reverses a dismissal"),
+    # 2026-09-03. The last 999px pressable in the filter bar. It survived the
+    # 2026-08-22 squaring because the segments beside it were pills too, so it
+    # did not look out of place; with the round shape moved onto the segmented
+    # control's own track (where it is the GROUP's capsule) a stadium-shaped
+    # "Clear" was the one button in the bar still wearing a badge shape.
+    (".filters-clear", "Clear — drops every active filter"),
 ]
 
 # Kept as capsules, each for a stated reason.
@@ -284,6 +358,43 @@ def test_a_thing_you_press_is_ten_pixels(selector, why):
 @pytest.mark.parametrize("selector,why", PILLED)
 def test_a_thing_that_reports_state_keeps_the_pill(selector, why):
     assert "border-radius: 999px" in _rule(_css(), selector), f"{selector} ({why})"
+
+
+def test_the_capsule_is_spent_on_the_group_not_on_five_buttons():
+    """THE THIRD ENTRY IN THE SHAPE REGISTRY (2026-09-03), and it is neither
+    of the two above: a segmented control is not a status chip and it is not a
+    button.
+
+    `docs/design-spec.md` allows the capsule for a segmented choice among
+    peers. Five separately-rounded, separately-bordered, separately-shadowed
+    chips spent that licence five times over — once per button — which is
+    exactly the "pill on an action" the spec squares `.btn` and `.csel-btn`
+    to avoid, and it drew five objects for one decision.
+
+    So the TRACK is the capsule and the segments inside it are borderless
+    labels. Both halves are asserted, because either alone is the old shape:
+    a track with bordered chips in it is six boxes, and borderless chips with
+    no track is five words floating in the bar.
+    """
+    css = _css()
+    track = _rule(css, ".seg-list")
+    assert "border-radius: 999px" in track, (
+        f"the group wears the capsule, not its members ({track})")
+    assert "border: 1px solid var(--line)" in track, track
+    pill = _rule(css, ".filters .seg-pill")
+    assert "border: 0" in pill, (
+        f"a segment inside the track draws no border of its own ({pill})")
+    assert "box-shadow: none" in pill, (
+        "at rest a segment has no lift; the checked one does, and it is the "
+        f"only thing in the track that lifts ({pill})")
+    # And the capsule is spent only where it is earned. `_rule` joins every
+    # `.seg-list` rule on the page, so both radii show up here: 999px from
+    # the base rule and `--r-ctl` from the <=640px block, where the control
+    # wraps to a 2x2 grid and stops being one row of peers. A stadium shape
+    # around two stacked rows is the `.seg-optin`-stretched-to-a-banner
+    # mistake in a different place.
+    assert "border-radius: var(--r-ctl)" in track, (
+        f"the track must square off once it wraps to a grid ({track})")
 
 
 def test_the_read_button_is_squared_for_every_page_that_draws_it():

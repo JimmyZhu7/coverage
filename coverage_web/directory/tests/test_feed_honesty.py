@@ -771,7 +771,14 @@ def test_the_counts_describe_the_board_not_the_loaded_slice(client):
 @pytest.mark.django_db
 def test_a_one_firm_board_says_firm_not_firms(client):
     """The strip's counts are singular-aware. "1 Firms" is the same hardcoded
-    plural that "1 deadlines" was on the calendar, one line further along."""
+    plural that "1 deadlines" was on the calendar, one line further along.
+
+    Both anchors were `>1</b> <noun><` until 2026-09-03, when the two board
+    figures became ONE clause — "1 Open Role across 1 Firm" — so the role
+    count is no longer followed by a tag. The promise is unchanged and the
+    anchor moved onto the word that follows it instead; "Open Roles across"
+    would fail exactly as "Open Roles<" used to.
+    """
     f = Firm.objects.create(slug="solo", name="Solo Capital")
     Opportunity.objects.create(firm=f, title="Analyst", bucket="internship",
                                status="open", url="https://solo.com/a")
@@ -780,7 +787,8 @@ def test_a_one_firm_board_says_firm_not_firms(client):
     strip = body[body.index('class="stat-strip"'):]
     strip = strip[:strip.index("</div>")]
     assert ">1</b> Firm<" in strip
-    assert ">1</b> Open Role<" in strip
+    assert ">1</b> Open Role across" in strip
+    assert "Open Roles" not in strip and "Firms" not in strip
 
 
 @pytest.mark.django_db

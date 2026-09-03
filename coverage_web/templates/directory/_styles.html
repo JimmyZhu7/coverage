@@ -83,7 +83,11 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      min-content intrinsic width by default, which inside a flex container
      stops it shrinking and pushes the bar wider than the page.
      ====================================================================== */
-  .seg { flex: 1 1 100%; min-width: 0; margin: 0 0 var(--s1); padding: 0; border: 0; }
+  /* margin: 0, not `0 0 var(--s1)`. `.filters` already states an --s2 row gap
+     between its flex lines, so the 4px here was a second rule setting one
+     distance — the same "written against another rule" shape `.scope-foot`
+     was cured of. The gap between row 1 and row 2 is --s2, stated once. */
+  .seg { flex: 1 1 100%; min-width: 0; margin: 0; padding: 0; border: 0; }
   /* The legend joins the captions in the visually-hidden set (fieldset
      semantics intact — a screen reader still announces "Role type" for the
      group). The four pills self-describe; a floating uppercase caption over
@@ -91,12 +95,34 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .seg > legend { position: absolute; width: 1px; height: 1px; padding: 0;
     margin: -1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
     white-space: nowrap; border: 0; }
-  /* wrap, not nowrap: the four pills measure ~636px and sit on one line at
+  /* ONE CAPSULE, NOT FIVE (2026-09-03).
+
+     This was five free-floating chips: each with its own 999px border, its
+     own shadow and 8px of air between them, which is five objects for one
+     choice. The design spec allows the capsule for a segmented choice among
+     peers — the GROUP is the capsule. So the track owns the round shape, the
+     border, the recessed ground and the lift, and the five segments inside it
+     are borderless labels separated by hairlines, with the checked one lifting
+     onto `--surface`. Five boxes become one, and the row stops competing with
+     the controls under it.
+
+     `--paper` for the track and `--surface` for the selected segment is the
+     standard recessed/raised pairing, and it is the right way round here: the
+     page ground IS `--paper`, so an unselected track reads as an outline and
+     the selected segment is the only lifted thing in the row.
+
+     inline-flex, not flex: the track is exactly as wide as its five segments.
+     Stretched to the full 1392px it would be a band, which is the same defect
+     `.seg-optin` was cured of two comments below.
+
+     wrap, not nowrap: the five segments measure ~640px and sit on one line at
      every width down to 641px, but a label that grows (a longer count, a
      larger user font size) must wrap rather than push the page into a
      horizontal scroll. Wrapping is the fallback, not the intent. */
-  .seg-list { display: flex; flex-wrap: wrap; justify-content: flex-start;
-    gap: var(--s2); }
+  .seg-list { display: inline-flex; flex-wrap: wrap; justify-content: flex-start;
+    gap: 0; max-width: 100%; padding: 3px;
+    border: 1px solid var(--line); border-radius: 999px;
+    background: var(--paper); box-shadow: var(--shadow-1); }
   /* Clip-rect, NOT display:none. display:none removes a radio from the
      keyboard order, and native radio semantics — one Tab stop for the group,
      arrow keys within it — are the entire reason this is a radio group and not
@@ -115,43 +141,67 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      min-height, never height: the label holds a scraped-vocabulary count that
      can reach four digits and, at 375px, wrap to two lines. This page has
      shipped a clipping bug twice from fixed heights; the box gives way. */
-  .filters .seg-pill { display: inline-flex; flex-direction: row;
+  .filters .seg-pill { position: relative; display: inline-flex; flex-direction: row;
     align-items: center; justify-content: center;
-    text-align: center; min-height: 34px; padding: 5px 13px; cursor: pointer;
-    border: 1px solid var(--line); border-radius: 999px;
-    background: var(--surface); color: var(--ink-2);
+    text-align: center; min-height: 30px; padding: 4px 14px; cursor: pointer;
+    border: 0; border-radius: 999px;
+    background: transparent; color: var(--ink-2);
     font-size: var(--fs-s); font-weight: var(--w-med);
     text-transform: none; letter-spacing: 0; line-height: 1.25;
     /* The label is a flex container and its "Internship (" / span / ")" runs
        are three separate flex items; without this they would each become a
        wrap opportunity and break the count off its own label. */
     white-space: nowrap; gap: 0;
-    box-shadow: var(--shadow-1);
-    transition: border-color var(--t-fast), background var(--t-fast),
-      color var(--t-fast), box-shadow var(--t-med); }
-  .filters .seg-pill:hover { border-color: var(--accent-line); box-shadow: var(--shadow-2); }
-  /* Selected state: the role-* colour families, plus WEIGHT and (on keyboard)
-     a focus ring. Never colour alone — a student who cannot separate the tints
-     still reads the bold and, tabbing, the outline. */
-  .seg-input:checked + .seg-pill { font-weight: var(--w-bold); box-shadow: var(--shadow-2); }
+    box-shadow: none;
+    transition: background var(--t-fast), color var(--t-fast),
+      box-shadow var(--t-med); }
+  /* Hover is the UNCHECKED state's affordance only. Written as
+     `:not(:checked)` rather than relying on source order, because the checked
+     tints below are (0,2,0) and a bare `.filters .seg-pill:hover` would win
+     on specificity and grey out the selected segment under the cursor. */
+  .filters .seg-input:not(:checked) + .seg-pill:hover { color: var(--ink);
+    background: color-mix(in srgb, var(--ink) 6%, transparent); }
+  /* The hairline between two segments, drawn in the track's own gutter. It is
+     `::before` on every segment but the first, and it is switched OFF either
+     side of the checked one — a rule butting against a filled chip reads as a
+     seam in the chip rather than a divider between two options. Opacity, not
+     `display`, so it fades with the fill instead of snapping. */
+  .filters .seg-pill::before { content: ""; position: absolute; left: 0;
+    top: 50%; margin-top: -7px; width: 1px; height: 14px;
+    background: var(--line-strong); opacity: 0.65;
+    transition: opacity var(--t-fast); }
+  .seg-input:first-child + .seg-pill::before,
+  .seg-input:checked + .seg-pill::before,
+  .seg-input:checked + .seg-pill + .seg-input + .seg-pill::before { opacity: 0; }
+  /* The checked segment is the one thing in the track that lifts. Weight and
+     a shadow carry it as well as the tint does — never colour alone, since a
+     student who cannot separate the tints still reads the bold, and a
+     keyboard user still gets the ring below. */
+  .seg-input:checked + .seg-pill { font-weight: var(--w-bold);
+    box-shadow: var(--shadow-1); }
   .seg-input:checked + .seg-campus { background: var(--accent-soft);
-    color: var(--accent-ink); border-color: var(--accent); }
+    color: var(--accent-ink); }
   .seg-input:checked + .seg-insight { background: var(--ok-soft);
-    color: var(--ok); border-color: var(--ok-line); }
+    color: var(--ok); }
   .seg-input:checked + .seg-internship { background: var(--accent-soft);
-    color: var(--accent-ink); border-color: var(--accent-line); }
+    color: var(--accent-ink); }
   .seg-input:checked + .seg-entry_level { background: var(--surface);
-    color: var(--accent-ink); border-color: var(--accent); }
+    color: var(--accent-ink); }
   /* "Everything" — a real fifth segment now (2026-08-27), not the
      deep-link-only opt-in it used to be: the header's subset sentence, whose
      "Show everything" link was its only door, is gone, so this pill is the
      one-click escape hatch in its place. Muted grey rather than an accent
      tint on purpose, matching `.seg-optin` below — choosing it is not a
      recommendation, it is a wider net, and it sits beside the four campus
-     pills as an equal, always-clickable fifth rather than a banner. */
+     pills as an equal, always-clickable fifth rather than a banner.
+
+     `--surface` is the lift now, not a second border. The inset ring this
+     used to carry was drawn when the segments were free-floating chips on
+     `--paper`, where `--surface` alone was almost invisible; inside a
+     `--paper` TRACK the same fill is the raised state every checked segment
+     wears, so the ring is one line of emphasis too many. */
   .seg-input:checked + .seg-all { background: var(--surface);
-    color: var(--ink-3); border-color: var(--line-strong);
-    box-shadow: inset 0 0 0 1px var(--line-strong); }
+    color: var(--ink-2); }
   /* The conditional fifth segment, for `?role=other` alone now. Muted on
      purpose — it states an opt-in mode honestly without dressing it up as a
      normal option. Grey, never an accent tint: this mode is not a
@@ -163,8 +213,7 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      the 2x2 grid gives it a row of its own. Stretched across 1392px of desktop
      it stopped reading as a pill at all and became a banner. */
   .seg-input:checked + .seg-optin { background: var(--surface);
-    color: var(--ink-3); border-color: var(--line-strong);
-    box-shadow: inset 0 0 0 1px var(--line-strong); }
+    color: var(--ink-2); }
   .seg-input:focus-visible + .seg-pill { outline: 2px solid var(--accent);
     outline-offset: 2px; }
 
@@ -256,10 +305,79 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     border-color: var(--accent-line); box-shadow: var(--shadow-2); }
   .filters select:focus-visible, .filters input[type="search"]:focus-visible {
     outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent-line); }
-  /* Search leads the band and takes the slack: a flexible basis with a cap,
-     so it reads as the primary control without becoming a runway. */
-  .filters-search { flex: 1 1 15rem; max-width: 24rem; }
-  .filters-search input[type="search"] { width: 100%; min-width: 0; }
+  /* ======================================================================
+     THREE WEIGHTS IN ROW 2, NOT ONE (2026-09-03).
+
+     Six controls were drawn identically — same surface, same lift, same
+     hairline — so the band read as six equal decisions when in practice one
+     of them (Search) is used constantly and four of them are never touched
+     on most visits. Worse, a dropdown left at "Any Year" looked exactly like
+     one narrowed to "2027", so the bar could not say what it was doing.
+
+     The weights, loudest first:
+
+       1. SEARCH keeps the raised surface and the lift. It is the control that
+          earns its space on 3,000 scraped titles, and it is the only one that
+          takes typed input, so it should read as an input.
+       2. A SET filter takes the accent: tinted fill, accent border, accent
+          ink. There are never more than a few, and they are the answer to
+          "why am I seeing this many roles".
+       3. AN UNSET filter recedes to a flat outline on the page's own ground.
+          Still a full-size, full-contrast, always-visible control — nothing
+          is hidden, and `--ink-2` on `--paper` is the same text colour it
+          had — it simply stops claiming to be a decision the student made.
+
+     `is-set` is SERVER-rendered on the label (see opportunities.html), not
+     derived in script, so a deep-linked filter is lit on first paint and with
+     JS off, and it survives the htmx swap like every other rendered state. */
+  .filters-search { position: relative; flex: 1 1 15rem; max-width: 24rem; }
+  /* `background-color`, never the `background` shorthand, in every tier rule
+     below. coverage.css draws the native <select>'s caret as a
+     `background-image` (L1311), and the shorthand resets it to `none` — which
+     would leave the no-JS fallback, and the first frames before the enhancer
+     runs, as four flat boxes with no affordance saying they open. */
+  .filters-search input[type="search"] { width: 100%; min-width: 0;
+    padding-left: 38px; background-color: var(--surface);
+    box-shadow: var(--shadow-1); }
+  /* The magnifier. An inline <svg> in the markup rather than a background
+     image, for the same reason `.csel-caret` is one: an SVG data URI has no
+     access to the cascade, so it cannot follow `currentColor` and would have
+     to hardcode a light-mode ink that dark mode then draws wrong. This is the
+     one mark in the row — five controls carry a caret, one takes typing. */
+  .filters-search-icon { position: absolute; left: 14px; top: 50%;
+    width: 14px; height: 14px; margin-top: -7px; flex: none;
+    pointer-events: none; color: var(--ink-3); }
+  .filters-search.is-set .filters-search-icon { color: var(--accent-ink); }
+  /* Row 2's quiet tier: every closed-vocabulary control at rest. Transparent
+     on `--paper`, no lift. Named once, for the native <select> (the no-JS
+     fallback), the enhanced `.csel-btn` that stands in for it, the Companies
+     button and the Eligible-only toggle, so the four cannot drift apart. */
+  .filters label:not(.is-set) select,
+  .filters label:not(.is-set) .csel-btn,
+  .filters label:not(.is-set) .cmulti-btn,
+  .filters .fit-toggle:not(:has(input:checked)) {
+    background-color: transparent; box-shadow: none; color: var(--ink-2); }
+  /* Quiet does not mean inert: the tier rises to `--surface` under the cursor,
+     so the affordance a shadow carried at rest is carried on approach instead.
+     Restated here rather than left to the plain `:hover` rules elsewhere,
+     because those are (0,2,1) at most and the tier above them is (0,3,0) —
+     without this an unset control would never answer the mouse. */
+  .filters label:not(.is-set) select:hover,
+  .filters label:not(.is-set) .csel-btn:hover,
+  .filters label:not(.is-set) .cmulti-btn:hover,
+  .filters .fit-toggle:not(:has(input:checked)):hover {
+    background-color: var(--surface); box-shadow: var(--shadow-1);
+    border-color: var(--accent-line); color: var(--ink); }
+  /* Row 2's set tier. The same accent the checked segment above wears, so one
+     colour means "you chose this" the whole way down the bar. */
+  .filters label.is-set select,
+  .filters label.is-set .csel-btn,
+  .filters label.is-set .cmulti-btn,
+  .filters .filters-search.is-set input[type="search"] {
+    background-color: var(--accent-soft); border-color: var(--accent);
+    color: var(--accent-ink); font-weight: var(--w-med);
+    box-shadow: var(--shadow-1); }
+  .filters label.is-set .csel-caret { color: var(--accent-ink); }
   /* The fit toggle: a labelled checkbox styled as its row-mates' pill, the
      checked state carrying the same accent the segmented control uses.
 
@@ -333,8 +451,14 @@ honesty, timeline chrome) lives in static/css/coverage.css.
     padding-left: 6px; }
   .variant-fold .rolerow { margin-top: 6px; }
 
+  /* `--r-ctl`, not 999px. Clear is a thing you press, and the pill belongs to
+     things that report state — the same argument that squared `.btn`, the
+     `.csel-btn` dropdowns and `.cmulti-btn`. It was the last 999px pressable
+     left in this bar once the segments' round shape moved onto their track,
+     where it is the GROUP's capsule rather than five buttons wearing a badge
+     shape. Pinned in test_board_surface.py's SQUARED list. */
   .filters-clear { font-size: var(--fs-s); align-self: center; padding: 6px 14px;
-    border-radius: 999px; }
+    border-radius: var(--r-ctl); }
   .filters-clear:hover { background: var(--accent-soft); text-decoration: none; }
 
   /* The scope sentences at the top of #cov-results: what this view excludes,
@@ -459,7 +583,34 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .stat-strip b { font-family: var(--font-mono); font-variant-numeric: tabular-nums;
     font-size: var(--fs-m); font-weight: var(--w-bold); color: var(--ink);
     letter-spacing: -0.01em; }
+  /* ======================================================================
+     TWO KINDS OF FACT, DRAWN AS TWO (2026-09-03).
+
+     The strip carried four figures at one weight, and they are not one kind
+     of thing. "Open Roles" and "Firms" DESCRIBE the board: they change only
+     when you change the filters, and the first of them is the same number the
+     checked segment above already states in bold. "Closing This Week" and
+     "Fresh" are TIME facts — they are why you would look at the board today
+     rather than on Friday — and they are the only two on this line that no
+     other surface on the page says.
+
+     So the board pair is now one clause at the strip's own text size, quiet,
+     and the two time figures keep the full `--fs-m` mono figure treatment and
+     take a colour each: `--stale-t` for what is closing, `--ok` for what has
+     just arrived. The loud statement of the board's size is the segment pill,
+     one row up; this line restates it only as the subject of the coverage
+     fact ("3026 Open Roles across 90 Firms"), which is a sentence the pill
+     cannot say.
+
+     Nothing is removed. `total` is still printed, still reconciled against
+     `board_count` by `.scope-foot` when "Eligible only" is on, and still the
+     `#cov-live` announcement's source. It stopped being a headline; it did
+     not stop being a fact. */
+  .stat-strip .ss-board { color: var(--ink-3); }
+  .stat-strip .ss-board b { font-size: var(--fs-xs); font-weight: var(--w-med);
+    color: var(--ink-2); }
   .stat-strip .ss-warn b { color: var(--stale-t); }
+  .stat-strip .ss-fresh b { color: var(--ok); }
   /* The strip's figures arrive, they do not COUNT UP. `ss-pop` used to scale
      each digit 0.6 -> 1.08 -> 1 over 620ms, and a number growing on load is
      the one motion this product cannot afford: it reads as the figure
@@ -474,12 +625,22 @@ honesty, timeline chrome) lives in static/css/coverage.css.
   .stat-strip b.dash-num { display: inline-block;
     animation: ss-settle 380ms ease-out both;
     animation-delay: calc(var(--i, 0) * 90ms); }
-  /* `.ss-warn` states its own colour; letting the settle land on `--ink`
-     would repaint the warning tier neutral at the end of the animation. */
+  /* Every tier that states its own colour needs its own settle: the shared
+     keyframe lands on `--ink`, and `animation-fill-mode: both` means that
+     landing colour WINS over the rule that set the tier's colour. One
+     keyframe per tier, each ending on the colour its tier declares. */
   .stat-strip .ss-warn b.dash-num {
     animation-name: ss-settle-warn; }
   @keyframes ss-settle-warn { from { opacity: 0; color: var(--ink-3); }
     to { opacity: 1; color: var(--stale-t); } }
+  .stat-strip .ss-fresh b.dash-num {
+    animation-name: ss-settle-ok; }
+  @keyframes ss-settle-ok { from { opacity: 0; color: var(--ink-3); }
+    to { opacity: 1; color: var(--ok); } }
+  .stat-strip .ss-board b.dash-num {
+    animation-name: ss-settle-quiet; }
+  @keyframes ss-settle-quiet { from { opacity: 0; color: var(--ink-3); }
+    to { opacity: 1; color: var(--ink-2); } }
   @media (prefers-reduced-motion: reduce) {
     .stat-strip b.dash-num { animation: none; } }
 
@@ -1602,7 +1763,15 @@ honesty, timeline chrome) lives in static/css/coverage.css.
        segment, and this file's firm-column lesson is that content parked
        outside its own box needs affordances we would then have to build.
        Vertical growth is free here; a hidden option is not. */
-    .seg-list { display: grid; grid-template-columns: 1fr 1fr; }
+    /* The track squares off here and the hairlines go. A capsule is the shape
+       of ONE row of peers; wrapped to a 2x2 grid it stops being a row, and a
+       stadium-shaped box around two stacked rows reads as a mistake. Same
+       argument the `.seg-optin` comment makes about a pill stretched to a
+       banner. The segments inside stay round — a half-width cell at 375px is
+       still pill-sized — so the family is intact. */
+    .seg-list { display: grid; grid-template-columns: 1fr 1fr;
+      gap: var(--s1); border-radius: var(--r-ctl); padding: var(--s1); }
+    .filters .seg-pill::before { content: none; }
     .filters .seg-pill { width: 100%; padding: var(--s2) 10px; }
     /* "Everything" is the fifth, real segment: it spans both columns on its
        own row rather than sitting alone beside an empty cell. */
@@ -1848,7 +2017,8 @@ honesty, timeline chrome) lives in static/css/coverage.css.
      Quiet, one line, in the scope block's own voice — it is a footnote to
      a number, not a warning. Same `.scope-line` family the firm page uses
      for its own "what this scope is not showing" sentence, which is the
-     same kind of claim. */
+     same kind of claim.
+
      THE NEGATIVE TOP MARGIN IS GONE (2026-09-02) and it was a real overlap,
      not a tight gap. This rule read `margin: calc(var(--s3) * -1) 0 var(--s3)`
      — a -12px pull written to cancel `.stat-strip`'s own 12px bottom margin.

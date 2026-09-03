@@ -49,8 +49,21 @@ def test_the_select_caret_ships_at_the_app_wide_stroke_width(client):
     # The JS that progressively-enhances every <select> in the app (shipped
     # inline via base.html on every page, opportunities.html included)
     # must inject the same stroke-width, not the old 1.8 outlier.
+    #
+    # ANCHORED ON THE <svg> TAG AND BOUNDED (2026-09-03). This was
+    # `csel-caret.*?stroke-width="..."` with DOTALL over the whole document,
+    # which is not "the stroke-width inside this caret" — it is "the next
+    # stroke-width anywhere after the first mention of the class". It passed
+    # only because the earliest mention happened to be a real <svg>. The
+    # moment `_styles.html` grew a `.csel-caret` RULE (and a comment naming
+    # the class), the match started at the <style> block and ran on to the
+    # masthead logo's 2.6, reporting drift in a caret that had not changed.
+    # The gap between the opening tag and its <path> is a JS string
+    # concatenation of a few characters; bounding it is what makes the regex
+    # measure the thing the docstring names.
     js_carets = re.findall(
-        r'csel-caret.*?stroke-width=\\?"([\d.]+)\\?"',
+        r'<svg class=\\?"csel-caret\\?"[^>]*>.{0,40}?<path[^>]*'
+        r'stroke-width=\\?"([\d.]+)\\?"',
         html,
         flags=re.DOTALL,
     )
