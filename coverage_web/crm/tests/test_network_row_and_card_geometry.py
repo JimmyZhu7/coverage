@@ -186,19 +186,26 @@ def test_the_cg_tag_is_built_like_the_chip_beside_it():
 # The contact grid: one card height
 # ---------------------------------------------------------------------------
 def test_every_contact_card_in_the_grid_is_one_height():
-    """Measured at 1280x800 on the demo board, the nine cards in the open
-    warmth row:
-
-        before   heights 156 x8, 178 x1   foot offsets 71 x8, 93 x1
-        after    heights 178 x9           foot offsets 93 x9
-
-    and at every other width tested, one height and one foot offset per
-    grid: 1600 -> 146, 900 -> 128, 700 -> 178, 375 -> 146, nothing clipped.
-
-    `1fr` rows are what makes all ROWS equal rather than just the cards
+    """`1fr` rows are what makes all ROWS equal rather than just the cards
     within one row, `stretch` fills each row with its card, and the foot's
     `margin-top: auto` puts the controls at the same offset from the bottom
     of every card.
+
+    Re-measured 2026-09-02 across all five warmth grids at once, 49 cards,
+    with `content-visibility` disabled for the measurement (leave it on and
+    every card reports its `contain-intrinsic-size` placeholder instead of
+    its box, which reads as a flat "no change" whatever you do):
+
+        1280x800   before  heights 156 x16, 178 x9, 202 x24   foot 72/94/118
+                   after   heights 202 x49                    foot 118 x49
+        375x812    before  heights 128 x16, 146 x9, 171 x24   foot 75/93/118
+                   after   heights 171 x49                    foot 118 x49
+
+    The rules below were already doing their job WITHIN a grid before this
+    pass; what changed is that the card's own slots are fixed heights now
+    (see the two tests below), so the tallest card in every warmth section is
+    the same card, and the whole page settles on one height instead of one
+    height per section.
     """
     css = _styles(_page())
     grid = _rule(css, ".contact-grid")
@@ -261,28 +268,164 @@ def test_the_foot_wraps_on_the_card_width_not_on_the_day_count():
     )
 
 
-def test_the_firm_line_reads_before_it_cuts():
-    """The column is 174px and "Goldman Sachs · Campus Recruiting Manager"
-    wants 270px, so the board rendered "Goldman Sachs · Campus R…" — the
-    ellipsis one letter into the word carrying the meaning. Two lines is
-    348px, which fits that title, "Bain & Company · Bain Campus Recruiter"
-    and every firm · role string on the demo board outright. Wrapping stays
-    `normal`, so a line that still overruns breaks at a space rather than
-    inside a word, and the clamp is the cap that stops a 124-character title
-    becoming three lines.
+def test_the_firm_line_is_one_line_and_the_role_is_what_survives_it():
+    """THIS TEST REPLACES `test_the_firm_line_reads_before_it_cuts`, whose
+    premise was retired hours after it was written.
+
+    That test pinned `-webkit-line-clamp: 2` on `.cc-firm`, and it was right
+    about its own problem: at 173px of room "Goldman Sachs · Campus
+    Recruiting Manager" rendered as "Goldman Sachs · Campus R…", an ellipsis
+    one letter into the word carrying the meaning, and two lines fitted every
+    string on the board. What it could not see is that a clamp which is two
+    lines on some cards and one on others is a variable-height fact, and the
+    card is a fixed skeleton now: "the description of their job cannot spill
+    over into the second line."
+
+    So the mid-word cut it was protecting against is answered a different
+    way, and this test pins THAT instead of weakening what it asked for:
+
+      ROOM. The line is a full-width row of the card, not a column beside
+      the 40px avatar. 253px at 1280 and 283px at 375, against 173px.
+      Two-line firm lines on the demo board: 2 before, 0 after, both widths.
+
+      SPLIT. Firm and role truncate independently and the firm is the half
+      that gives way, because two people at the same firm are told apart by
+      the role. Rendered against all 384 real firm/role pairs on the demo
+      and the founder's boards, at every line width this grid produces:
+      roleCut 0 everywhere; firmCut 2 of 323 and 1 of 61 at the narrowest,
+      0 at 321px.
+
+      SHRINK ZERO, not a ratio. At 100-to-1 the role still gave up 0.34px of
+      Rachel Lin's 18.2px deficit, and `text-overflow: ellipsis` fires on any
+      overflow at all and then eats three more characters to fit its own
+      glyph: a third of a pixel cost four characters. Only 0 is safe.
     """
-    firm = _rule(_styles(_page()), ".cc-firm")
-    assert "-webkit-line-clamp: 2" in firm, (
-        "the firm line is capped somewhere other than two lines; one cuts "
-        "mid-word and three is no longer a bounded card."
+    css = _styles(_page())
+    firm = _rule(css, ".cc-firm")
+    assert "line-clamp" not in firm, (
+        "the firm line is back on a multi-line clamp. One card in the grid "
+        "then spends two lines on it and the next spends one, which is the "
+        "spill this was reported for."
     )
-    assert "nowrap" not in firm, (
-        "the firm line is back on one line, which is the truncation that was "
-        "reported: an ellipsis four letters into the role."
+    assert "white-space: nowrap" in firm, (
+        "the firm line can wrap again, so its height is a property of the "
+        "contact's job title rather than of the card."
     )
-    assert "anywhere" not in firm and "break-all" not in firm, (
-        "the line breaks inside words again, which is the mid-word cut this "
-        "was fixed to avoid."
+    assert "text-overflow: ellipsis" in _rule(css, ".cc-firm-name"), (
+        "the firm name clips instead of ellipsising, so a reader cannot see "
+        "that anything was cut."
+    )
+
+    role = _rule(css, ".cc-firm-role")
+    assert "flex: 0 0 auto" in role, (
+        "the role can shrink again. Any shrink at all, even a third of a "
+        "pixel, triggers its ellipsis and costs four characters — the role "
+        "is the half that distinguishes two people at the same firm and it "
+        "must give up nothing while the firm still has room to give."
+    )
+    assert "max-width: calc(100% - 3.85em)" in role, (
+        "the cap that guarantees the firm 3.5em is gone. It is what makes "
+        "`flex: 0 0 auto` on the role safe: without it a very long role "
+        "leaves the firm nothing to shrink into and overflows the card."
+    )
+    assert "min-width" not in _rule(css, ".cc-firm-name") or (
+        "min-width: 0" in _rule(css, ".cc-firm-name")
+    ), (
+        "the firm has a min-width floor again. A min-width is also a WIDTH: "
+        "it pads 'BCG' and 'USC' out to the floor and hands the reserved "
+        "pixels to nobody. Measured at a 5.5em floor, that cut the role on 4 "
+        "of 323 rows on the founder's board and 1 of 61 on the demo one; the "
+        "cap on the role cuts none at any width."
+    )
+
+
+def test_the_pill_row_is_reserved_whether_or_not_it_has_pills():
+    """The pills used to ride the name's line, and there are four of them —
+    Parked, gender, tier, region — each independently conditional. Measured
+    at 1280x800 on the demo board, that put the firm line under them at three
+    different heights in one grid:
+
+        firmTop  before  43 x41, 65 x5, 89 x3    (3 distinct)
+                 after   89 x49                  (1)
+
+    and the founder's own 323-contact board has the same shape: "Parked HK"
+    on 81 rows, a bare "US" on 59, nothing at all on 58.
+
+    Reserved beats omitted, and both were measured. Reserved, `.cc-firm` sits
+    at 89px on all 49 cards and a pill-less card shows an empty band where
+    its pills would be; it costs 24px of card height only when NO card in the
+    grid has a pill, because `grid-auto-rows: 1fr` was already stretching
+    every card to the tallest one. Omitted, the 29 pill-less demo cards pull
+    their firm line up 24px and the grid has two firm-line offsets again.
+
+    `nowrap` is safe rather than hopeful: the widest combination the data can
+    produce is Parked + gender + tier + region = 59.6 + 25.5 + 29.2 + 46.8
+    plus three 8px gaps = 185px, against 248px in the narrowest card the grid
+    can build (the 280px `minmax` floor less 32px of padding).
+    """
+    css = _styles(_page())
+    tags = _rule(css, ".cc-tags")
+
+    assert "min-height" in tags, (
+        "the pill row no longer reserves its line, so a contact with no "
+        "region and no tier pulls the whole card below it up one row."
+    )
+    assert "flex-wrap: nowrap" in tags, (
+        "the pill row can wrap to a second line again, which is the original "
+        "defect moved one row down: one card in the grid is then 24px taller "
+        "inside than its neighbour."
+    )
+
+    html = _page_with_a_contact()
+    assert re.search(r'class="[^"]*\bcc-tags\b', html), (
+        "the pill row is not rendered at all. It is rendered UNCONDITIONALLY "
+        "on purpose — the contact seeded by this test has no pills, and the "
+        "empty row is what holds the skeleton open."
+    )
+    assert not re.search(r'class="[^"]*\bcc-pill\b', html), (
+        "this fixture's contact has no region, tier, gender or parked state, "
+        "so it should render an EMPTY pill row. A pill here means the "
+        "reserved-row measurement above was taken against different markup."
+    )
+
+
+def test_the_identity_row_is_the_avatars_own_height():
+    """The other source of drift, and the one that survives a name nobody
+    predicted: the name wrapped. "Mariela Jimenez-Sanchez" on the founder's
+    board measures 181px in this face and "Bartholomew Vanderhoeven" on the
+    demo one 204px, against 173px of room, so both take two lines and used to
+    push every fact under them down 24px.
+
+    The name is still never truncated (see the test below). The head absorbs
+    the second line instead: it is pinned at the avatar's own 40px, and the
+    name's line-height is 20px so that TWO lines land on exactly that 40px.
+    Three of the 49 demo cards wrap their name at 1280 and one at 375, and
+    `.cc-firm` sits at 89px on all 49 either way.
+
+    `align-items: center` is what makes a one-line name sit against the
+    middle of the avatar rather than its cap-height, and it also replaced the
+    hand-computed 12px nudge on the checkbox — (40 - 16) / 2, arithmetic
+    standing in for a centring the row could not do while it was on
+    `flex-start`.
+    """
+    css = _styles(_page())
+    head = _rule(css, ".cc-head")
+    assert "min-height: 40px" in head, (
+        "the identity row can be shorter or taller than the avatar again, so "
+        "a wrapped name moves the pill row and the firm line down with it."
+    )
+    assert "align-items: center" in head, (
+        "the identity row is back on top alignment, which leaves a one-line "
+        "name floating above the middle of a 40px avatar."
+    )
+    assert "line-height: 20px" in _rule(css, ".cc-name"), (
+        "the name's line-height is not the half of the 40px head it has to "
+        "divide into, so a two-line name overflows the row that reserves it."
+    )
+    assert "margin-top: 0" in _rule(css, "input.cc-check"), (
+        "the checkbox is back on a hand-computed top margin. The row centres "
+        "it now; a fixed nudge goes wrong the moment the avatar or the box "
+        "is resized."
     )
 
 
