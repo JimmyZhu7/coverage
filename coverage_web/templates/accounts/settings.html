@@ -1158,7 +1158,7 @@ that don't already declare explicit htmx behaviour.
                       <select class="tf-tier" draggable="false" data-no-csel data-tf-tier-sel
                               aria-label="Tier for {{ f.name|smart_title }}">
                         {% for t in firm_tiers %}
-                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>Tier {{ t.tier }}</option>
+                          <option value="{{ t.tier }}"{% if t.tier == col.tier %} selected{% endif %}>{{ t.tier }}</option>
                         {% endfor %}
                       </select>
                       <button type="button" class="tf-chip-x" data-tf-remove="{{ f.id }}"

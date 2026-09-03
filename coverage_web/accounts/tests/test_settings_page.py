@@ -401,20 +401,46 @@ def test_the_picker_offers_every_tier_the_board_renders(client, tracked_firms):
 
 
 def test_the_picker_shows_the_tier_the_chip_is_actually_on(client, tracked_firms):
+    """Option text is the bare numeral as of 2026-09-02, the founder's own
+    call. The word was on screen once per chip inside a column already
+    headed TIER 1, sixteen times in one lane, which made the firm name (the
+    only thing that differs chip to chip) the least prominent text on the
+    row. The template comment above the control had argued for numerals all
+    along; the markup simply never did it.
+
+    The word is not lost, it moved: the `aria-label` below carries it, and
+    the next test pins that it still does."""
     body = client.get(reverse(SETTINGS)).content.decode()
     for tier, chip in enumerate(_chips(body), start=1):
-        assert f'<option value="{tier}" selected>Tier {tier}</option>' in chip
+        assert f'<option value="{tier}" selected>{tier}</option>' in chip
+        assert f">Tier {tier}</option>" not in chip, (
+            "the tier word is back on the chip face, inside a column whose "
+            "heading already says it"
+        )
 
 
-def test_the_picker_names_its_firm_and_spells_the_tier_out(client, tracked_firms):
-    """The `aria-label` says which firm, the option text says which tier. A
-    screen reader reads the chosen OPTION back on change, not the box's
-    label, so an abbreviated "T2" would drop half of what a blind student
-    needs to hear."""
+def test_the_accessible_name_carries_the_word_the_face_no_longer_does(client, tracked_firms):
+    """Rewritten 2026-09-02, and this is the half that must not regress.
+
+    It used to require the option text to spell "Tier 2", on the argument
+    that a screen reader reads the chosen OPTION back on change rather than
+    the box's label, so a bare numeral drops half the meaning. That concern
+    is real, which is why the word has to live somewhere the control always
+    carries: the accessible name. `aria-label="Tier for Tier 2 Co"` is
+    announced when the control takes focus, so the pair reads "Tier for Tier
+    2 Co, 2" rather than an unqualified "2".
+
+    So the visible redundancy goes and the spoken meaning stays. If the
+    label ever loses the word, this fails even though the page looks fine,
+    which is the point."""
     body = client.get(reverse(SETTINGS)).content.decode()
     chip = _chips(body)[1]
     assert 'aria-label="Tier for Tier 2 Co"' in chip
-    assert ">Tier 2</option>" in chip
+    assert 'aria-label="Tier' in chip, (
+        "the accessible name dropped the word Tier, which is now the only "
+        "place a screen reader can hear it"
+    )
+    assert ">2</option>" in chip
 
 
 def test_the_drag_survives_as_the_pointer_shortcut(client, tracked_firms):
