@@ -2378,10 +2378,39 @@ moved-flag all live in static/css/coverage.css (the animation contract for
 
   A fixed floor makes the zone one width whatever the number says, so the
   wrap decision is a property of how wide the CARD is and every card in the
-  grid answers it the same way. 7.5rem clears the widest real string with
-  room for a four-digit count, and it is deliberately not wider: at 8rem the
-  phone's one-column card tips over into wrapping and grows 32px for nothing.
-  `nowrap` keeps the fact on one line inside its own zone; it is never cut.
+  grid answers it the same way.
+
+  IT ONLY HOLDS FOR A STRING THAT FITS INSIDE IT, and this comment used to
+  claim 7.5rem had "room for a four-digit count". It does not, and the claim
+  was never measured. Re-measured 2026-09-03 on the demo board, 49 cards,
+  `content-visibility` forced off:
+
+      41d since last touch     106.4   the widest count the board holds
+                                       (its oldest real touch is 43 days)
+      999d since last touch    117.2   inside the 120px floor
+      1234d since last touch   120.2   outgrows it
+      3650d since last touch   124.1   outgrows it
+
+  A `min-width` is a floor, not a cap, so the moment the text is wider than
+  120px the zone goes back to sizing itself and the wrap decision goes back
+  to being a property of the digits. Injecting a four-digit count on every
+  fifth card reproduces the original defect exactly: at 375, `.cc-foot` came
+  back at 117.8px on 11 cards and 149px on the other 38, in one grid.
+
+  The fix is upstream, in `views.py::_since_label`: past a year the sentence
+  switches to years, so the widest string this zone can ever hold is "364d
+  since last touch" at 116.4px and the floor is a cap again by construction.
+  Widening the floor was the other option and it is the expensive one. At
+  8rem the phone's one-column card tips over into wrapping, measured: card
+  height 171.2 to 202.4 at 375, +31.2px on all 49 cards, permanently, to buy
+  headroom for a number no card is showing. The years build measures 171.2
+  x49 and foot 117.8 x49 with a four-digit count planted on every fifth card,
+  which is byte-identical to a board with no long counts at all.
+
+  7.5rem therefore stays, and stays paired: this floor and that function are
+  one mechanism, and neither is safe to change without re-measuring the
+  other. `nowrap` keeps the fact on one line inside its own zone; it is
+  never cut.
   {% endcomment %}
   .cc-since { font-size: var(--fs-xs); color: var(--ink-3);
     flex: 0 0 auto; min-width: 7.5rem; white-space: nowrap; }
