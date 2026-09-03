@@ -322,10 +322,14 @@ def test_lens_rows_show_the_stage_they_are_counted_in(client, board, tracked):
                 "Saved", "Applied", "Interviewing", "Offer", "Done",
             }
     body = resp.content.decode()
-    # 2026 redesign shortened the intro; "sorted by deadline instead of
-    # stage" replaced the old "same roles seen by deadline, not extra ones"
-    # sentence, but the overlap claim still has to be ON the page somewhere.
-    assert "sorted by deadline instead of stage" in body
+    # The overlap claim still has to be ON the page somewhere, and this test
+    # has always asserted it wherever it currently lives. The 2026 redesign
+    # cut it to one sentence; the 2026-09-02 copy pass cut that sentence too,
+    # because the eyebrow above it had been making the same claim in four
+    # words the whole time. The eyebrow is now where the claim lives, and the
+    # fraction below is the arithmetic that backs it up.
+    assert "Cross-section, not extra roles" in body
+    assert "sorted by deadline instead of stage" not in body
     assert f"of {resp.context['live_total']} live" in body
 
 

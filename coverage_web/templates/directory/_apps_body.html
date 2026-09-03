@@ -79,12 +79,17 @@ survives even if it was in the batch.
     </p>
     <h2 class="apps-lenses-h" id="lenses-h">By deadline</h2>
     {% comment %}
-    Cut from three sentences to one (2026 redesign, "cleaner, less words").
-    The eyebrow above already says "cross-section, not extra roles"; each
-    stage pill below is itself the proof, one click away — restating both
-    in prose here was the same claim made three times on one screen.
+    Cut from three sentences to one (2026 redesign, "cleaner, less words"),
+    and now to none. The last sentence read "The same N live roles, sorted by
+    deadline instead of stage" — it explained the page's structure to a
+    student who had not asked, and every clause in it is stated by something
+    that has to be on the screen anyway: the eyebrow above makes the
+    same-roles claim, the h2 says "by deadline", and each lens fraction below
+    prints the live total itself as "of N live". Nothing that was only here
+    is gone. The three affordances the band's own comment names — eyebrow,
+    fraction, stage pill — are all still standing; the intro was a fourth,
+    repeating the first.
     {% endcomment %}
-    <p class="apps-lenses-intro">The same <strong>{{ live_total }} live role{{ live_total|pluralize }}</strong>, sorted by deadline instead of stage.</p>
     {% comment %}
     Every live row lands in exactly one lens, so the fractions sum to the
     denominator. They did not before: the band ran Closing Soon + Rolling
@@ -100,7 +105,12 @@ survives even if it was in the batch.
         <h3>{{ lens.label }}
           <span class="apps-lens-frac">{{ lens.items|length }} of {{ live_total }} live</span>
         </h3>
-        <p class="apps-lens-note">{{ lens.note }}</p>
+        {% comment %}A note only when it says something the heading cannot —
+        a window, a boundary, what happens to the row next. "Deadline Passed"
+        and "No Deadline" say their own note, so they carry none, and an
+        empty <p> would leave their heading floating on a note's margin.
+        {% endcomment %}
+        {% if lens.note %}<p class="apps-lens-note">{{ lens.note }}</p>{% endif %}
         {% if lens.items %}
           <ul class="apps-lens-list">
             {% for r in lens.items %}
@@ -184,11 +194,17 @@ survives even if it was in the batch.
         {% else %}
           <p class="apps-lens-empty">
             <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.9v3.6" stroke-linecap="round"/><circle cx="8" cy="11.1" r=".85" fill="currentColor" stroke="none"/></svg>
+            {% comment %}The day count is NOT repeated here. It is stated
+            once, on this lens's own note two lines above ("Within N days."),
+            and printing it again inside the box it explains was the same
+            number twice in adjacent sentences. Still one fact plus one
+            action (ux: empty-states) — the fact is just no longer wearing
+            the window's arithmetic a second time.{% endcomment %}
             {% if lens.key == 'closing' %}
-              <span>Nothing you're tracking closes in the next {{ closing_soon_days }} days.
+              <span>Nothing you're tracking closes that soon.
                 <a href="{% url 'opportunities' %}">Find roles that do</a>.</span>
             {% else %}
-              <span>Everything you're tracking has a posted deadline.
+              <span>Everything you're tracking has a posted date.
                 <a href="{% url 'opportunities' %}">Browse openings</a>.</span>
             {% endif %}
           </p>
