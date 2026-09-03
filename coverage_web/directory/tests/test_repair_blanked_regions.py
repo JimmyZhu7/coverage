@@ -172,13 +172,40 @@ def test_a_posted_market_contradicting_the_firms_own_field_stops_the_guess():
 
 
 @pytest.mark.django_db
-def test_a_place_outside_the_tracked_markets_is_left_alone():
-    """Blank is the honest reading of "Regina, Saskatchewan" — the posting
-    said where it is and it is nowhere Coverage tracks. Filling it in would
-    be inventing a market, which is the mistake this command undoes."""
+def test_a_place_outside_the_tracked_markets_is_filed_other_not_tracked():
+    """REWRITTEN 2026-09-02, and the rewrite is the point of `other`.
+
+    This test used to pin `region == ""` for "Regina, Saskatchewan" on the
+    reasoning that blank is the honest reading of a place Coverage does not
+    track. That conflates two different answers, which is exactly what
+    `REGION_LABELS`' own comment says it must not: blank means the posting
+    never said where it is, `other` means it said and the answer is outside
+    the six tracked markets. Saskatchewan is the second case. The rule that
+    matters — that a stated location outside the tracked markets may never
+    be promoted INTO one — is what is asserted here now, and it still holds.
+
+    (The example only stopped answering blank because the spelled-out
+    Canadian provinces became keys on 2026-09-02; the eleven US-state names
+    added in the same pass are why 238 open rows stopped being placeless.)"""
     firm = _firm(slug="td", name="TD Securities", regions=[])
     opp = _opp(firm, location="Regina, Saskatchewan",
                url="https://td.example/job/regina")
+
+    _run(apply=True)
+
+    opp.refresh_from_db()
+    assert opp.region == "other"
+    assert opp.region not in ("us", "hk", "sg", "eu", "cn", "jp")
+
+
+@pytest.mark.django_db
+def test_a_location_that_names_nowhere_stays_blank():
+    """The half of the old assertion that was really about silence. A
+    building name is not a place, so nothing in the database can be shown to
+    have stated a market and the command must leave the row alone."""
+    firm = _firm(slug="dbs", name="DBS", regions=[])
+    opp = _opp(firm, location="Technology Centre",
+               url="https://dbs.example/job/centre")
 
     body = _run(apply=True)
 

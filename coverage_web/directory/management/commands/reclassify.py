@@ -41,9 +41,11 @@ import re
 
 from directory.boards import BOARDS
 from directory.classify import (
-    bucket_from_contract, campus_hint_pairs, classify_role, clean_title, cohort_from_provider_title,
+    bucket_from_contract, bucket_from_event_filing, campus_hint_pairs,
+    classify_role, clean_title, cohort_from_provider_title,
     derive_class_year, extract_class_year, extract_cohort,
-    extract_deadline_from_text, extract_sponsorship, normalize_region, region_from_fields,
+    extract_deadline_from_text, extract_sponsorship, location_from_bullets,
+    normalize_region, region_from_fields,
     region_from_prose, region_from_title_segments, posting_text,
 )
 from directory.models import Opportunity
@@ -83,6 +85,7 @@ class Command(BaseCommand):
                 # outright where it speaks, the title rules where it is silent.
                 bucket = (bucket_from_contract(
                               (opp.raw or {}).get("contract_type"), title)
+                          or bucket_from_event_filing(opp.raw, title)
                           or classify_role(title, campus_hint=hint))
                 cohort = (opp.cohort or extract_cohort(title)
                           or cohort_from_provider_title(opp.raw))
@@ -93,7 +96,16 @@ class Command(BaseCommand):
                 stated_grad = ((opp.raw or {}).get("facts") or {}).get("grad")
                 class_year_derived = "" if (class_year or stated_grad) else \
                     derive_class_year(bucket, title, cohort)[0]
-                region = normalize_region(opp.location)
+                # The DISPLAY location, fill-only: a Workday tenant that omits
+                # `locationsText` still names its office in `bulletFields`,
+                # and 429 open rows were stored blank beside a payload that
+                # said "Pittsburgh, Pennsylvania - United States". Ingest now
+                # reads it on the way in (see `ingest._upsert`); this is the
+                # same read over rows already in the table, so they do not
+                # have to wait for their board's next scrape. Never
+                # overwrites a location the connector reported.
+                location = opp.location or location_from_bullets(opp.raw)
+                region = normalize_region(location)
                 # Title fallback, and ONLY when the row carries no location at
                 # all (327 open campus rows on live data — boards that route
                 # the city into the title instead: "2027 Investment Banking
@@ -109,7 +121,7 @@ class Command(BaseCommand):
                 # Hong Kong, "Head of Compliance, Hong Kong" in Singapore. A
                 # row that stated a location we could not parse has already
                 # told us the title is not where it is.
-                if not region and not (opp.location or "").strip():
+                if not region and not (location or "").strip():
                     region = normalize_region(title)
                 # Same gate, on the provider's ORIGINAL title: boards route
                 # location into leading pipe-segments ("APAC | Singapore |
@@ -117,7 +129,7 @@ class Command(BaseCommand):
                 # — correctly for display, but the stored title has therefore
                 # already lost the one place the row ever stated. The raw
                 # payload still carries the uncleaned title.
-                if not region and not (opp.location or "").strip():
+                if not region and not (location or "").strip():
                     region = region_from_title_segments(
                         (opp.raw or {}).get("title") or "")
                 # Workday's list payload writes "2 Locations" into the
@@ -222,6 +234,7 @@ class Command(BaseCommand):
                             (parsed, "day", 0.6) if parsed else (None, "", 0.0))
 
                 if (bucket != opp.bucket or cohort != opp.cohort
+                        or location != opp.location
                         or class_year != opp.class_year
                         or class_year_derived != opp.class_year_derived
                         or region != opp.region or title != opp.title
@@ -236,13 +249,14 @@ class Command(BaseCommand):
                         opp.class_year = class_year
                         opp.class_year_derived = class_year_derived
                         opp.region = region
+                        opp.location = location
                         opp.sponsorship = sponsorship
                         opp.deadline = deadline
                         opp.deadline_precision = precision
                         opp.confidence = confidence
                         opp.save(update_fields=[
                             "title", "bucket", "cohort", "class_year",
-                            "class_year_derived", "region",
+                            "class_year_derived", "region", "location",
                             "sponsorship", "deadline", "deadline_precision",
                             "confidence",
                         ])

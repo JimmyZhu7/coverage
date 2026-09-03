@@ -9,12 +9,14 @@ faces, not toy strings.
 import pytest
 
 from directory.classify import (
+    location_from_bullets,
     normalize_region,
     ENTRY_LEVEL,
     INSIGHT,
     INTERNSHIP,
     OTHER,
     board_is_campus,
+    bucket_from_event_filing,
     campus_hint_pairs,
     classify_role,
     clean_title,
@@ -1126,3 +1128,369 @@ def test_selectable_tracks_leaves_junk_alone_to_be_junk():
     same answer as a retired one, which is what every caller already does
     with it."""
     assert selectable_tracks(["ib", "quant-research", ""]) == ["ib"]
+
+
+# ---------------------------------------------------------------------------
+# The 2026-09-02 categorization audit. Every case below is a live title from
+# the 27,357-row stored set, paired with the title the same rule must NOT
+# catch — the precedent is `test_career_insights_needs_the_colon_because_it_
+# is_also_a_job_title` above, and the pairing is the point: a rule with no
+# stated negative is a rule nobody can check.
+#
+# Row counts (measured over all 27,357 stored rows, open and closed):
+#   leading "Stage"        79 titles, 66 open, 65 of them filed `other`
+#   degree cohort          14 titles, 13 of them filed `other`
+#   zh-Hant campus words    5 titles,  3 of them filed `other`
+#   university event       24 titles, 10 of them in the wrong bucket
+#   talent community       13 titles,  1 of them in the wrong bucket
+#   underscore boundary     2 titles,  1 of them filed `entry_level`
+# ---------------------------------------------------------------------------
+
+def test_a_leading_stage_is_a_french_internship():
+    """"Stage" is the French and Italian word for an internship and it opens
+    65 open titles that were all sitting in `other` — PwC France and Italy,
+    Lazard, Rothschild, UBS. A student filtering the board for internships
+    could not see one of them."""
+    assert classify_role("Stage Audit - Milano [ADT]") == INTERNSHIP
+    assert classify_role("Stage en Audit Financier") == INTERNSHIP
+    assert classify_role(
+        "Stage H/F - Analyste Actions - Janvier 2027") == INTERNSHIP
+    assert classify_role("Stage/Alternance Auditeur Financier") == INTERNSHIP
+    # The two other shapes a European board writes it in.
+    assert classify_role(
+        "Assistant(e) chef de projet en edition | Stage | H/F") == INTERNSHIP
+    assert classify_role("Charge (e) de recrutement - stage") == INTERNSHIP
+
+
+def test_stage_must_be_anchored_because_it_is_also_an_english_noun():
+    """The negative that makes the rule safe, and it is live: Stifel posts
+    "Managing Director, Venture & Growth Stage Lending". A "stage" in the
+    middle of an English title is a growth stage, a deal stage or a career
+    stage — never a posting type — so only the head of the title, the head
+    of a pipe segment, or a dash-closed tail counts."""
+    assert classify_role(
+        "Managing Director, Venture & Growth Stage Lending") == OTHER
+    assert classify_role("Late Stage Clinical Portfolio Analyst") != INTERNSHIP
+    assert classify_role("Multi-Stage Growth Equity Associate") != INTERNSHIP
+
+
+def test_the_internship_boundary_reads_an_underscore_as_a_boundary():
+    r"""`\b` counts the underscore as a word character, so BCG Japan's "2027
+    Summer Intern_Bachelor or Master with NO full-time work experience" was
+    filed `entry_level` — a full-time graduate hire — and Accenture's
+    "Finance & AI Intern_ML13" was filed `other`."""
+    assert classify_role(
+        "JPN, 2027 Summer Intern_Bachelor or Master") == INTERNSHIP
+    assert classify_role("Finance & AI Intern_ML13") == INTERNSHIP
+
+
+def test_the_underscore_boundary_did_not_loosen_the_letter_boundary():
+    r"""The whole reason `\b` was there: "intern" must never fire on
+    "Internal" or "International". A letter lookaround refuses both exactly
+    as `\b` did, and only stops treating `_` and a digit as letters."""
+    assert classify_role("Internal Audit Analyst") != INTERNSHIP
+    assert classify_role("International Markets Associate") != INTERNSHIP
+    assert classify_role("Head of Internal Controls") == OTHER
+
+
+def test_a_degree_cohort_is_a_graduate_hire():
+    """SIG names the same programme two ways. "Quantitative Trader -
+    Graduate: 2027" was `entry_level`; "Quantitative Trader - Master's:
+    2027" and "- PhD: 2026" were `other`, which split one graduate
+    programme across two buckets on a synonym. 13 open rows."""
+    assert classify_role("Quantitative Researcher - Master's: 2027") == ENTRY_LEVEL
+    assert classify_role("Quantitative Systematic Trader - PhD: 2026") == ENTRY_LEVEL
+    assert classify_role(
+        "Quantitative Researcher - Honours and Master's: 2026") == ENTRY_LEVEL
+
+
+def test_a_degree_cohort_never_outranks_an_explicit_internship():
+    """SIG's own counter-example, on the same board and in the same
+    spelling: "Machine Learning Internship - PhD: 2027" is an internship for
+    a PhD student, not a PhD graduate hire. Step 2 before step 4 is what
+    settles it."""
+    assert classify_role("Machine Learning Internship - PhD: 2027") == INTERNSHIP
+    # And a degree with no cohort year is a requirement, not a cohort.
+    assert classify_role("Quantitative Researcher, PhD in Statistics") == OTHER
+
+
+def test_traditional_chinese_campus_recruitment_is_a_graduate_hire():
+    """The simplified keys the vocabulary already had cannot see PwC
+    Taiwan's traditional spelling. 3 open rows, all `other`."""
+    assert classify_role(
+        "預計2027報到_校園招募_"
+        "審計_Associate") == ENTRY_LEVEL
+    assert classify_role(
+        "校園招募_2026 服務中心(SDC)"
+        "-初級專員") == ENTRY_LEVEL
+
+
+def test_a_campus_recruitment_event_outranks_the_campus_recruitment_words():
+    """Same board, same words, different thing: PwC Taiwan's autumn campus
+    recruitment OPEN DAY is the event, not the hire, and step 1 is allowed
+    to say so before step 4 ever runs."""
+    assert classify_role(
+        "2026 資誠秋季校園徵才 Open Day "
+        "活動") == INSIGHT
+
+
+def test_a_talent_community_is_not_an_opening():
+    """It is a mailing list: no cohort, no deadline, nothing to apply to.
+    KKR's "Early Careers Talent Community" was counted in the Entry-Level
+    segment as a job a student could act on."""
+    assert classify_role("Early Careers Talent Community") == OTHER
+    assert classify_role("Join Our Campus Talent Community") == OTHER
+    assert classify_role("Market Intelligence Emerging Talent Network") == OTHER
+
+
+def test_a_talent_pool_is_not_a_talent_community():
+    """The negative, and it is nine live internships wide: PwC calls its
+    ordinary application funnel a talent pool. "Community" and "network"
+    name the mailing list; "pool" names the queue for a real role."""
+    assert classify_role("FY27 - Intern - Assurance (Talent Pool)") == INTERNSHIP
+    assert classify_role(
+        "Internship - Digital, Cloud, Data - Talent Pool") == INTERNSHIP
+    assert classify_role(
+        "Consulting - Associate - Strategy & Operations (Talent Pool)",
+        campus_hint=True) == ENTRY_LEVEL
+
+
+def test_a_title_that_names_a_university_and_no_role_is_an_event():
+    """A job is posted to a city; an event is posted to a campus. 10 rows
+    moved: Blackstone's seven "Blackstone at <University>" postings, PJT's
+    Cambridge dinner and J.P. Morgan's four "Find Your Fit ... <University>"
+    sessions, which were being offered as entry-level jobs."""
+    assert classify_role("Blackstone at Harvard University") == INSIGHT
+    assert classify_role("Cambridge University Exclusive Dinner") == INSIGHT
+    assert classify_role(
+        "2026 Find Your Fit - Early Career Programs in China - "
+        "Tsinghua University") == INSIGHT
+
+
+def test_the_university_rule_refuses_any_title_that_names_a_role():
+    """"University" is also an address word and a department word, and the
+    live boards carry every trap. The role-noun test is the whole guard, and
+    the two vetoes in front of it do the rest."""
+    assert classify_role("Customer Experience Associate - University Ave") != INSIGHT
+    assert classify_role("Branch Manager University Mall") == OTHER
+    assert classify_role("University Talent Acquisition Specialist") == OTHER
+    assert classify_role(
+        "Deputy Head of University Talent Acquisition, EMEA & APAC") == OTHER
+    assert classify_role("Technology Co-op with Drexel University") == INTERNSHIP
+
+
+def test_college_is_deliberately_not_a_university_key():
+    """Vanguard names its whole internship family "College to Corporate",
+    and one of them — "College to Corporate - Advice" — drops the word
+    "Internship" and stores no description. Reading it as an event would be
+    a guess about a row that says nothing, so it stays in `other`."""
+    assert classify_role("College to Corporate - Advice") == OTHER
+
+
+def test_a_subject_101_is_a_teaching_session():
+    """"2026 Wealth Management 101 with Morgan Stanley at NYU" — three live
+    rows, all `other`. No board titles a job "<something> 101"."""
+    assert classify_role(
+        "2026 Wealth Management 101 with Morgan Stanley at NYU") == INSIGHT
+
+
+def test_101_cannot_fire_on_an_address():
+    r"""The shape a bare `\b101\b` would have taken. The word in front of
+    the number is what separates a session from a suite number."""
+    assert classify_role("Client Services Associate - Suite 101") != INSIGHT
+    assert classify_role("Branch Banker, Room 101") != INSIGHT
+    assert classify_role("Relationship Manager, Route 101 Corridor") != INSIGHT
+
+
+# ---------------------------------------------------------------------------
+# Region — the 2026-09-02 measurement. 1,773 open rows were stored at
+# region="" and 313 of them named a market in what we had already stored.
+# ---------------------------------------------------------------------------
+
+SPELLED_OUT_STATE_CASES = [
+    # TD's American branch network writes its states out in full and the
+    # ", XX" suffix rule cannot read one of them. 238 open rows.
+    ("Waterville, Maine", "us"),
+    ("Stratham, New Hampshire", "us"),
+    ("Asheville, North Carolina", "us"),
+    ("Bethlehem, Pennsylvania", "us"),
+    ("Methuen, Massachusetts", "us"),
+    ("Drexel Hill, Pennsylvania", "us"),
+    ("Hartford, Connecticut", "us"),
+    ("Middleton, Massachusetts", "us"),
+    # "Remote - <state>" is an American role delivered remotely, which the
+    # placeless tier's own comment already said and could not act on.
+    ("REMOTE - Massachusetts", "us"),
+    ("Remote Louisiana - United States", "us"),
+    # PNC and CIBC file by Workday slot, state code FIRST — neither the
+    # suffix rule nor the spelled-out names can see it. 15 open rows.
+    ("PA - Pittsburgh (15222)", "us"),
+    ("KS - Overland Park", "us"),
+    ("TX - 2121 N. Pearl Street", "us"),
+    ("NY - 2000 Westchester Ave", "us"),
+    # Canada is a market Coverage does not track, so the honest answer is
+    # `other`, not blank. 17 open rows on the bare code, plus the spelled-out
+    # provinces the ", canada" family missed.
+    ("Edmonton, AB", "other"),
+    ("Halifax, NS", "other"),
+    ("Richmond, BC", "other"),
+    ("Regina, Saskatchewan", "other"),
+    ("Sussex, New Brunswick", "other"),
+    ("Truro, Nova Scotia", "other"),
+]
+
+
+@pytest.mark.parametrize("location,expected", SPELLED_OUT_STATE_CASES)
+def test_spelled_out_states_and_province_codes(location, expected):
+    assert normalize_region(location) == expected
+
+
+NON_AMERICAN_LOOKALIKES = [
+    # Every one of these is why the state list is boundary-anchored, why
+    # four province codes are missing, and why "georgia" is not a key.
+    #
+    # "Georgia" is a US state AND a country and nothing in a location string
+    # tells them apart; the ", GA" suffix rule reads the state's own
+    # abbreviation, which the country never carries.
+    ("Tbilisi, Georgia", ""),
+    # A hyphen has to end the state name as surely as a letter does, or
+    # "Maine" fires inside the French departement.
+    ("Maine-et-Loire, France", "eu"),
+    # The same boundary the ", oh" suffix rule needed.
+    ("Ohrid, North Macedonia", ""),
+    ("Indore, India", "other"),
+    # SK is Saskatchewan and Slovakia; PE is Prince Edward Island and Peru;
+    # NL is Newfoundland and the Netherlands; YT is Yukon and Mayotte. All
+    # four codes are refused, which leaves Regina and Lima honest.
+    ("Bratislava, SK, 811 02", "eu"),
+    ("Lima, PE, 15073", ""),
+]
+
+
+@pytest.mark.parametrize("location,expected", NON_AMERICAN_LOOKALIKES)
+def test_the_new_region_passes_cannot_claim_a_non_american_place(
+        location, expected):
+    assert normalize_region(location) == expected
+
+
+# ---------------------------------------------------------------------------
+# Workday's `bulletFields`: the office the provider sent and we never read.
+# ---------------------------------------------------------------------------
+
+def test_a_workday_bullet_field_that_names_a_place_is_the_location():
+    """1,417 of 19,315 stored Workday rows carry no `locationsText` at all,
+    and 429 OPEN rows sat at location="" beside a payload that named the
+    office. Raymond James puts it first, Accenture puts it second behind the
+    requisition code, Fidelity International writes it as "<City> Office"."""
+    assert location_from_bullets(
+        {"bulletFields": ["Pittsburgh, Pennsylvania - United States",
+                          "R-0012827"]}
+    ) == "Pittsburgh, Pennsylvania - United States"
+    assert location_from_bullets(
+        {"bulletFields": ["R00353933", "Amsterdam"]}) == "Amsterdam"
+    assert location_from_bullets(
+        {"bulletFields": ["Gurgaon Office", "J70283 Assistant Manager - LEC",
+                          "Posting Date: 02/09/2026"]}) == "Gurgaon Office"
+
+
+def test_a_requisition_code_is_never_read_as_an_office():
+    """The vetting IS the rule: an entry only counts once `normalize_region`
+    has recognised it as a place, so a tenant whose bullets hold nothing but
+    codes and dates contributes nothing rather than something wrong."""
+    assert location_from_bullets({"bulletFields": ["566817WD"]}) == ""
+    assert location_from_bullets({"bulletFields": ["REQ100020"]}) == ""
+    assert location_from_bullets(
+        {"bulletFields": ["R-572761", "Posting End Date: 09/30/2026"]}) == ""
+    assert location_from_bullets({"bulletFields": []}) == ""
+    assert location_from_bullets({}) == ""
+    assert location_from_bullets(None) == ""
+
+
+def test_the_office_beats_the_market_word_in_the_title():
+    """Fidelity International's "Senior Manager - Financial Controller,
+    Japan" is posted from the Dalian office. The old chain read "Japan" out
+    of the title and filed the row in `jp`; the payload says where it
+    actually is. This is the hazard reclassify's own title-fallback comment
+    warns about, now answerable instead of only documented."""
+    raw = {"bulletFields": ["Dalian Office", "J68919 Financial Controller"],
+           "title": "Senior Manager - Financial Controller, Japan"}
+    assert normalize_region(location_from_bullets(raw)) == "cn"
+
+
+def test_goldmans_new_associate_is_an_experienced_hire():
+    """Goldman's own programme page: "Our New Associate Program is a
+    full-time program for individuals who have 2-5 years of experience and
+    an advanced degree." 21 open rows sat in `entry_level` because the
+    campus board's hint promotes a neutral "Associate", so a job with a
+    two-year experience floor was being offered to sophomores."""
+    assert classify_role(
+        "Wealth Management, Private Wealth Management — New Associate",
+        campus_hint=True) == OTHER
+    assert classify_role("Measurement and Reporting New Associate") == OTHER
+
+
+def test_new_analyst_is_still_the_new_grad_hire():
+    """The negative, 50 rows wide. Goldman draws the line itself: "New
+    Analyst" is the full-time new-grad hire and "New Associate" is not, and
+    the veto must not blur the two."""
+    assert classify_role(
+        "Asset Management, Controls Governance & Testing — New Analyst"
+    ) == ENTRY_LEVEL
+    assert classify_role("Operations — New Analyst") == ENTRY_LEVEL
+
+
+def test_a_student_job_is_an_internship_not_a_graduate_hire():
+    """`_NEUTRAL_JUNIOR`'s bare "student" was promoting PwC's "Student job -
+    HR Content & SharePoint Migration Support" to `entry_level`: a part-time
+    term-time job read as a graduate hire. Same family as "working
+    student", which was already here."""
+    assert classify_role(
+        "Student job - HR Content & SharePoint Migration Support",
+        campus_hint=True) == INTERNSHIP
+
+
+# ---------------------------------------------------------------------------
+# The board's own label table. tal.net files a posting with EITHER an
+# "Application Deadline" or an "Event Date", never both (measured across all
+# 27,357 stored rows on 2026-09-02: 65 and 112, zero overlap), so the column
+# name is the board telling us which of the two kinds of thing a row is.
+# ---------------------------------------------------------------------------
+
+def test_an_event_date_column_files_the_row_as_an_event():
+    """11 open rows carried an event marker and were NOT in `insight` — and
+    they are exactly the rows a title-only classifier cannot reach, because
+    their titles carry no event word at all."""
+    assert bucket_from_event_filing(
+        {"cols": {"Event Date": "8 October 2026, 03:00:00pm CEST"}},
+        "Build Your Future at Morgan Stanley Budapest") == INSIGHT
+    assert bucket_from_event_filing(
+        {"cols": {"Event Date": "1 January 2026, 12:00:00am HKT"}},
+        "Morgan Stanley Asia 2026/27 Recruiting News") == INSIGHT
+    # The same statement in the other tense.
+    assert bucket_from_event_filing(
+        {"cols": {"Registration Deadline": "20 October 2026"}},
+        "Evercore | Restructuring Focus Event - Paris") == INSIGHT
+
+
+def test_an_application_deadline_column_decides_nothing():
+    """The other half of the board's own distinction: a row filed with an
+    application deadline is a role, and this function stays silent so the
+    title rules answer it."""
+    assert bucket_from_event_filing(
+        {"cols": {"Application Deadline": "31 October 2026",
+                  "City": "London"}},
+        "2027 Investment Banking Summer Analyst") == ""
+    assert bucket_from_event_filing({"cols": {"City": "London"}}, "x") == ""
+    assert bucket_from_event_filing({}, "x") == ""
+    assert bucket_from_event_filing(None, "x") == ""
+
+
+def test_an_explicit_internship_title_outranks_the_event_filing():
+    """The live counter-example, and the board contradicts itself on it:
+    "Register Your Interest: Morgan Stanley Internships 2027" is filed with
+    an Event Date, and its own venue field reads "this is not a live event.
+    This is a registration opportunity ... for our 2027 Summer Analyst
+    Programmes." Same precedence `bucket_from_contract` already uses."""
+    assert bucket_from_event_filing(
+        {"cols": {"Event Date": "14 May 2026, 12:00:00am BST"}},
+        "Register Your Interest: Morgan Stanley Internships 2027") == ""
