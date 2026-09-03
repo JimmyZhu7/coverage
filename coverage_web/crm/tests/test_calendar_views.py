@@ -656,6 +656,43 @@ def test_an_htmx_request_answers_with_a_page_hx_select_can_carve(
     assert 'class="cal-month"' in body
 
 
+@pytest.mark.parametrize("view", ["month", "week", "day"])
+def test_the_period_group_still_carries_three_live_links(client, logged_in, view):
+    """Today moved INSIDE `.cal-nav`, between the arrows it shares a job with
+    (2026-09-02). The three links are now siblings in one drawn group, which
+    is exactly the shape of the regression this section exists for: a
+    container that looks like it navigates while the links inside it are
+    plain anchors.
+
+    So the group is asserted as a group — three links, each with its own
+    href, and every one of them either firing an `hx-get` or deliberately
+    not. Only Today may decline, and only when today is already on screen;
+    the two arrows never may, in any view.
+    """
+    markup = _markup(_get(client, view=view, y=2027, m=3, d=15))
+    group = re.search(r'<div class="cal-nav">(.*?)</div>', markup, re.DOTALL)
+    assert group, "the period group went missing"
+    links = re.findall(r"<a[^>]*>", group.group(1))
+    assert len(links) == 3, f"expected ‹ / Today / ›, got {len(links)} links"
+
+    for link in links:
+        assert _href(link), "every segment still works with JS off"
+        assert _hx_get(link) == _href(link), (
+            "away from today all three segments navigate by swap; an "
+            "inherited attribute on the wrapper does not start a request"
+        )
+    assert 'rel="prev"' in links[0] and "data-today-link" in links[1]
+    assert 'rel="next"' in links[2]
+
+    # And on the period today is in, only Today stands down.
+    here = re.search(r'<div class="cal-nav">(.*?)</div>',
+                     _markup(_get(client, view=view)), re.DOTALL).group(1)
+    here_links = re.findall(r"<a[^>]*>", here)
+    assert _hx_get(here_links[0]) and _hx_get(here_links[2])
+    assert _hx_get(here_links[1]) is None
+    assert "data-already-today" in here_links[1]
+
+
 def test_the_today_handler_is_delegated_so_it_survives_a_swap(
         client, logged_in):
     """The Today link lives INSIDE #cal-view, and every navigation replaces

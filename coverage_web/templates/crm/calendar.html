@@ -14,8 +14,23 @@
      CELL and the entries inside it scroll. Nothing is unreachable; the day
      just stops shoving the week below it down the page.
      -------------------------------------------------------------------- */
-  .cal-bar { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
+  /* ONE height for the control line, stated once. Measured at 1280px the day
+     before this rule: the arrows computed 36px, the segment's track 40.4,
+     Today and Subscribe 37.6, and Add 39 — its `+` glyph is set at
+     `--fs-l`/1, which pushed the <summary> two pixels past the `.btn` whose
+     class it shares. Four heights on one row, not one of them chosen: each
+     was whatever its own padding happened to compute. Nothing lined up along
+     either edge, which is most of what "busy" was measuring here.
+
+     `--cal-h` is the row's height and every control is set to it. On a coarse
+     pointer it goes to 44, except the segment: its TABS owe a finger 44 each,
+     and 44 inside a 4px-padded 1px-bordered track makes the track 54. The
+     alternative is a tab a thumb misses, so the segment stands 10px taller
+     than the rest on touch and is centred against them. */
+  .cal-bar { --cal-h: 40px;
+    display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap;
     margin-bottom: var(--s4); }
+  @media (pointer: coarse) { .cal-bar { --cal-h: 44px; } }
   /* `flex-basis: 100%` — the period title takes the whole first line, and
      every control sits on the line below it.
      -----------------------------------------------------------------------
@@ -41,8 +56,8 @@
      No reserved slot can fix that — a 471px title track leaves 325px of dead
      air beside "May 2026" and cannot survive a phone width at all. Giving the
      title its own line is what makes the rest of the bar constant-width: the
-     arrows, the switcher, Today, Subscribe and Add are the same five controls
-     with the same five labels in all three views, so once nothing variable
+     nav group, the switcher, Add and the Subscribe link are the same four
+     items with the same labels in all three views, so once nothing variable
      precedes them they wrap identically and land on the same pixel every time.
 
      Costs one line of height (43px -> 85px at 1440px). That is the trade: the
@@ -102,10 +117,11 @@
      (border-radius: 999px), a permanent box-shadow, and the lighter --line
      border — none of which is what a button looks like anywhere else in
      the product (see .btn, coverage.css: --r-ctl radius, --line-strong
-     border, shadow only on hover). ‹ › /Today/Subscribe/+ Add to the
-     calendar now all carry the real .btn class in the markup; what's left
-     here is only what .btn does not already give a circular icon button —
-     the fixed 36px square and centred glyph size. */
+     border, shadow only on hover). ‹ › /Today/Subscribe/+ Add all carried
+     the real .btn class in the markup from then on; what was left here was
+     only what .btn does not already give a circular icon button — the fixed
+     36px square and centred glyph size. (Subscribe left the .btn family
+     again on 2026-09-02, deliberately: see `.cal-sub` below.) */
   {% comment %}
   The last of that pass, finished 2026-09-01: the arrows kept `--r-ctl` too.
   The rewrite above put the real `.btn` class on them and then immediately
@@ -123,16 +139,70 @@
   On a coarse pointer it grows to 44 in both directions. `.btn`'s shared
   floor (coverage.css §16b) only sets `min-height`, and a 44x36 target is
   still a miss on the axis a thumb travels along a month bar.
+
+  2026-09-02: `‹`, `›` and Today are now ONE control rather than three. They
+  had been three separate outlined boxes with 4px and 12px of air between
+  them, sitting either side of the view segment, which is six drawn edges
+  spent on what is a single job — move the period you are looking at. Today
+  in particular was standing at the far end of the row, four controls away
+  from the arrows it belongs with, dressed identically to Subscribe, which it
+  has nothing in common with.
+
+  Joined, the group is one rounded rectangle: outer corners at `--r-ctl`,
+  square where the segments meet, one shared 1px edge between neighbours
+  (`margin-left: -1px`). That is still one shape and one radius under the
+  control-shape rule — a joined group is a button's corner drawn once round
+  three of them, not a fourth shape. It is not a capsule and does not claim
+  the segmented-choice exception, because these are three actions rather than
+  a choice among peers: the segment beside it is the choice, and the two now
+  read as different KINDS of control instead of as five interchangeable
+  boxes.
   {% endcomment %}
-  .cal-nav { display: flex; gap: var(--s1); }
-  .cal-nav a.btn { width: 36px; height: 36px; padding: 0;
-    border-radius: var(--r-ctl); font-size: var(--fs-m); }
-  @media (pointer: coarse) {
-    .cal-nav a.btn { width: 44px; height: 44px; }
-  }
+  .cal-nav { display: flex; }
+  .cal-nav .btn { height: var(--cal-h); padding: 0 var(--s3);
+    border-radius: 0; margin-left: -1px; }
+  .cal-nav .btn:first-child { margin-left: 0;
+    border-radius: var(--r-ctl) 0 0 var(--r-ctl); }
+  .cal-nav .btn:last-child { border-radius: 0 var(--r-ctl) var(--r-ctl) 0; }
+  /* The arrows keep their square. A glyph does not need a word's padding, and
+     square is what makes them read as a pair bracketing the label between
+     them. Width tracks the row height, so they stay square at both sizes. */
+  .cal-nav .cal-arrow { width: var(--cal-h); padding: 0; font-size: var(--fs-m); }
+  /* `.btn`'s hover lifts and shadows, which inside a joined group tears one
+     segment out of the outline the other two are still drawing. Ground and
+     border instead, with the hovered segment raised in the stack so its own
+     edge wins over the neighbour it shares a pixel with. z-index applies to a
+     flex item without `position`, which is why there is none here. */
+  .cal-nav .btn:hover { transform: none; box-shadow: none;
+    background: var(--paper); z-index: 1; }
+  .cal-nav .btn:focus-visible { z-index: 1; }
+
+  /* Subscribe, demoted from a button to a link. It is a once-ever action —
+     you point Apple or Google Calendar at the feed one time and never touch
+     it again — and it was drawn at exactly the weight of Today, which is
+     pressed several times a session. Six controls at one weight is why the
+     row read as busy; this is the one whose weight was furthest from its
+     use.
+
+     Demoted, NOT moved off the bar and not removed: it is the only place in
+     the product that hands out the feed (Settings' Calendar Link row only
+     RESETS it), so it stays on the calendar's own bar where someone would
+     look for it. It sits at the quiet end beside the counts, at the counts'
+     own size, because that end of the row is already where this page puts
+     things you read rather than press. `margin-left: auto` is on this
+     rather than on the legend now, so the pair stays together and the legend
+     cannot strand it when a period has no counts to draw.
+
+     SIZE is the whole demotion, and colour deliberately is not: this states
+     `--fs-xs` and nothing else, so the link keeps the accent ink and the
+     hover underline `a` gives every link in the product (coverage.css §3).
+     Written in the counts' own `--ink-2` it matched the static text beside it
+     exactly, which is not a quieter control, it is a control you cannot tell
+     is one. */
+  .cal-sub { margin-left: auto; font-size: var(--fs-xs); white-space: nowrap; }
   /* Legend doubles as the month's counts — the key and the summary are the
      same three facts, so they are one row rather than two. */
-  .cal-legend { display: flex; gap: var(--s3); margin-left: auto; flex-wrap: wrap;
+  .cal-legend { display: flex; gap: var(--s3); flex-wrap: wrap;
     font-size: var(--fs-xs); color: var(--ink-2); }
   .cal-key { display: inline-flex; align-items: center; gap: 6px; }
   .cal-key::before { content: ""; width: 9px; height: 9px; border-radius: 3px; }
@@ -336,9 +406,35 @@
      a narrow screen. What is left here is only what a BAR item needs and a
      standalone strip does not — `.subnav` carries a top margin for a strip
      that sits above a page title, and segments sized to head a page are too
-     tall to stand beside a 36px arrow button. */
+     tall to stand beside the period group (`--cal-h`, 40px). */
   .cal-views { margin: 0; flex: none; }
-  .cal-views a { padding: 7px 14px; font-size: var(--fs-xs); }
+  /* Elevation and edge, the third and fourth things a bar item does not want
+     from a standalone strip. `.subnav.scope-tabs` carries `--shadow-1`
+     permanently and draws its border in `--line`; `.btn` shadows only on
+     hover and draws in `--line-strong`. Beside each other that made the
+     switcher the one control on the row floating above the rest AND the one
+     with an edge you could barely see — it read as hovering over its
+     neighbours rather than standing with them. Flat and at the same edge
+     weight now; the selected segment's navy is what marks the state.
+
+     Written `.cal-views.scope-tabs`, matching the two classes it overrides.
+     `.cal-views` alone is one class against `.subnav.scope-tabs`'s two and
+     loses on specificity no matter that it is declared later — which it did,
+     silently, for the first cut of this rule. */
+  .cal-views.scope-tabs { box-shadow: none; border-color: var(--line-strong); }
+  /* Height rather than vertical padding, so the track lands on `--cal-h`: the
+     track is a tab plus its own 4px of padding and 1px of border on each
+     side, hence the 10.
+
+     Two classes here for the same reason as the rule above. What this
+     replaces read `.cal-views a { padding: 7px 14px }` and had never once
+     applied — `.subnav.scope-tabs a`'s `var(--s2) 20px` outranks it — so the
+     comment above it described a bar-sized segment while the rendered
+     control kept the padding of a strip that heads a page. Measured at
+     1280px: the switcher was 229.8px wide, the single widest control on the
+     row, against 193.8 once its own rule reaches it. */
+  .cal-views.scope-tabs a { display: inline-flex; align-items: center;
+    height: calc(var(--cal-h) - 10px); padding: 0 14px; font-size: var(--fs-xs); }
   {% comment %}
   The segment is the one control on this bar that keeps a capsule, and it
   earns it under the single exception in the control-shape rule
@@ -394,7 +490,6 @@
     flex-wrap: wrap; padding: var(--s3) var(--s4); background: var(--paper);
     border-bottom: 1px solid var(--line-strong); }
   .cal-dayv-date { margin: 0; font-size: var(--fs-s); color: var(--ink-2); }
-  .cal-dayv-add { margin-left: auto; }
   /* The same today marker the grid cells wear, on this view's own header,
      so the Today control has something to land on and highlight here too. */
   .cal-dayv.is-today .cal-num { background: var(--accent); color: var(--on-accent);
@@ -437,11 +532,6 @@
     .cal-dayv-row { grid-template-columns: 52px minmax(0, 1fr); gap: var(--s2);
       padding-left: var(--s2); padding-right: var(--s2); }
     .cal-dayv-head { padding: var(--s3); }
-    /* The date and the button stop fighting over one line at this width and
-       take one each: `margin-left: auto` inside a wrapped flex row pushes the
-       button onto its own line already, and this is what stops it hanging off
-       the right edge when it gets there. */
-    .cal-dayv-add { margin-left: 0; }
   }
 
   /* ---- Add-event panel --------------------------------------------------
@@ -451,8 +541,19 @@
 
      Lives INSIDE `.cal-bar` now (2026-08-29), not on its own row below it —
      closed, the <summary> carries the real `.btn` class, the same button
-     every other control in the product uses, so it earns a place beside
-     Today/Subscribe instead of a whole line of its own under them.
+     every other control in the product uses, so it earns a place on the
+     control line instead of a whole line of its own under it.
+
+     `btn-primary` since 2026-09-02, and it is the only filled control on the
+     row. Adding an entry is the one thing this page lets you DO — everything
+     else here moves you around it or reports what is on it — and until now
+     that was said nowhere: six outlined boxes at one weight, in which the
+     once-ever Subscribe and the constantly-pressed arrows were drawn
+     identically. The switcher's selected segment is also navy and is not in
+     competition with this: it is a filled state inside a drawn track, which
+     is what "you are here" looks like, against a free-standing filled
+     rectangle, which is what "press me" looks like.
+
      `flex-basis: 100%` on the open state is what keeps the FORM from doing
      the same: `.cal-bar` already wraps, so a full-width item drops to its
      own new line instead of squeezing a grid of eight fields between two
@@ -461,7 +562,10 @@
   /* Everything .btn does not already cover: no bullet/marker (it's a
      <summary>, not a list item), and the +/× glyph that shows which state
      a click leads to. */
-  .cal-add > summary { list-style: none; gap: 7px; }
+  /* `height`, because the glyph below is set at `--fs-l`/1 and was computing
+     a summary 1.4px taller than the `.btn`s beside it. */
+  .cal-add > summary { list-style: none; gap: 7px;
+    height: var(--cal-h); padding: 0 20px; }
   .cal-add > summary::-webkit-details-marker { display: none; }
   .cal-add > summary::before { content: "+"; font-size: var(--fs-l); line-height: 1;
     transition: transform var(--t-med); }
@@ -559,9 +663,45 @@
        hx-swap="outerHTML" hx-push-url="true">
   <div class="cal-bar">
     <h2 class="cal-month">{{ period_label }}</h2>
+    {% comment %}
+    One control, three segments: back a period, to the period containing
+    today, forward a period. They are the same job and they are now drawn as
+    the same object, with Today bracketed by the arrows that move away from
+    it. Its own comment (below, on the conditional `hx-get`) is unchanged —
+    only where it sits changed, not what it does.
+
+    Every link in here still carries its own `hx-get`. Read the wrapper's
+    comment above before adding a fourth: an inherited attribute describes a
+    request without starting one.
+    {% endcomment %}
     <div class="cal-nav">
-      <a class="btn" href="{{ prev_url }}" hx-get="{{ prev_url }}" aria-label="Previous {{ period_noun }}" rel="prev">‹</a>
-      <a class="btn" href="{{ next_url }}" hx-get="{{ next_url }}" aria-label="Next {{ period_noun }}" rel="next">›</a>
+      <a class="btn cal-arrow" href="{{ prev_url }}" hx-get="{{ prev_url }}" aria-label="Previous {{ period_noun }}" rel="prev">‹</a>
+      {% comment %}
+      Reported live: clicking Today while already viewing the current month
+      did a full page reload to render the exact same content -- the link's
+      target (crm:calendar with no ?y=&m=) IS correct, but a click with zero
+      visible result reads as a broken button, not a working one. Only wired
+      with data-already-today when that's actually the case; any other month
+      still gets the real navigation, which is its own visible feedback (the
+      grid changes).
+
+      `?view=` and nothing else: the anchor is deliberately absent so the URL
+      resolves to today, and the view is kept so Today means "this week" in
+      week view and "this day" in day view rather than dumping you back on
+      the month grid. `today_in_range` is the same question the month
+      comparison asked, asked once for all three views (see
+      `_period_context`).
+
+      `hx-get` on this one is conditional where the other five carry it
+      unconditionally: when today is already on screen the script at the foot
+      of this page cancels the click and scrolls instead, so a request would
+      be a swap that repaints identical markup and throws away the animation
+      the handler just started. No `hx-get` in that case means no request at
+      all, which is what "already here" should cost.
+      {% endcomment %}
+      <a class="btn" href="{% url 'crm:calendar' %}?view={{ view }}" data-today-link
+         {% if today_in_range %}data-already-today{% else %} hx-get="{% url 'crm:calendar' %}?view={{ view }}"{% endif %}>Today</a>
+      <a class="btn cal-arrow" href="{{ next_url }}" hx-get="{{ next_url }}" aria-label="Next {{ period_noun }}" rel="next">›</a>
     </div>
     {% comment %}The product's own segmented control (.subnav.scope-tabs in
     coverage.css, the same component the Network and Opportunities filters
@@ -578,42 +718,22 @@
       <a href="{{ week_url }}" hx-get="{{ week_url }}"{% if view == 'week' %} aria-current="page"{% endif %}>Week</a>
       <a href="{{ day_url }}" hx-get="{{ day_url }}"{% if view == 'day' %} aria-current="page"{% endif %}>Day</a>
     </nav>
-    {% comment %}
-    Reported live: clicking Today while already viewing the current month
-    did a full page reload to render the exact same content -- the link's
-    target (crm:calendar with no ?y=&m=) IS correct, but a click with zero
-    visible result reads as a broken button, not a working one. Only wired
-    with data-already-today when that's actually the case; any other month
-    still gets the real navigation, which is its own visible feedback (the
-    grid changes).
-
-    `?view=` and nothing else: the anchor is deliberately absent so the URL
-    resolves to today, and the view is kept so Today means "this week" in
-    week view and "this day" in day view rather than dumping you back on the
-    month grid. `today_in_range` is the same question the month comparison
-    asked, asked once for all three views (see `_period_context`).
-    {% endcomment %}
-    {% comment %}
-    `hx-get` on this one is conditional where the other five carry it
-    unconditionally: when today is already on screen the script at the foot
-    of this page cancels the click and scrolls instead, so a request would be
-    a swap that repaints identical markup and throws away the animation the
-    handler just started. No `hx-get` in that case means no request at all,
-    which is what "already here" should cost.
-    {% endcomment %}
-    <a class="btn" href="{% url 'crm:calendar' %}?view={{ view }}" data-today-link
-       {% if today_in_range %}data-already-today{% else %} hx-get="{% url 'crm:calendar' %}?view={{ view }}"{% endif %}>Today</a>
-    {% comment %}Feed URL for the calendar app the user already lives in.
-    webcal:// so Calendar.app opens a subscribe dialog instead of downloading
-    a one-off snapshot.{% endcomment %}
-    <a class="btn" title="Live-updating feed for Apple/Google Calendar"
-       href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe</a>
     {% comment %}Add, in the bar rather than under the grid: it is the only
     thing on this page you can DO, and a whole row to itself under a
     five-week grid put it below the fold. See `.cal-add`'s own comment for
-    how the open state still gets a full line for its form.{% endcomment %}
+    how the open state still gets a full line for its form.
+
+    "Add", not "Add to the calendar". Four words beside two one-word controls,
+    naming the surface they are printed on: this page IS the calendar, and
+    both other labels the student meets on the way through say the object
+    anyway — the field grid names every part of what is being added, and the
+    submit button under it still reads "Add to calendar" at the moment it
+    commits. A disclosure can be short when the thing it discloses is
+    explicit. The `+` glyph is drawn by `.cal-add > summary::before` and
+    rotates to a `×` when open, so the label does not have to carry the state
+    either.{% endcomment %}
     <details class="cal-add" id="add"{% if form_open %} open{% endif %}>
-      <summary class="btn">Add to the calendar</summary>
+      <summary class="btn btn-primary">Add</summary>
       <form class="cal-form panel" method="post" action="{% url 'crm:calendar_add' %}">
         {% csrf_token %}
         {% comment %}The view and anchor travel with the submission so a
@@ -638,6 +758,24 @@
         </div>
       </form>
     </details>
+    {% comment %}Feed URL for the calendar app the user already lives in.
+    webcal:// so Calendar.app opens a subscribe dialog instead of downloading
+    a one-off snapshot.
+
+    "Subscribe in Calendar", not "Subscribe". The bare verb named no object,
+    and the object is the part a student who has read no documentation cannot
+    supply: on a product that sells subscriptions, a lone "Subscribe" on a
+    page with a Pricing link in its footer can just as easily read as "start
+    paying". Naming the destination app settles both questions — what is
+    subscribed, and that it is not a plan. The word "Subscribe" itself stays,
+    because it is the verb Apple and Google use in the dialog this link opens
+    and the one Settings' Calendar Link row already refers back to.
+
+    A link, not a `.btn` — see `.cal-sub` for why this one control recedes.
+    The arrow marks it as going somewhere and is hidden from the accessible
+    name, which stays the four words of the label.{% endcomment %}
+    <a class="cal-sub" title="Live-updating feed for Apple/Google Calendar"
+       href="webcal://{{ request.get_host }}{% url 'crm:calendar_ics' token=user.calendar_token %}">Subscribe in Calendar <span aria-hidden="true">→</span></a>
     {% comment %}A colour nothing on the grid uses this month is not worth a
     key entry, and "0 Events" next to three real counts reads as a fourth
     fact when it is really the absence of one. Written as a plain {% if %}
