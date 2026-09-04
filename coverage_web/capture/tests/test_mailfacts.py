@@ -570,8 +570,18 @@ class TestOooUndoRestoresPriorSnooze:
     def test_undo_puts_back_the_snooze_the_user_had_set(self, student, allen):
         """Regression: `_extend_snooze` only moves forward, so it can move
         the clock OVER a snooze the user set themselves — and undo cleared
-        `snoozed_until` to None instead of restoring the user's value."""
-        earlier = timezone.now() + timezone.timedelta(days=3)
+        `snoozed_until` to None instead of restoring the user's value.
+
+        `earlier` is derived from the RETURN DATE, not from `timezone.now()`.
+        It used to be `now + 3 days`, which stopped being earlier than the
+        Sept 7 return the moment the real clock reached Sept 4: `_extend_snooze`
+        then correctly declined to move a snooze that already covered the
+        return, recorded no prior, and the test failed on a product that was
+        working. A scenario about "the user's snooze is earlier than the
+        return" has to state that relationship, not approximate it from
+        whatever day the suite happens to run.
+        """
+        earlier = mailfacts._snooze_datetime(student, date(2026, 9, 7)) - timezone.timedelta(days=1)
         contact = Contact.all_objects.create(
             user=student, name="Peter Foggo", email="pfoggo@allenco.com",
             firm=allen, snoozed_until=earlier,
