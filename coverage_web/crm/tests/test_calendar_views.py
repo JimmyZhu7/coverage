@@ -728,3 +728,63 @@ def test_the_add_form_is_still_a_plain_post(client, logged_in):
     )
     assert 'method="post"' in form.group(0)
     assert "hx-boost" not in markup
+
+
+# --------------------------------------------------------------------------- #
+# A chat time READ OUT OF PROSE (capture.chattime, 2026-09-03)
+# --------------------------------------------------------------------------- #
+#
+# `capture.gmail_live` used to put a chat on the grid only when a counterparty
+# returned an `.ics`, which is why the founder's calendar held nothing after 5
+# August while forty-three chat touches landed behind it. It now also reads a
+# time out of a sentence — and a page that renders the two identically is
+# telling the student a guess and an invite are the same fact.
+#
+# The word is "reported", the same one a tracked role's prose-read closing date
+# already wears on this page, because it is the same claim.
+
+
+def _prose_chat(user, **kwargs):
+    return CalendarEvent.all_objects.create(
+        user=user, title="Chat with Lily Liu", kind="chat", source="capture",
+        starts_at=timezone.now() + timedelta(days=2), thread_id="t-prose",
+        **kwargs,
+    )
+
+
+def test_a_prose_chat_is_marked_reported_on_the_grid(client, logged_in):
+    _prose_chat(logged_in, time_confidence=0.6,
+                time_evidence="6pm tomorrow works great for me.")
+
+    markup = _markup(_get(client))
+    assert "is-reported" in markup
+    assert "Time reported, not from an invite" in markup
+
+
+def test_the_grid_quotes_the_sentence_the_time_was_read_from(client, logged_in):
+    """The quote is the whole difference between a fact the student can check
+    and a number they are asked to trust."""
+    _prose_chat(logged_in, time_confidence=0.6,
+                time_evidence="6pm tomorrow works great for me.")
+
+    assert "6pm tomorrow works great for me." in _markup(_get(client))
+
+
+def test_a_reported_time_is_spoken_as_well_as_styled(client, logged_in):
+    """A dotted underline reaches a mouse and nothing else. Same rule the
+    cancelled marker and the tracked-deadline one already follow here."""
+    _prose_chat(logged_in, time_confidence=0.6,
+                time_evidence="See you at 4pm Friday.")
+
+    assert "(reported time)" in _markup(_get(client))
+
+
+def test_a_chat_from_an_invite_is_not_marked_reported(client, logged_in):
+    """An `.ics` stated the time. Nothing to caveat, and the page must not
+    invent a doubt it does not have."""
+    _prose_chat(logged_in, ics_uid="uid-1")
+
+    markup = _markup(_get(client))
+    assert "Found in your mail" in markup
+    assert "Time reported, not from an invite" not in markup
+    assert "(reported time)" not in markup

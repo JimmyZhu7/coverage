@@ -32,12 +32,18 @@ Two shapes, decided by `ev.editable`:
   who and the notes without a click; the month and week grids are seven
   columns wide, where the same body would bury the rest of the day.{% endcomment %}
   <details class="cal-ev-wrap"{% if ev_open %} open{% endif %}>
-    <summary class="cal-ev cal-ev-{{ ev.kind }}{% if ev.source == 'capture' %} cal-ev-auto{% endif %}{% if ev.cancelled %} is-cancelled{% endif %}">
+    <summary class="cal-ev cal-ev-{{ ev.kind }}{% if ev.source == 'capture' %} cal-ev-auto{% endif %}{% if ev.reported %} is-reported{% endif %}{% if ev.cancelled %} is-cancelled{% endif %}">
       {% if ev.at_label %}<span class="cal-ev-time">{{ ev.at_label }}</span>{% endif %}
       <span class="cal-ev-title">{{ ev.title }}</span>
       {% comment %}Spoken, not just struck: strike-through is invisible to a
       screen reader, and this is the one fact about the row that matters.{% endcomment %}
       {% if ev.cancelled %}<span class="vh">(cancelled)</span>{% endif %}
+      {% comment %}`ev.reported` is a time READ OUT OF A SENTENCE rather than
+      taken off a calendar invite — the same word, and the same caveat, a
+      tracked role's prose-read closing date already wears below. It is spoken
+      as well as styled for the same reason the cancellation is: a dotted
+      border reaches a mouse and nothing else.{% endcomment %}
+      {% if ev.reported and not ev.cancelled %}<span class="vh">(reported time)</span>{% endif %}
     </summary>
     <div class="cal-ev-body">
       {% if ev.cancelled %}
@@ -49,7 +55,17 @@ Two shapes, decided by `ev.editable`:
       {% if ev.location %}<p class="cal-ev-meta">{{ ev.location }}</p>{% endif %}
       {% if ev.description %}<p class="cal-ev-note">{{ ev.description|linebreaksbr }}</p>{% endif %}
       {% if ev.source == 'capture' %}
-        <p class="cal-ev-meta cal-ev-prov">Found in your mail</p>
+        {% comment %}Two different claims, so two different sentences. A
+        captured chat with a stated time came off a calendar invite and the
+        page can say so flatly. A REPORTED one was read out of somebody's
+        sentence, so it says which sentence — that quote is the whole
+        difference between a fact the student can check and a number we are
+        asking them to trust.{% endcomment %}
+        {% if ev.reported %}
+          <p class="cal-ev-meta cal-ev-prov">Time reported, not from an invite{% if ev.time_evidence %} · “{{ ev.time_evidence }}”{% endif %}</p>
+        {% else %}
+          <p class="cal-ev-meta cal-ev-prov">Found in your mail</p>
+        {% endif %}
       {% endif %}
       <form method="post" action="{% url 'crm:calendar_delete' ev.id %}">
         {% csrf_token %}

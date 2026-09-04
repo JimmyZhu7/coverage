@@ -68,6 +68,7 @@ from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
 from capture import appmail, discovery, mailfacts
+from capture.chattime import KIND_BOOKING as PROSE_BOOKING
 from core.templatetags.textstyle import smart_person_name
 from capture.providers import (
     AmbiguousContactError,
@@ -716,6 +717,25 @@ def _record_pattern_evidence(
     return True
 
 
+def _zone_of(user):
+    """The user's own zone, with `_user_aware`'s fallback discipline.
+
+    Split out because `timezone.localtime()` is the WRONG tool inside a
+    management command: it converts to whatever zone is currently active,
+    which here is the server's UTC, never the account owner's. That is
+    harmless when a value is only being formatted and load-bearing the moment
+    a clock time is read back out of one (see `_upsert_scheduled_chat`'s
+    dateless prose branch, which reads an hour off one datetime and writes it
+    onto another — done in UTC, a 5:30pm chat in Los Angeles lands on the
+    wrong DAY).
+    """
+    tzname = (getattr(user, "timezone", "") or "").strip()
+    try:
+        return ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.get_current_timezone()
+
+
 def _user_aware(user, value: str | None):
     """`value` (an ISO string) as an aware datetime on the USER's clock, or
     None if absent/unparseable.
@@ -735,12 +755,7 @@ def _user_aware(user, value: str | None):
     parsed = parse_datetime(raw)
     if parsed is None or timezone.is_aware(parsed):
         return parsed
-    tzname = (getattr(user, "timezone", "") or "").strip()
-    try:
-        zone = ZoneInfo(tzname) if tzname else timezone.get_current_timezone()
-    except (ZoneInfoNotFoundError, ValueError):
-        zone = timezone.get_current_timezone()
-    return timezone.make_aware(parsed, zone)
+    return timezone.make_aware(parsed, _zone_of(user))
 
 
 def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
@@ -782,7 +797,27 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
 
     A finding with no time is not an error — most are — it simply makes no
     event.
+
+    PROSE (2026-09-03, `capture.chattime`). A finding may now carry
+    `prose_time` instead of a DTSTART: a time read out of a sentence somebody
+    wrote. It reaches the same row through the same lookups and obeys three
+    extra rules, all of which are the same rule said three ways — a reading
+    never outranks a statement.
+
+    * A PROPOSAL MOVES, IT NEVER CREATES. "Can we do 5:30?" against a chat
+      already on this thread is a renegotiation, and refusing it leaves the
+      student turning up half an hour late — the exact failure the `.ics`
+      COUNTER handling above exists to prevent, arriving in prose. With no
+      row to move it is a question, and a question makes no calendar entry.
+    * A TIME WITH NO DAY MOVES ONLY THE CLOCK. "5:30" states an hour, not a
+      date; it is applied to the day the existing row already holds and can
+      do nothing else.
+    * NOTHING PROSE MAY OVERWRITE A STATED TIME. A row at
+      `time_confidence` 1.0 was set by an invite's own DTSTART or typed in by
+      the user. Either way it is a statement, and a sentence we parsed does
+      not get to argue with it.
     """
+    prose = finding.get("prose_time") or {}
     when = _user_aware(user, finding.get("chat_scheduled_at"))
     thread_id = (finding.get("thread_id") or "").strip()[:128]
     uid = (finding.get("ics_uid") or "").strip()[:255]
@@ -796,6 +831,25 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     if event is None and thread_id:
         event = CalendarEvent.all_objects.filter(user=user, thread_id=thread_id).first()
 
+    if prose:
+        may_create = prose.get("kind") == PROSE_BOOKING and prose.get("dated")
+        if event is None and not may_create:
+            return False
+        if event is not None and not event.time_reported:
+            # Structured beats prose, always. See the docstring.
+            return False
+        if event is not None and not prose.get("dated"):
+            # The clock, onto the day the row already holds — both read on the
+            # USER'S OWN zone (`_zone_of`, not `timezone.localtime`). "5:30"
+            # means half five where they are; converted through the server's
+            # UTC it can land on the previous or the next day, which is the
+            # one thing a dateless reading is forbidden from changing.
+            zone = _zone_of(user)
+            clock = when.astimezone(zone)
+            when = event.starts_at.astimezone(zone).replace(
+                hour=clock.hour, minute=clock.minute, second=0, microsecond=0
+            )
+
     label = contact.name or "Coffee chat"
     if event is None:
         CalendarEvent.all_objects.create(
@@ -804,6 +858,8 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
             all_day=False,
             kind=CalendarEvent.KIND_CHAT, source=CalendarEvent.SOURCE_CAPTURE,
             contact=contact,
+            time_confidence=prose.get("confidence", 1.0) if prose else 1.0,
+            time_evidence=(prose.get("evidence") or "")[:255] if prose else "",
         )
         return True
 
@@ -842,7 +898,7 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     before = (
         event.title, event.all_day, event.kind, event.source, event.contact_id,
         event.ics_uid, event.starts_at, event.thread_id, event.invite_sent_at,
-        event.cancelled_at,
+        event.cancelled_at, event.time_confidence, event.time_evidence,
     )
 
     deleted_dup = False
@@ -885,17 +941,32 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     # Only "undateable over dated" is refused. The CREATE path above is
     # deliberately not gated on this: a row that does not exist yet has no
     # time to protect, and some evidence beats none.
-    if event.invite_sent_at is None or (
+    #
+    # AND A STATEMENT ALWAYS OUTRANKS A READING, whatever the dates say. A row
+    # this module wrote from prose sits at `time_confidence` 0.6 and carries
+    # the send time of the sentence it was read from — which can easily be
+    # LATER than the invite that finally arrives, so the recency test alone
+    # would have the guess hold the line against the DTSTART. It does not.
+    # (The reverse never reaches here: a prose finding aimed at a stated row
+    # was refused at the top of this function.)
+    structured_over_prose = not prose and event.time_reported
+    if structured_over_prose or event.invite_sent_at is None or (
         sent_at is not None and sent_at >= event.invite_sent_at
     ):
         event.starts_at = when
         event.thread_id = thread_id or event.thread_id
         event.invite_sent_at = sent_at or event.invite_sent_at
+        # The provenance moves WITH the time it describes, in both
+        # directions: prose keeps saying "reported", and an invite landing on
+        # a row we had guessed at promotes it to stated and drops the
+        # sentence, which is no longer what the row is claiming.
+        event.time_confidence = prose.get("confidence", 1.0) if prose else 1.0
+        event.time_evidence = (prose.get("evidence") or "")[:255] if prose else ""
 
     after = (
         event.title, event.all_day, event.kind, event.source, event.contact_id,
         event.ics_uid, event.starts_at, event.thread_id, event.invite_sent_at,
-        event.cancelled_at,
+        event.cancelled_at, event.time_confidence, event.time_evidence,
     )
     if not deleted_dup and before == after:
         # Same finding re-read on a later pass, nothing to say that wasn't
@@ -905,6 +976,7 @@ def _upsert_scheduled_chat(user, contact: Contact, finding: dict) -> bool:
     event.save(update_fields=[
         "title", "all_day", "kind", "source", "contact", "ics_uid",
         "starts_at", "thread_id", "invite_sent_at", "cancelled_at",
+        "time_confidence", "time_evidence",
     ])
     return True
 
@@ -1447,11 +1519,28 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
         # on one, and this second guard covers an externally-supplied finding
         # that sets both — a webinar on a mass invitation is not "Chat with
         # <person>" on the student's calendar.
-        if not is_bulk and finding.get("chat_status") in ("scheduled", "completed"):
+        #
+        # A PROSE PROPOSAL REACHES THE CALENDAR WITHOUT CLAIMING A STATUS.
+        # "Can we do 5:30?" leaves `chat_status` at "none" on purpose — it is
+        # a question and must not climb the relationship ladder — and it still
+        # has to reach `_upsert_scheduled_chat`, which is the only place that
+        # knows whether there is an existing chat for it to MOVE. The refusal
+        # lives there, with the row in hand, rather than here where the answer
+        # would have to be guessed.
+        if not is_bulk and (
+            finding.get("chat_status") in ("scheduled", "completed")
+            or finding.get("prose_time")
+        ):
             if not dry_run:
                 if _upsert_scheduled_chat(user, contact, finding):
                     result.chats_scheduled += 1
-            elif (finding.get("chat_scheduled_at") or "").strip():
+            elif (finding.get("chat_scheduled_at") or "").strip() and finding.get(
+                "chat_status"
+            ) in ("scheduled", "completed"):
+                # The preview counts SCHEDULED chats. A proposal carries a
+                # time so the upsert has a clock to work with, and claims no
+                # status — counting it here would have `gmail_poll --dry-run`
+                # promise a chat that the real run correctly refuses to make.
                 result.chats_scheduled += 1
 
         # A cancellation is the only finding that reaches the calendar while
