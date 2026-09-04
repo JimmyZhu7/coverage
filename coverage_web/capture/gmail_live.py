@@ -106,7 +106,7 @@ from googleapiclient.errors import HttpError
 
 from accounts import trials as pro_trials
 from billing import credits as billing_credits
-from capture import gmail_residue, inbound
+from capture import chattime, gmail_residue, inbound
 from capture.gmail import apply_findings
 from capture.models import GmailConnection
 from crm.models import Contact, Touch
@@ -840,7 +840,11 @@ def sync_connection(connection: GmailConnection):
         if message is None:
             continue
         findings.extend(
-            classify_message_findings(connection.gmail_address, message)
+            classify_message_findings(
+                connection.gmail_address,
+                message,
+                tz=getattr(connection.user, "timezone", ""),
+            )
         )
 
     result = None
@@ -1251,6 +1255,9 @@ def _rsvp_finding(
         "replied": True,
         "chat_status": "scheduled" if scheduled else "none",
         "chat_scheduled_at": ics_dt if scheduled else None,
+        # An iTIP statement is structured by definition; there is no prose
+        # reading to make and nothing for one to add.
+        "prose_time": None,
         "ics_uid": ics_uid,
         "chat_cancelled": rsvp.cancels,
         "bulk": False,
@@ -1444,6 +1451,96 @@ def _bounce_text(message: dict) -> str:
     return "\n".join(text_chunks)
 
 
+def _message_prose(message: dict) -> str:
+    """The words a PERSON typed in this message, for `capture.chattime`.
+
+    `text/plain` when the message carries one, the tags stripped out of
+    `text/html` when it does not, and Gmail's snippet only when there is no
+    body part at all. Deliberately not the snippet first: it is truncated
+    mid-sentence, so "6pm tomorrow works great for" is one word away from
+    being a time with no day beside it, and it renders addresses and digits
+    with spaces after every dot (see `_bounce_text`).
+
+    The QUOTED trailer is cut downstream, in `chattime.visible_body`, because
+    that cut is a correctness rule about attribution rather than a detail of
+    how Gmail packs a payload — see that function.
+    """
+    plain: list[str] = []
+    html: list[str] = []
+    for part in _walk_parts(message.get("payload", {})):
+        mime = (part.get("mimeType") or "").lower()
+        if part.get("filename"):
+            continue
+        if mime == "text/plain":
+            plain.append(_decode_body(part))
+        elif mime == "text/html":
+            html.append(_decode_body(part))
+    body = "\n".join(t for t in plain if t) or "\n".join(t for t in html if t)
+    return body or (message.get("snippet") or "")
+
+
+def _prose_chat_time(message: dict, tz: str | None) -> dict | None:
+    """`capture.chattime`'s reading of this message, in the finding's own
+    shape, or None. Every guard about WHO is applied by the callers below;
+    this only turns a `ChatTime` into a dict.
+    """
+    occurred = _message_occurred_at(message)
+    sent_at = datetime.fromisoformat(occurred) if occurred else None
+    found = chattime.extract_chat_time(
+        _message_prose(message), sent_at=sent_at, tz=tz
+    )
+    if found is None:
+        return None
+    return {
+        "kind": found.kind,
+        "dated": found.dated,
+        "confidence": found.confidence,
+        "evidence": found.evidence,
+        "at": found.when.isoformat(),
+    }
+
+
+def _one_to_one(own_email: str, message: dict) -> bool:
+    """True when this message is between the account owner and exactly one
+    other person.
+
+    The prose reader is allowed nowhere near a message that is not. A time in
+    a note addressed to twelve people is a programme's schedule, not a chat
+    with any of them — which is the same failure the no-prose doctrine was
+    written about (`gmail_live`'s module docstring: a webinar `.ics` putting
+    "Chat with <recruiter>" on the calendar), and the `.ics` case at least had
+    a structured invite behind it. Prose has nothing but this test.
+    """
+    own = (own_email or "").strip().lower()
+    people: set[str] = set()
+    for header in ("From", "To", "Cc"):
+        for _, addr in getaddresses([_header(message, header)]):
+            low = (addr or "").strip().lower()
+            if low and "@" in low and low != own:
+                people.add(low)
+    return len(people) == 1
+
+
+def _threaded(message: dict) -> bool:
+    """True when this message sits in a conversation — it carries an RFC
+    reply pointer, or Gmail has more than one message on its thread.
+
+    A chat is arranged in a back-and-forth. A first, unanswered cold email
+    saying "are you free Thursday at 3?" is a question the recipient has not
+    seen yet, and the one-message thread is the structural way to know that
+    without reading its tone.
+
+    A message carrying neither a reply pointer NOR its own id proves nothing
+    either way, and False is the answer that costs a reading rather than
+    inventing one.
+    """
+    if _header(message, "In-Reply-To").strip() or _header(message, "References").strip():
+        return True
+    message_id = (message.get("id") or "").strip()
+    thread_id = (message.get("threadId") or "").strip()
+    return bool(message_id and thread_id and message_id != thread_id)
+
+
 def _message_occurred_at(message: dict) -> str | None:
     """Gmail's own `internalDate` (epoch milliseconds, as a string — the
     API's actual format) as an ISO 8601 string, or None if absent/garbled.
@@ -1477,7 +1574,9 @@ def _outbound_recipients(own_email: str, message: dict) -> list[tuple[str, str]]
     return recipients
 
 
-def classify_message_findings(own_email: str, message: dict) -> list[dict]:
+def classify_message_findings(
+    own_email: str, message: dict, *, tz: str | None = None
+) -> list[dict]:
     """Every finding one Gmail message honestly supports.
 
     For inbound mail this is `_classify_message`'s single finding (or
@@ -1494,21 +1593,69 @@ def classify_message_findings(own_email: str, message: dict) -> list[dict]:
     fan-out count now sees the true recipient count — a single blast To:
     forty people counts as forty, which is exactly what the guard exists
     to notice.
+
+    `tz` is the account owner's `User.timezone`, and it is needed for one
+    thing only: `capture.chattime` resolves "tomorrow" against the day the
+    message was sent ON THE OWNER'S CLOCK. Left out, a note sent at 8pm in
+    Los Angeles is already the next day in UTC and every relative date in it
+    lands a day late. It is optional rather than required only so that the
+    older callers this function has always had keep working; both live call
+    sites pass it.
     """
     from_name, from_addr = parseaddr(_header(message, "From"))
     if from_addr.lower() == own_email.lower():
         recipients = _outbound_recipients(own_email, message)
         return [
-            _outbound_finding(message, to_name, to_addr)
+            _outbound_finding(message, to_name, to_addr, own_email=own_email, tz=tz)
             for to_name, to_addr in recipients
         ]
-    finding = _classify_message(own_email, message)
+    finding = _classify_message(own_email, message, tz=tz)
     return [finding] if finding is not None else []
 
 
-def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
+def _prose_for_outbound(own_email: str, message: dict, to_addr: str, tz: str | None):
+    """The prose chat time the account owner's OWN sent mail states, or None.
+
+    THIS IS THE STRONGEST EVIDENCE IN THE MAILBOX and the reason this feature
+    exists at all. "6pm tomorrow works great for me" and "sending an invite
+    over for tomorrow 7:30 PM ET" are the student writing down, in his own
+    words, a chat he has agreed to. No `.ics` was ever going to say it: he
+    arranges these by phone and by sentence, which is why his calendar held
+    nothing after 5 August while forty-three chat touches landed behind it.
+
+    Three structural refusals, none of them about tone:
+
+    * NOT ONE-TO-ONE — a time in a note to several people is a schedule
+      somebody is announcing, not a chat with any one of them.
+    * NOT IN A CONVERSATION — a first cold email proposing a time is a
+      question the other person has not answered yet.
+    * A NO-REPLY OR ROLE MAILBOX on the other end — nobody is behind it, so
+      there is nobody to have agreed with.
+    """
+    if not _one_to_one(own_email, message) or not _threaded(message):
+        return None
+    if inbound.looks_like_noreply(to_addr):
+        return None
+    return _prose_chat_time(message, tz)
+
+
+def _outbound_finding(
+    message: dict,
+    to_name: str,
+    to_addr: str,
+    *,
+    own_email: str = "",
+    tz: str | None = None,
+) -> dict:
     subject = _header(message, "Subject")
     ics_dt, ics_summary, ics_uid, ics_cancelled = _extract_ics_schedule(message)
+    # `.ics` FIRST, ALWAYS. A message carrying an invite has already stated
+    # its time structurally, and re-reading the prose beside it could only
+    # ever disagree with the field it sits next to.
+    prose = (
+        None if (ics_dt or ics_cancelled)
+        else _prose_for_outbound(own_email, message, to_addr, tz)
+    )
     return {
         "name": to_name or to_addr.split("@")[0],
         "email": to_addr.lower(),
@@ -1516,8 +1663,25 @@ def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
         "bounced": False,
         "outreach_sent": True,
         "replied": False,
-        "chat_status": "scheduled" if ics_dt else "none",
-        "chat_scheduled_at": ics_dt,
+        # A PROSE BOOKING SAYS "scheduled"; A PROSE PROPOSAL SAYS NOTHING
+        # HERE. `chat_status` is what climbs the relationship ladder
+        # (`capture.gmail._touch_kind_for`), and "can we do 5:30?" is a
+        # question — logging a `chat_scheduled` touch for it would move the
+        # ladder on somebody's hope. The proposal still travels, on
+        # `prose_time` below, where it may move a chat that already exists
+        # and nothing else.
+        "chat_status": (
+            "scheduled" if ics_dt
+            else "scheduled" if (prose or {}).get("kind") == chattime.KIND_BOOKING
+            and (prose or {}).get("dated")
+            else "none"
+        ),
+        "chat_scheduled_at": ics_dt or ((prose or {}).get("at") if prose else None),
+        # The reading itself: kind, whether a DAY was stated, the confidence
+        # (below an `.ics`'s, always) and the sentence it came from. Absent on
+        # every structured finding, which is how `capture.gmail` tells the two
+        # apart at the calendar.
+        "prose_time": prose,
         # The invite's own identity, stable across a reschedule that lands
         # on a different Gmail thread — see `_extract_ics_schedule`.
         "ics_uid": ics_uid,
@@ -1530,6 +1694,12 @@ def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
             if ics_dt
             else f"Calendar invite cancelled: {subject}"
             if ics_cancelled
+            # The sentence, quoted, and the word "reported" doing the same
+            # job it does on a prose deadline: this time was read out of the
+            # mail, not stated by a field. The touch note is the one place a
+            # student can check the claim against what was actually written.
+            else f"Chat time reported in your reply: “{prose['evidence']}”"
+            if prose and prose["kind"] == chattime.KIND_BOOKING and prose["dated"]
             else f"Sent: {subject}"
         ),
         "thread_id": message.get("threadId", ""),
@@ -1543,7 +1713,36 @@ def _outbound_finding(message: dict, to_name: str, to_addr: str) -> dict:
     }
 
 
-def _classify_message(own_email: str, message: dict) -> dict | None:
+def _prose_for_inbound(own_email: str, message: dict, from_addr: str, verdict, tz):
+    """The prose chat time an INBOUND message states, or None.
+
+    Weaker evidence than the account owner's own sent mail, and guarded
+    harder for it. Everything `_prose_for_outbound` refuses is refused here
+    too, plus the two facts only an inbound message can be wrong about:
+
+    * `verdict.is_bulk` — the whole no-prose doctrine in one flag. A
+      programme blast announcing "Thursday at 4pm" is the exact message this
+      pipeline was built to keep off the calendar, and it is the reason the
+      rule existed before this module did. It is checked here even though the
+      bulk branch below would blank the finding anyway, so that the refusal
+      is stated where the reading happens and cannot be lost to a later edit
+      of the branch order.
+    * `verdict.addressed_to_user` — a reply-all into a thread the student was
+      only list-delivered into carries a reply pointer just the same. Somebody
+      arranged a time; it was not with him.
+    """
+    if verdict.is_bulk or not verdict.addressed_to_user:
+        return None
+    if inbound.looks_like_noreply(from_addr):
+        return None
+    if not _one_to_one(own_email, message) or not _threaded(message):
+        return None
+    return _prose_chat_time(message, tz)
+
+
+def _classify_message(
+    own_email: str, message: dict, *, tz: str | None = None
+) -> dict | None:
     """One Gmail message -> one finding dict in `GmailFindingsProvider`'s
     shape, or None if there's nothing worth reporting (e.g. a message from
     the account owner to themselves, or an address this heuristic can't
@@ -1565,7 +1764,9 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         recipients = _outbound_recipients(own_email, message)
         if not recipients:
             return None
-        return _outbound_finding(message, *recipients[0])
+        return _outbound_finding(
+            message, *recipients[0], own_email=own_email, tz=tz
+        )
 
     if _looks_like_bounce(message, from_addr, subject):
         recipient = _bounce_recipient(message, own_email)
@@ -1676,6 +1877,13 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             # "a machine composed this" — a list send is neither.
             "chat_status": "none",
             "chat_scheduled_at": None,
+            # None for the same reason, said about the same failure one layer
+            # in. A blast announcing "our session is at 4pm tomorrow" is a
+            # perfectly readable chat time and it is nobody's chat, so the
+            # prose reader is never asked. Stated here rather than left to the
+            # absence of a key: this is the branch the whole doctrine is
+            # about, and a refusal you have to infer is one an edit can lose.
+            "prose_time": None,
             # False for the same reason `chat_status` is "none" above: a
             # blast never PLACED a chat, so there is none of ours for it to
             # retire, and letting a list cancellation reach into the calendar
@@ -1708,6 +1916,13 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             "occurred_at": occurred_at,
         }
 
+    # `.ics` first, always — see `_outbound_finding`. A message that carries
+    # an invite has stated its time structurally and the prose beside it is
+    # at best a restatement.
+    prose = (
+        None if (ics_dt or ics_cancelled)
+        else _prose_for_inbound(own_email, message, from_addr, verdict, tz)
+    )
     return {
         "name": from_name or from_addr.split("@")[0],
         "email": from_addr.lower(),
@@ -1715,8 +1930,16 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
         "bounced": False,
         "outreach_sent": False,
         "replied": True,
-        "chat_status": "scheduled" if ics_dt else "none",
-        "chat_scheduled_at": ics_dt,
+        # Same split as the outbound branch: a booking with a day climbs the
+        # ladder, a proposal rides on `prose_time` and climbs nothing.
+        "chat_status": (
+            "scheduled" if ics_dt
+            else "scheduled" if (prose or {}).get("kind") == chattime.KIND_BOOKING
+            and (prose or {}).get("dated")
+            else "none"
+        ),
+        "chat_scheduled_at": ics_dt or ((prose or {}).get("at") if prose else None),
+        "prose_time": prose,
         # See the outbound branch above: this is what makes Lily's "New Time
         # Proposed" on a brand-new thread move the existing chat instead of
         # adding a second one at the old time.
@@ -1750,6 +1973,8 @@ def _classify_message(own_email: str, message: dict) -> dict | None:
             if ics_dt
             else f"Calendar invite cancelled: {subject}"
             if ics_cancelled
+            else f"Chat time reported in their reply: “{prose['evidence']}”"
+            if prose and prose["kind"] == chattime.KIND_BOOKING and prose["dated"]
             else message.get("snippet", "")[:300]
         ),
         "thread_id": thread_id,
@@ -2002,7 +2227,9 @@ def backfill_connection(
         message = _fetch_message(gmail, message_id)
         if message is None:
             continue
-        message_findings = classify_message_findings(own_email, message)
+        message_findings = classify_message_findings(
+            own_email, message, tz=getattr(user, "timezone", "")
+        )
         if message_findings:
             findings.extend(message_findings)
         elif residue_sink is not None:

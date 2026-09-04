@@ -1637,6 +1637,41 @@ def test_the_feed_names_an_unstated_market_as_unstated(client, logged_in):
     assert "SUMMARY:Goldman Sachs · market unstated · Applications close" in body
 
 
+def test_the_feed_carries_the_caveat_on_a_time_read_out_of_prose(
+        client, logged_in):
+    """THE SURFACE THE CAVEAT MATTERS MOST ON. A subscribed feed puts this
+    time on a phone with nothing around it — no dotted underline, no
+    "reported" beside the clock — so a time `capture.chattime` READ OUT OF A
+    SENTENCE would arrive looking exactly like one an invite stated. The
+    sentence rides along in the one field a phone will show."""
+    contact = Contact.all_objects.create(user=logged_in, name="Lily Liu")
+    CalendarEvent.all_objects.create(
+        user=logged_in, contact=contact, title="Chat with Lily Liu",
+        starts_at=_at(days=2), kind="chat", source="capture",
+        thread_id="t-prose", time_confidence=0.6,
+        time_evidence="6pm tomorrow works great for me.",
+    )
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "Time reported from your mail\\, not from an invite" in body
+    assert "6pm tomorrow works great for me." in body
+
+
+def test_the_feed_adds_no_caveat_to_a_time_an_invite_stated(client, logged_in):
+    contact = Contact.all_objects.create(user=logged_in, name="Lily Liu")
+    CalendarEvent.all_objects.create(
+        user=logged_in, contact=contact, title="Chat with Lily Liu",
+        starts_at=_at(days=2), kind="chat", source="capture",
+        thread_id="t-ics", ics_uid="uid-1",
+    )
+    body = client.get(
+        reverse("crm:calendar_ics", args=[logged_in.calendar_token])
+    ).content.decode()
+    assert "Chat with Lily Liu" in body
+    assert "Time reported" not in body
+
+
 def test_a_deadline_already_gone_keeps_its_place_and_loses_its_alarms(
         client, logged_in):
     """The feed reaches 30 days back on purpose, so a deadline stays in the

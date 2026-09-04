@@ -841,7 +841,35 @@ class CalendarEvent(PrivateModel):
     # SUBSCRIBED, and an entry that silently vanishes from someone's phone
     # teaches them to distrust the whole calendar.
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    # HOW SURE WE ARE OF `starts_at`, on the deadline pipeline's own scale
+    # (`directory.ingest`: a board's published field is 1.0, a date read out
+    # of the posting's prose is 0.6, and the UI says "reported" for the
+    # second). The two numbers mean the same two things here.
+    #
+    # 1.0 — an `.ics` said so (DTSTART), or the user typed it in. Either way
+    # a structured statement of the time, and the default, so every row
+    # written before this column existed keeps reading as stated.
+    # 0.6 — `capture.chattime` read it out of a sentence somebody wrote:
+    # "6pm tomorrow works great for me". A real time, arrived at by our regex
+    # rather than by a field, and marked as such everywhere it is shown.
+    #
+    # It is also the WRITE guard, not only a label. `capture.gmail.
+    # _upsert_scheduled_chat` refuses to let a prose reading overwrite a row
+    # at 1.0: structured beats prose, always, and a typed time is the user's
+    # own word and outranks anything we inferred.
+    time_confidence = models.FloatField(default=1.0)
+    # The sentence a prose time was read out of, so the claim can be checked
+    # by the person it is being made to. Blank for an `.ics` or a typed event,
+    # which have nothing to quote.
+    time_evidence = models.CharField(max_length=255, blank=True, default="")
     created = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def time_reported(self) -> bool:
+        """True when `starts_at` was read out of prose rather than stated.
+        The chat twin of `directory.views.deadline_provenance`, and it asks
+        the same question of the same scale."""
+        return (self.time_confidence or 0) < 1.0
 
     class Meta(PrivateModel.Meta):
         db_table = "calendar_events"

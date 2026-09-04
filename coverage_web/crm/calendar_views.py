@@ -161,6 +161,14 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             # this flag is what lets the grid strike it through as well, so
             # it reads as retired at a glance and not just on close reading.
             "cancelled": ev.cancelled_at is not None,
+            # Same key, same word and the same meaning as layer 4's below: we
+            # read this out of prose rather than being told it by a field. On
+            # a tracked role that is the posting's own text; here it is a
+            # sentence in the student's mail ("6pm tomorrow works great for
+            # me"), quoted back on `time_evidence` so the claim can be checked
+            # against what was actually written.
+            "reported": ev.time_reported,
+            "time_evidence": ev.time_evidence,
         })
 
     # Layer 3 — confirmed firm dates, read-only. Deadlines AND openings: this
@@ -791,8 +799,19 @@ def _ics_body(user) -> HttpResponse:
             lines.append(f"DTEND:{end.astimezone(dt_timezone.utc):%Y%m%dT%H%M%S}Z")
         if ev.location:
             lines.append(f"LOCATION:{esc(ev.location)}")
-        if ev.description:
-            lines.append(f"DESCRIPTION:{esc(ev.description)}")
+        # THE CAVEAT HAS TO TRAVEL, and this is the surface it matters most
+        # on. A subscribed feed puts this time on a phone with nothing around
+        # it — no dotted underline, no "reported" beside the clock — so a time
+        # we READ OUT OF A SENTENCE arrives looking exactly like one an invite
+        # stated. The sentence goes with it, in the one field a phone will
+        # show when the entry is opened.
+        note = ev.description
+        if ev.time_reported:
+            said = f" — “{ev.time_evidence}”" if ev.time_evidence else ""
+            caveat = f"Time reported from your mail, not from an invite{said}"
+            note = f"{note}\n{caveat}" if note else caveat
+        if note:
+            lines.append(f"DESCRIPTION:{esc(note)}")
         lines.append("END:VEVENT")
 
     def alarms(summary: str) -> list[str]:

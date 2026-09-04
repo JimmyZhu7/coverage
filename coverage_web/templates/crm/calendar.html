@@ -502,6 +502,12 @@
      mark it identically. */
   .cal-ev-tracked.is-reported .cal-ev-title {
     text-decoration: underline dotted currentColor; text-underline-offset: 2px; }
+  /* A CHAT TIME READ OUT OF A SENTENCE wears the same dotted rule, because it
+     is the same claim: this came from prose, not from a field. The clock is
+     what was inferred, so the clock is what is marked — dotting the title
+     would say we were unsure who the chat is with, which we are not. */
+  .cal-ev.is-reported .cal-ev-time {
+    text-decoration: underline dotted currentColor; text-underline-offset: 2px; }
   /* The firm pulled this posting. It keeps its place on the day (it is still
      the student's tracked role) and loses the urgency bar it no longer earns
      — the red rail is what makes a deadline row read as something to act on,
