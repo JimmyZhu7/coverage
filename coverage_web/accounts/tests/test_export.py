@@ -209,6 +209,7 @@ def test_every_deletable_table_is_also_exportable(student, loaded):
         "advisor_memories": "advisor_memories.csv",
         "daily_briefs": "daily_briefs.csv",
         "gmail_connection": "gmail_connection.csv",
+        "gcal_connection": "gcal_connection.csv",
         "push_subscriptions": "push_subscriptions.csv",
         "credit_ledger": "credit_ledger.csv",
         "pro_waitlist": "pro_waitlist.csv",

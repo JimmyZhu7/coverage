@@ -26,8 +26,8 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from analytics.events import record_event
 from billing import credits as billing_credits
 from billing import stripe_gateway as billing_stripe_gateway
-from capture import gmail_live
-from capture.models import ContactProposal, GmailConnection
+from capture import gcal_live, gmail_live
+from capture.models import ContactProposal, GmailConnection, GoogleCalendarConnection
 from crm import campaigns as crm_campaigns, merge as crm_merge, recruitment as crm_recruitment
 from crm.models import Campaign, Contact, ContactMerge, UserFirm
 from directory.models import Firm
@@ -636,6 +636,39 @@ def _gmail_live_context(user) -> dict:
     }
 
 
+def _gcal_context(user) -> dict:
+    """The Google Calendar card's own facts, same posture and same cost as
+    `_gmail_live_context` right above: cheap enough to compute on every
+    settings render, because a grant that quietly went `revoked` should be
+    visible on the page a student would check rather than discoverable only
+    by the timeline silently stopping.
+
+    `available` False renders NO card at all. Until the consent screen
+    carries the calendar scope (`settings.GCAL_LIVE_ENABLED`), a Connect
+    button would send a student to a Google page that refuses the request,
+    and they would read that refusal as Coverage being broken. This is the
+    same rule the Gmail card holds itself to, not a new one.
+    """
+    if not gcal_live.is_configured():
+        return {"available": False}
+    connection = GoogleCalendarConnection.all_objects.filter(user=user).first()
+    if connection is None:
+        return {"available": True, "connected": False}
+    return {
+        "available": True,
+        "connected": True,
+        "google_email": connection.google_email,
+        "status": connection.status,
+        "last_synced_at": connection.last_synced_at,
+        "last_sync_stats": connection.last_sync_stats,
+        # "Never synced yet" and "synced, found nothing" are different
+        # sentences and the template needs to tell them apart — a freshly
+        # connected calendar showing "0 events" reads as a broken connection
+        # when it means the first sync has not run.
+        "ever_synced": connection.last_synced_at is not None,
+    }
+
+
 def _credits_context(user) -> dict:
     """Settings' own credit meter (docs/credit-system-plan.md §6 — the
     other half of "show the meter", alongside the chat composer's). Cheap
@@ -791,6 +824,7 @@ def settings_view(request):
             "saved": saved,
             "cycle_suggestions": CYCLE_SUGGESTIONS,
             "gmail_live": _gmail_live_context(request.user),
+            "google_calendar": _gcal_context(request.user),
             # Bulk sends we detected in this user's own outbound mail, and the
             # one question they answer about each. Read-only here — the answer
             # POSTs to crm:classify_campaign. Detection itself is NOT run on a

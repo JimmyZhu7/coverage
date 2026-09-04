@@ -622,6 +622,74 @@ class GmailConnection(PrivateModel):
         return f"{self.gmail_address} ({self.status})"
 
 
+class GoogleCalendarConnection(PrivateModel):
+    """One student's READ-ONLY grant on their Google Calendar.
+
+    A SEPARATE ROW FROM `GmailConnection`, DELIBERATELY, even though both
+    grants come from the same OAuth client and are encrypted with the same
+    key. They are two consents and a student is entitled to give one and
+    refuse the other: disconnecting the calendar revokes the calendar token
+    and leaves mail sync running, and vice versa. Folding both refresh
+    tokens onto one row would make either disconnect a decision about both.
+
+    NOTHING HERE CAN WRITE TO GOOGLE. The stored token carries
+    `calendar.readonly` (settings.GCAL_LIVE_SCOPES) and there is no call
+    anywhere in this project that creates, moves or deletes a Google event.
+    The Settings card says "view only" because that is enforced by the
+    scope, not by our own restraint.
+    """
+
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        # Same meaning as `GmailConnection.status`: Google's own refresh call
+        # reported the grant is gone (revoked in the user's Google Account,
+        # or the OAuth app fell out of the test-user allowlist). Surfaced on
+        # the Settings card rather than retried forever, because the fix is
+        # the user reconnecting.
+        ("revoked", "Revoked — needs reconnect"),
+    ]
+
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    # The Google account the grant belongs to. Not necessarily the same
+    # address as a connected mailbox, and not necessarily the Coverage login
+    # either — a student can connect a personal calendar and a school inbox.
+    google_email = models.EmailField()
+    # Fernet ciphertext, never the raw refresh token — the same key and the
+    # same functions as `GmailConnection.refresh_token_encrypted`
+    # (`gmail_live.encrypt_token`/`decrypt_token`), so one key rotation
+    # covers both grants and `rotate_gmail_tokens` has one thing to learn.
+    refresh_token_encrypted = models.TextField()
+    # WHICH calendar is mirrored. "primary" is Google's own alias for the
+    # account's main calendar and is what every connect writes; the column
+    # exists so a future "which calendar?" picker has somewhere to put the
+    # answer without a migration, and so the sync never has to guess.
+    calendar_id = models.CharField(max_length=255, default="primary")
+    # Google Calendar's incremental cursor — the analogue of
+    # `GmailConnection.history_id`. `events.list(syncToken=...)` returns only
+    # what changed since it was issued, which is the difference between a
+    # sync that re-reads six months of events every run and one that reads
+    # nothing when nothing moved. Blank means "no cursor yet": the next run
+    # does a full windowed read and stores the token that read returns.
+    sync_token = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="active")
+    # When the STORED REFRESH TOKEN was issued, written explicitly on every
+    # connect — the same correction `GmailConnection.connected_at` carries.
+    # `auto_now_add` alone would freeze this at the first connect and leave
+    # nothing in the row saying where the token beside it came from.
+    connected_at = models.DateTimeField(auto_now_add=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    # The counters from the last run, same posture as
+    # `GmailConnection.backfill_stats`: one JSON blob, one place a human
+    # reads "what did the last sync do".
+    last_sync_stats = models.JSONField(default=dict, blank=True)
+
+    class Meta(PrivateModel.Meta):
+        db_table = "google_calendar_connections"
+
+    def __str__(self) -> str:
+        return f"{self.google_email} ({self.status})"
+
+
 class AutopilotRun(PrivateModel):
     """One reviewed batch of AI decisions over a scan's proposals — decided
     unattended, applied on the user's own tap, never both in one step.

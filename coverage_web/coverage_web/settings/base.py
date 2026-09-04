@@ -864,6 +864,49 @@ GMAIL_LIVE_TOKEN_KEY = env("GMAIL_LIVE_TOKEN_KEY", default="")
 GMAIL_LIVE_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 # ---------------------------------------------------------------------------
+# Google Calendar (capture/gcal_live.py) — READ-ONLY, and a SEPARATE GRANT.
+# ---------------------------------------------------------------------------
+#
+# WHY THIS IS NOT APPENDED TO GMAIL_LIVE_SCOPES. Widening that list would
+# make every Gmail reconnect ask for the calendar too, and would make the
+# calendar impossible to refuse without also giving up mail sync. They are
+# two questions and a student is entitled to answer them separately: the
+# consent screens are separate, the stored grants are separate rows, and
+# disconnecting one leaves the other running.
+#
+# `calendar.readonly`, never `calendar` or `calendar.events`. Coverage
+# mirrors what is on the calendar onto its own timeline and writes nothing
+# back — there is no code path in this project that creates, moves or
+# deletes a Google event, and requesting a write scope for a feature that
+# never writes is how an app ends up holding permissions it cannot justify
+# on a verification review. `calendar.events.readonly` would be narrower
+# still but cannot list the calendars themselves, which is how the sync
+# resolves "primary" for an account whose main calendar is not the login
+# address.
+GCAL_LIVE_SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+# THE OFF-SWITCH, and the reason it is a flag rather than a blank credential
+# like every other integration on this page. Calendar reuses the Gmail Live
+# OAuth client — same Cloud project, same client id and secret, same Fernet
+# key — because a second client would mean a second consent screen to
+# verify for no gain. So there is no empty credential here to gate on: with
+# the flag alone off, the connect view 404s and the Settings card does not
+# render.
+#
+# It stays False until the OAuth consent screen actually lists the calendar
+# scope. A Connect button that sends a student to a Google page which
+# refuses the scope is worse than no button: they read the refusal as
+# Coverage being broken. Flip this in the environment on the same deploy
+# that adds the scope in Cloud Console, not before.
+GCAL_LIVE_ENABLED = env.bool("GCAL_LIVE_ENABLED", default=False)
+# How far back a first sync reaches. A calendar is a record of the future
+# far more than the past for this product's purpose — the chats a student
+# is about to have — so the backward window is deliberately short and the
+# forward one is where the value is. Both are cheap: Google returns a
+# single page per 250 events and the sync pages through.
+GCAL_SYNC_PAST_DAYS = 30
+GCAL_SYNC_FUTURE_DAYS = 180
+
+# ---------------------------------------------------------------------------
 # Stripe (docs/credit-system-plan.md's "Stripe later" note — see
 # billing/stripe_gateway.py). Pay-as-you-go credit top-ups, Checkout
 # Sessions built with ad-hoc `price_data` rather than pre-created Stripe
