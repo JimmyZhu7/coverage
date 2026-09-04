@@ -789,9 +789,20 @@ class CalendarEvent(PrivateModel):
     ]
     SOURCE_MANUAL = "manual"
     SOURCE_CAPTURE = "capture"
+    # A row mirrored from a connected Google Calendar (capture/gcal_live.py).
+    # A THIRD source and not a variant of `capture`, because the two answer
+    # different questions and the page says different things about them: a
+    # `capture` row is something Coverage FOUND in the student's mail and can
+    # be argued with; a `gcal` row is the student's own calendar restated,
+    # read-only, and the place to change it is Google Calendar. Coverage
+    # never writes back — the grant is `calendar.readonly` and there is no
+    # code path in this project that creates, moves or deletes a Google
+    # event.
+    SOURCE_GCAL = "gcal"
     SOURCE_CHOICES = [
         (SOURCE_MANUAL, "Added by you"),
         (SOURCE_CAPTURE, "From your mailbox"),
+        (SOURCE_GCAL, "From your calendar"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
@@ -825,6 +836,23 @@ class CalendarEvent(PrivateModel):
     # Blank whenever the invite could not be parsed (or the event was typed
     # in by hand), which is why the constraint below excludes blanks.
     ics_uid = models.CharField(max_length=255, blank=True, default="")
+    # Google Calendar's own event id, for rows mirrored from a connected
+    # calendar. THE IDENTITY A RE-SYNC KEYS ON: the sync re-reads a rolling
+    # window every run, so without a stable external key each pass would
+    # stack another copy of the same meeting — the exact failure the thread
+    # and UID constraints below already exist to prevent for mail.
+    #
+    # NOT the same key as `ics_uid`, and both can sit on one row. Google's
+    # event id is per-calendar and changes if the same meeting is copied
+    # between calendars; the iCalUID is the meeting's identity across
+    # everything that touched it, invites in mail included. That second key
+    # is what lets a synced event ADOPT the row an invite in the mailbox
+    # already created for the same meeting, rather than putting a duplicate
+    # beside it — see `capture.gcal_live._upsert_event`.
+    #
+    # Blank for every row that did not come from a calendar sync, on the
+    # same "blanks are not a key" terms as the two fields above.
+    external_id = models.CharField(max_length=255, blank=True, default="")
     # When the invite that set `starts_at` was SENT — not when this row was
     # written. Findings are not guaranteed to arrive in the order things
     # happened (only the backfill sorts them), and without this an older
@@ -910,6 +938,14 @@ class CalendarEvent(PrivateModel):
                 fields=["user", "ics_uid"],
                 condition=~models.Q(ics_uid=""),
                 name="uniq_calendar_event_user_ics_uid",
+            ),
+            # One event per (user, Google event id), same terms again. This
+            # is what makes a re-sync structurally unable to duplicate a
+            # mirrored event rather than merely careful not to.
+            models.UniqueConstraint(
+                fields=["user", "external_id"],
+                condition=~models.Q(external_id=""),
+                name="uniq_calendar_event_user_external_id",
             ),
         ]
         indexes = [models.Index(fields=["user", "starts_at"])]

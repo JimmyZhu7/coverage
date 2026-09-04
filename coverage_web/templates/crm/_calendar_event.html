@@ -17,6 +17,13 @@ Two shapes, decided by `ev.editable`:
 - A tracked role's closing date is the exception: it carries `ev.url`, the
   posting itself, so it renders as a real link. Same rule as above read the
   other way — anything that looks clickable here has to go somewhere.
+
+`ev.removable` is a second, narrower question inside the first shape. An
+event mirrored from a connected Google Calendar is the user's own row and
+opens like any other, but Remove is withheld: Coverage's grant is view-only,
+so the event stays in Google and the next sync would put it straight back.
+That is the same rule again — a control that looks like it does something
+has to do it.
 {% endcomment %}
 {% if ev.editable %}
   {% comment %}`ev.cancelled` is an organiser having sent a METHOD:CANCEL for
@@ -67,6 +74,15 @@ Two shapes, decided by `ev.editable`:
           <p class="cal-ev-meta cal-ev-prov">Found in your mail</p>
         {% endif %}
       {% endif %}
+      {% comment %}A third provenance, and it says where to go to change it.
+      A mirrored row is the student's own Google Calendar restated: Coverage
+      holds a view-only grant, so this page cannot move or remove it and
+      saying so is more use than a Remove button that would be undone by the
+      next sync.{% endcomment %}
+      {% if ev.from_calendar %}
+        <p class="cal-ev-meta cal-ev-prov">From your Google Calendar · edit it there</p>
+      {% endif %}
+      {% if ev.removable %}
       <form method="post" action="{% url 'crm:calendar_delete' ev.id %}">
         {% csrf_token %}
         {% comment %}Where to put you back after the row is gone: the view and
@@ -78,6 +94,7 @@ Two shapes, decided by `ev.editable`:
         <input type="hidden" name="d" value="{{ anchor.day }}">
         <button type="submit" class="cal-ev-del">Remove</button>
       </form>
+      {% endif %}
     </div>
   </details>
 {% elif ev.url %}

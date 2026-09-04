@@ -5,6 +5,10 @@ login flow never touches these views or that client's credentials.
 The BCC/forward inbound-email webhook (§5's v1) was retired 2026-08-19 once
 Gmail Live made it redundant — a real, connected Gmail account needs no
 habit change (BCC/forward) to get the same touches logged.
+
+Google Calendar's three views live here too (see `capture/gcal_live.py`).
+Same pattern, separate grant: a third incremental consent, read-only, that
+a student can give or refuse without touching whether their mail syncs.
 """
 
 from __future__ import annotations
@@ -21,7 +25,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from analytics.events import record_event
-from capture import gmail_live, google_revoke
+from capture import gcal_live, gmail_live, google_revoke
 from capture.models import GmailConnection
 
 _STATE_SESSION_KEY = "gmail_live_oauth_state"
@@ -175,3 +179,80 @@ def gmail_rescan(request):
     connection.save(update_fields=["rescan_status", "rescan_requested_at"])
     messages.success(request, "Scan queued — check back in a few minutes.")
     return redirect(f"{reverse('accounts:settings')}#gmail-live")
+
+
+# ---------------------------------------------------------------------------
+# Google Calendar — a THIRD OAuth consent, read-only (capture/gcal_live.py)
+# ---------------------------------------------------------------------------
+#
+# Deliberately a parallel set of three views rather than a `provider` argument
+# threaded through the Gmail ones. The two grants share an OAuth client and a
+# token key and nothing else: separate scopes, separate rows, separate
+# consent screens, separate disconnects. A single set of views taking a
+# provider would put "which grant am I touching" into a request parameter,
+# and a disconnect that reads the wrong one silently kills the wrong feature.
+
+_GCAL_STATE_SESSION_KEY = "gcal_oauth_state"
+
+
+@login_required
+def gcal_connect(request):
+    """Redirects to Google's consent screen for the calendar READ scope."""
+    if not gcal_live.is_configured():
+        raise Http404("Google Calendar is not configured on this deploy.")
+    redirect_uri = request.build_absolute_uri(reverse("capture:gcal_callback"))
+    state = secrets.token_urlsafe(24)
+    # ITS OWN SESSION KEY. Sharing `_STATE_SESSION_KEY` with the Gmail flow
+    # would have a student who opened both consent screens land back with
+    # one state overwritten by the other, and the second callback would
+    # correctly refuse a request that was never tampered with.
+    request.session[_GCAL_STATE_SESSION_KEY] = state
+    return redirect(gcal_live.build_auth_url(redirect_uri, state))
+
+
+@login_required
+def gcal_callback(request):
+    """Google's redirect back after the calendar consent (or a denial)."""
+    if not gcal_live.is_configured():
+        raise Http404("Google Calendar is not configured on this deploy.")
+
+    expected_state = request.session.pop(_GCAL_STATE_SESSION_KEY, None)
+    if not expected_state or request.GET.get("state") != expected_state:
+        messages.error(request, "Calendar connect request expired — try again.")
+        return redirect(f"{reverse('accounts:settings')}#google-calendar")
+
+    if request.GET.get("error"):
+        messages.error(request, "Calendar connect was cancelled.")
+        return redirect(f"{reverse('accounts:settings')}#google-calendar")
+
+    code = request.GET.get("code", "")
+    redirect_uri = request.build_absolute_uri(reverse("capture:gcal_callback"))
+    try:
+        connection = gcal_live.connect_calendar(request.user, code, redirect_uri)
+    except gcal_live.GcalError as exc:
+        messages.error(request, str(exc))
+        return redirect(f"{reverse('accounts:settings')}#google-calendar")
+
+    # Counted for the same reason `gmail_connected` is: connecting is the
+    # step that turns Coverage from a blank timeline into a populated one,
+    # and a row in the database answers "did they" but not "when, and how
+    # long after signing up". No address in the props — the event stream is
+    # read on a staff page and a calendar address is not a metric.
+    record_event("gcal_connected", user=request.user, plan=request.user.plan)
+    messages.success(request, f"Calendar connected: {connection.google_email}.")
+    return redirect(f"{reverse('accounts:settings')}#google-calendar")
+
+
+@login_required
+@require_POST
+def gcal_disconnect(request):
+    """Hands the calendar grant back to Google, then deletes the stored row.
+
+    Through `gcal_live.disconnect`, which goes through the same best-effort
+    `capture.google_revoke` door the Gmail disconnect uses — one revoke
+    implementation, two grants, and neither disconnect can reach the other's
+    row.
+    """
+    gcal_live.disconnect(request.user)
+    messages.success(request, "Google Calendar disconnected.")
+    return redirect(f"{reverse('accounts:settings')}#google-calendar")

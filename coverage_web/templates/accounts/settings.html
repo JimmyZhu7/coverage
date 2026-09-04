@@ -952,6 +952,7 @@ that don't already declare explicit htmx behaviour.
       <p class="settings-nav-group">Plan &amp; Credits</p>
       <a href="#credits">Credits</a>
       {% if gmail_live.available %}<a href="#gmail-live">Gmail Live</a>{% endif %}
+      {% if google_calendar.available %}<a href="#google-calendar">Google Calendar</a>{% endif %}
       <p class="settings-nav-group">Account</p>
       <a href="#security">Sign-In &amp; Security</a>
       <a href="#data">Your Data</a>
@@ -2125,8 +2126,26 @@ that don't already declare explicit htmx behaviour.
                     {% endif %}
                   {% endif %}
                 {% else %}
-                  Not connected. Reads mail for bounces, replies, and
-                  calendar invites only, never message bodies.
+                  {% comment %}
+                  "never message bodies" used to end this sentence and it was
+                  not true. `capture/gmail_live.py` fetches with
+                  `format="full"` and `_decode_body` walks every text part,
+                  because a bounce's routing address is legible in the decoded
+                  body and mangled in Gmail's snippet. `settings/base.py` says
+                  so at GMAIL_LIVE_SCOPES and templates/legal/privacy.html was
+                  corrected to match on 2026-09-01 ("we do read your mailbox")
+                  — this card was the copy the correction never reached, so it
+                  spent a fortnight promising something narrower than the
+                  privacy policy the same account had agreed to.
+
+                  What replaces it is the fact that IS true and is the one a
+                  student is actually asking about at a Connect button: the
+                  grant is read-only, so nothing here can send, reply or
+                  delete. Same sentence shape as the Google Calendar card
+                  below, so the two read as the same kind of switch.
+                  {% endcomment %}
+                  Not connected. View only: Coverage reads your mail to log
+                  touches and can never send, reply or delete.
                   {% if not gmail_live.trial_days_left and not gmail_live.is_pro %}
                     Real-time sync needs Pro.
                   {% endif %}
@@ -2239,6 +2258,99 @@ that don't already declare explicit htmx behaviour.
       </section>
       {% endif %}
 
+      {# ---- Google Calendar ---- #}
+      {% comment %}
+      DELIBERATELY THE SAME CARD AS GMAIL LIVE ABOVE, not a new pattern. Same
+      `set-card` / `set-head` / `set-row` anatomy, the same Status label, the
+      same Disconnect-then-Connect control pair in the same order. A student
+      reading down this page meets two Google connections and should not have
+      to work out that they are the same kind of switch.
+
+      `--i:8`, and every card below it shifted by one — the reveal stagger is
+      positional and a duplicate index puts two cards on the same beat.
+
+      The card renders only when `google_calendar.available`, which is False
+      until the OAuth consent screen actually carries the calendar scope (see
+      `settings.GCAL_LIVE_ENABLED`). A Connect button that sends a student to
+      a Google page which refuses the request is worse than no button — they
+      read the refusal as Coverage being broken. Same rule as the Gmail card,
+      not a new one.
+      {% endcomment %}
+      {% if google_calendar.available %}
+      <section class="set-card kin-reveal panel" id="google-calendar" style="--i:8"
+               aria-labelledby="google-calendar-h">
+        <div class="set-head">
+          <h2 id="google-calendar-h">Google Calendar</h2>
+        </div>
+        <div class="set-body">
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Status</span>
+              <div class="set-row-desc">
+                {% if google_calendar.connected %}
+                  {% if google_calendar.status == "revoked" %}
+                    <strong>Access was revoked.</strong> Reconnect below.
+                  {% else %}
+                    {{ google_calendar.google_email }}.
+                    {% comment %}
+                    "Never synced" and "synced, found nothing" are different
+                    facts and the card has to tell them apart. A freshly
+                    connected calendar showing a count of zero reads as a
+                    broken connection when it means the first pass has not
+                    run yet.
+                    {% endcomment %}
+                    {% if google_calendar.ever_synced %}
+                      {# depth=1, matching every other "ago" line on the product. #}
+                      Last sync {{ google_calendar.last_synced_at|timesince1 }} ago.
+                    {% else %}
+                      First sync hasn't run yet.
+                    {% endif %}
+                  {% endif %}
+                {% else %}
+                  Not connected. View only: Coverage reads your events onto
+                  your timeline and can never add, move or delete anything on
+                  your calendar.
+                {% endif %}
+              </div>
+            </div>
+            <div class="set-row-control">
+              {% if google_calendar.connected %}
+                <form method="post" action="{% url 'capture:gcal_disconnect' %}">
+                  {% csrf_token %}
+                  <button type="submit" class="btn">Disconnect</button>
+                </form>
+              {% endif %}
+              <a class="btn" href="{% url 'capture:gcal_connect' %}">
+                {% if google_calendar.connected %}Reconnect{% else %}Connect Calendar{% endif %}
+              </a>
+            </div>
+          </div>
+
+          {% if google_calendar.connected and google_calendar.status != "revoked" %}
+          {% comment %}
+          What the last pass actually did, on the same argument the Gmail
+          card's Past History row makes: "connected" says the grant works and
+          nothing else, and this row is the only place a student learns
+          whether anything came across.
+          {% endcomment %}
+          <div class="set-row">
+            <div class="set-row-main">
+              <span class="set-row-label">Last Sync</span>
+              <div class="set-row-desc">
+                {% if google_calendar.ever_synced %}
+                  {{ google_calendar.last_sync_stats.created|default:0 }} event{{ google_calendar.last_sync_stats.created|default:0|pluralize }} added,
+                  {{ google_calendar.last_sync_stats.updated|default:0 }} updated.
+                {% else %}
+                  Your events appear on the calendar once the first sync runs.
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+
       {% comment %}
       There is no Language section here any more. `User.language` was written
       by this page and read by nothing — no LocaleMiddleware, no catalogs, no
@@ -2253,7 +2365,7 @@ that don't already declare explicit htmx behaviour.
       {% endcomment %}
 
       {# ---- Sign-In & Security ---- #}
-      <section class="set-card kin-reveal panel" id="security" style="--i:8"
+      <section class="set-card kin-reveal panel" id="security" style="--i:9"
                aria-labelledby="security-h">
         <div class="set-head">
           <h2 id="security-h">Sign-In &amp; Security</h2>
@@ -2436,7 +2548,7 @@ that don't already declare explicit htmx behaviour.
       For a signed-in student these are the ONLY in-app links to Privacy and
       Terms, so they can be restyled and they cannot be dropped.
       {% endcomment %}
-      <section class="set-card kin-reveal panel" id="data" style="--i:9"
+      <section class="set-card kin-reveal panel" id="data" style="--i:10"
                aria-labelledby="data-h">
         <div class="set-head">
           <h2 id="data-h">Your Data</h2>
@@ -2528,7 +2640,7 @@ that don't already declare explicit htmx behaviour.
       one bucket would bury it where nobody would look for it.
       {% endcomment %}
       {# ---- Danger Zone ---- #}
-      <section class="set-card is-danger kin-reveal panel" id="danger" style="--i:10"
+      <section class="set-card is-danger kin-reveal panel" id="danger" style="--i:11"
                aria-labelledby="danger-h">
         <div class="set-head">
           <h2 id="danger-h">Danger Zone</h2>

@@ -98,7 +98,6 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from django.conf import settings
 from django.db.models import Max, Q
 from django.utils import timezone
-from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -106,7 +105,7 @@ from googleapiclient.errors import HttpError
 
 from accounts import trials as pro_trials
 from billing import credits as billing_credits
-from capture import chattime, gmail_residue, inbound
+from capture import chattime, gmail_residue, google_oauth, inbound
 from capture.gmail import apply_findings
 from capture.models import GmailConnection
 from crm.models import Contact, Touch
@@ -154,8 +153,12 @@ SWEEP_MAX_MESSAGES = 500
 
 logger = logging.getLogger(__name__)
 
-GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
-GMAIL_AUTH_URI = "https://accounts.google.com/o/oauth2/auth"
+# Google's endpoints, now defined once in `capture.google_oauth` so the
+# Calendar grant cannot drift onto a different token URI than this one.
+# Kept as module-level names here because this file has always had them and
+# nothing is gained by making every reader chase the import.
+GMAIL_TOKEN_URI = google_oauth.TOKEN_URI
+GMAIL_AUTH_URI = google_oauth.AUTH_URI
 
 # Same bounce-pattern vocabulary the manual daily sync's agents already use
 # (see daily-networking-gmail-sync's SKILL.md) — kept identical so the two
@@ -442,19 +445,18 @@ def _flow(redirect_uri: str) -> Flow:
     exists to protect public clients that can't hold a secret; this is a
     confidential "web" client with a real client_secret, and CSRF is already
     covered by the `state` param, so there's nothing PKCE adds here worth
-    the cost of persisting a verifier across the redirect."""
-    return Flow.from_client_config(
-        {
-            "web": {
-                "client_id": settings.GMAIL_LIVE_CLIENT_ID,
-                "client_secret": settings.GMAIL_LIVE_CLIENT_SECRET,
-                "auth_uri": GMAIL_AUTH_URI,
-                "token_uri": GMAIL_TOKEN_URI,
-            }
-        },
+    the cost of persisting a verifier across the redirect.
+
+    The construction itself is `capture.google_oauth.flow` — the one thing
+    the Calendar grant shares with this one once the scope list is a
+    parameter. The SCOPES stay here: `GMAIL_LIVE_SCOPES` is this
+    integration's own question and must never widen to carry another
+    feature's."""
+    return google_oauth.flow(
+        client_id=settings.GMAIL_LIVE_CLIENT_ID,
+        client_secret=settings.GMAIL_LIVE_CLIENT_SECRET,
         scopes=settings.GMAIL_LIVE_SCOPES,
         redirect_uri=redirect_uri,
-        autogenerate_code_verifier=False,
     )
 
 
@@ -613,16 +615,15 @@ def connect_gmail(user, code: str, redirect_uri: str) -> GmailConnection:
 # ---------------------------------------------------------------------------
 
 def _credentials(connection: GmailConnection) -> Credentials:
-    creds = Credentials(
-        token=None,
-        refresh_token=decrypt_token(connection.refresh_token_encrypted),
-        token_uri=GMAIL_TOKEN_URI,
+    # Decryption stays here — it raises `GmailLiveError`, which is the one
+    # type `capture.views.gmail_callback` catches — and only the credential
+    # construction is shared with the Calendar grant.
+    return google_oauth.credentials(
         client_id=settings.GMAIL_LIVE_CLIENT_ID,
         client_secret=settings.GMAIL_LIVE_CLIENT_SECRET,
+        refresh_token=decrypt_token(connection.refresh_token_encrypted),
         scopes=settings.GMAIL_LIVE_SCOPES,
     )
-    creds.refresh(GoogleAuthRequest())
-    return creds
 
 
 def _gmail_client(connection: GmailConnection):

@@ -49,7 +49,7 @@ from billing.models import CreditLedger, ProWaitlist
 from capture import gmail_live
 from capture.models import (
     ApplicationEvent, AutopilotDecision, AutopilotRun, ContactProposal,
-    GmailConnection, MailFact,
+    GmailConnection, GoogleCalendarConnection, MailFact,
 )
 from crm.models import (
     CalendarEvent, Campaign, CampaignContact, ChatDebrief, Contact,
@@ -706,6 +706,15 @@ GMAIL_CONNECTION_EXPORT_COLUMNS = [
     "gmail_address", "status", "connected_at", "last_notification_at",
     "backfill_status", "rescan_status",
 ]
+# The calendar grant, same posture and the same omission: no
+# `refresh_token_encrypted`, and no `sync_token` either. The cursor is
+# Google's own opaque bookmark into their change feed, meaningless outside a
+# live grant and not a fact about the student — exporting it would be
+# exporting our plumbing. The EVENTS it pulled in are the student's data and
+# they are already in calendar_events.csv, where they belong.
+GCAL_CONNECTION_EXPORT_COLUMNS = [
+    "google_email", "calendar_id", "status", "connected_at", "last_synced_at",
+]
 # Deliberately excludes `p256dh`/`auth` — the Push API's own bearer secret for
 # this browser's channel, same posture as the Gmail refresh token above.
 PUSH_SUBSCRIPTION_EXPORT_COLUMNS = ["user_agent", "created"]
@@ -1246,6 +1255,17 @@ def gmail_connection_csv(user) -> str:
     return _csv(GMAIL_CONNECTION_EXPORT_COLUMNS, rows)
 
 
+def gcal_connection_csv(user) -> str:
+    conn = GoogleCalendarConnection.objects.for_user(user).first()
+    rows = []
+    if conn is not None:
+        rows = [[
+            conn.google_email, conn.calendar_id, conn.status,
+            _dt(conn.connected_at), _dt(conn.last_synced_at),
+        ]]
+    return _csv(GCAL_CONNECTION_EXPORT_COLUMNS, rows)
+
+
 def push_subscriptions_csv(user) -> str:
     rows = PushSubscription.objects.for_user(user).order_by("created")
     return _csv(PUSH_SUBSCRIPTION_EXPORT_COLUMNS, ([p.user_agent, _dt(p.created)] for p in rows))
@@ -1364,6 +1384,9 @@ EXPORT_FILES: list[tuple[str, object, str]] = [
     ("gmail_connection.csv", gmail_connection_csv,
      "Your connected Gmail address and its sync status (never the access "
      "token itself)."),
+    ("gcal_connection.csv", gcal_connection_csv,
+     "Your connected Google Calendar and its sync status (never the access "
+     "token itself). The events it pulled in are in calendar_events.csv."),
     ("push_subscriptions.csv", push_subscriptions_csv,
      "Browsers/devices subscribed to deadline push alerts (never the "
      "subscription's own keys)."),
@@ -1498,6 +1521,9 @@ _DELETE_ORDER: list[tuple[str, type]] = [
     ("advisor_memories", AdvisorMemory),
     ("daily_briefs", DailyBrief),
     ("gmail_connection", GmailConnection),
+    # The second Google grant, and a sibling of the row above rather than a
+    # child of it: neither references the other, and either can exist alone.
+    ("gcal_connection", GoogleCalendarConnection),
     ("push_subscriptions", PushSubscription),
     ("credit_ledger", CreditLedger),
     ("product_events", ProductEvent),
@@ -1514,10 +1540,10 @@ def delete_user_and_data(user) -> dict[str, int]:
     `user.delete()` is a belt-and-suspenders cascade that also sweeps
     allauth's own per-user rows (email addresses, social tokens).
 
-    THE ONE THING THIS CANNOT DELETE BY ITSELF is the OAuth grant behind a
-    connected Gmail: that lives at Google, not in this database, and until
-    2026-09-01 it simply stayed live after the account holding it ceased to
-    exist. The privacy policy calls this deletion immediate and complete, so
+    THE ONE THING THIS CANNOT DELETE BY ITSELF is an OAuth grant — the
+    connected Gmail's, and now the connected Google Calendar's too. Those
+    live at Google, not in this database, and until 2026-09-01 the mail one
+    simply stayed live after the account holding it ceased to exist. The privacy policy calls this deletion immediate and complete, so
     the grant is handed back first. Best-effort and outside the transaction,
     both deliberately: `google_revoke` never raises, and a network call has
     no business inside a transaction that is about to delete two dozen

@@ -1,4 +1,12 @@
-"""Hand a Gmail grant back to Google when the user is done with it.
+"""Hand a Google grant back to Google when the user is done with it.
+
+TWO GRANTS, ONE IMPLEMENTATION. This started as Gmail's and now covers the
+read-only Calendar grant too (`capture/gcal_live.py`). Nothing here knows
+which is which: `revoke_connection` reads `refresh_token_encrypted` off
+whatever connection object it is handed, and both models name that field
+the same on purpose. Revoking a REFRESH token invalidates the whole grant,
+so one call per stored row is the complete operation for either.
+
 
 WHY THIS EXISTS. Disconnecting Gmail, and deleting a Coverage account
 outright, both used to delete the encrypted refresh-token row and stop
@@ -101,17 +109,27 @@ def revoke_connection(connection) -> bool:
 
 
 def revoke_all_for_user(user) -> int:
-    """Revoke every Gmail grant this user holds. Returns how many succeeded.
+    """Revoke every Google grant this user holds. Returns how many succeeded.
+
+    BOTH GRANTS, not just the mailbox. Account deletion is documented in the
+    privacy policy as a hard delete with nothing kept, and a calendar grant
+    that outlives the account is the same thing this module was written to
+    stop — a live permission nobody can see and nobody can use, surfacing
+    years later. `GoogleCalendarConnection` names its ciphertext field
+    `refresh_token_encrypted` for exactly this reason: `revoke_connection`
+    reads that field off whatever it is handed, so one implementation covers
+    both and a third grant would cost one line here.
 
     `all_objects` with an explicit `user=` filter, the same shape every
-    other worker-side read of this table uses: `GmailConnection` is a
-    private-zone model and this is called from paths (account deletion)
-    where the caller already holds the user object.
+    other worker-side read of these tables uses: both are private-zone
+    models and this is called from paths (account deletion) where the caller
+    already holds the user object.
     """
-    from capture.models import GmailConnection
+    from capture.models import GmailConnection, GoogleCalendarConnection
 
     revoked = 0
-    for connection in GmailConnection.all_objects.filter(user=user):
-        if revoke_connection(connection):
-            revoked += 1
+    for model in (GmailConnection, GoogleCalendarConnection):
+        for connection in model.all_objects.filter(user=user):
+            if revoke_connection(connection):
+                revoked += 1
     return revoked

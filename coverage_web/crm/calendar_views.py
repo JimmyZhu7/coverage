@@ -152,6 +152,28 @@ def _events_by_day(user, first: date, last: date) -> dict[date, list[dict]]:
             "at": None if ev.all_day else local,
             "contact": ev.contact,
             "editable": True,
+            # WHETHER "Remove" IS AN HONEST BUTTON ON THIS ROW. For a
+            # captured chat or a typed event it is: the row is the only copy
+            # and deleting it deletes it. For a row Google is mirroring it is
+            # not — the event still exists in Google, the next sync reads it
+            # again, and the row comes straight back. That is the ghost loop
+            # `_retire_cancelled_chat` refused outright deletion to avoid, and
+            # offering the button anyway would be the same lie this partial's
+            # own docstring rejects ("styling them as clickable and then doing
+            # nothing"). The place to remove a Google event is Google
+            # Calendar, which is the honest consequence of a view-only grant.
+            #
+            # KEYED ON `external_id`, NOT ON `source`, and the difference is
+            # the adopted row. When a chat arrives as an invite in the mailbox
+            # AND on the student's calendar, `capture.gcal_live` joins the two
+            # onto one row by iCalUID — and that row keeps `source="capture"`,
+            # because that is where Coverage first learned about it and the
+            # mail pipeline goes on maintaining it. It is still backed by a
+            # live Google event, so it is still not deletable here. The
+            # question is "does an upstream copy exist", and `external_id`
+            # answers it; `source` only says who found it first.
+            "removable": not ev.external_id,
+            "from_calendar": bool(ev.external_id),
             # Kept on the grid rather than dropped, on exactly the reasoning
             # layer 4 uses for a posting the firm has pulled: this is a
             # RECORD of the student's month, and a row that silently vanishes
@@ -644,13 +666,33 @@ def calendar_add(request: HttpRequest) -> HttpResponse:
 @require_POST
 def calendar_delete(request: HttpRequest, pk: int) -> HttpResponse:
     """Remove one of the user's own events. Scoped through `for_user`, so a
-    hand-crafted pk for someone else's row simply finds nothing."""
+    hand-crafted pk for someone else's row simply finds nothing.
+
+    A ROW GOOGLE IS MIRRORING IS NOT THE USER'S TO DELETE HERE, and the
+    `external_id=""` filter below is the server-side guarantee behind the
+    missing Remove button (`templates/crm/_calendar_event.html`) rather than
+    a second opinion about it. The event lives in Google; Coverage holds a
+    view-only grant and cannot remove it there, so a delete here would take
+    the local copy out and the next `gcal_sync` would put it straight back —
+    a button that appears to work, does nothing lasting, and teaches the
+    student the page is unreliable. Silent rather than an error: this is
+    unreachable from the UI, so anyone hitting it is replaying a stale form,
+    and the redirect shows them the row still present, which is the truth.
+
+    The filter is on `external_id` rather than `source` for the reason
+    `_period_context` states at `removable`: an adopted row — one chat that
+    arrived both as an invite in the mailbox and on the calendar — keeps
+    `source="capture"` and is still backed by a live Google event. "Is there
+    an upstream copy" is the question, and only `external_id` answers it.
+    """
     today = timezone.localdate()
     view = _resolve_view(request.POST.get("view"))
     anchor = _resolve_anchor(request.POST.get("y") or today.year,
                              request.POST.get("m") or today.month,
                              request.POST.get("d"), today)
-    CalendarEvent.objects.for_user(request.user).filter(pk=pk).delete()
+    (CalendarEvent.objects.for_user(request.user)
+        .filter(pk=pk, external_id="")
+        .delete())
     return redirect(f"/app/calendar/{_qs(view, anchor)}")
 
 
