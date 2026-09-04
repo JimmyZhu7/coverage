@@ -32,11 +32,22 @@ the database — `enrich_contact_regions` (management command) does that, dry
 by default, with an undo file, mirroring `backfill_contact_regions`.
 
 COST, so nobody is surprised, and MEASURED rather than estimated: search
-results are injected into the context, and on the first seven live contacts
-that ran 24-32k input tokens each. At Opus 5 pricing that is about fifteen
-cents a contact — roughly fourteen dollars for the 94. The search is the
-cost, which is why the command saves a plan on the dry run and can apply
-from it without searching again.
+results are injected into the context, and on the live backlog run that was
+24-32k input tokens per contact. At Opus 5 with three searches that came to
+about fifteen cents each, ~$17 for 94. That is a fine price for a one-time
+backlog and a terrible one as a standing cost, so the defaults moved: the
+cheapest model and a single search (see MODEL below), a few cents a contact.
+
+WHO THIS RUNS ON is the other half of the cost answer, and it is a rule, not
+a dial. It runs on people who REPLIED. A contact who never wrote back is one
+this cannot honestly place anyway, and their region does not matter yet:
+`firm_markets` treats a blank region as "either market", so nothing is
+mis-scoped while they stay silent. When someone does reply, the evidence
+usually arrives free in the message itself — a signature, a phone country
+code, a stated time zone — and the search is only for the replies that carry
+none. That turns an every-contact cost into a small fraction of replies.
+The command enforces it; `--include-silent` is the deliberate override, and
+it is what the one-time backlog used.
 """
 from __future__ import annotations
 
@@ -45,8 +56,37 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-MODEL = "claude-opus-5"
-MAX_SEARCHES = 3
+# THE CHEAP MODEL, AND ONE SEARCH (2026-09-04, the founder's call).
+#
+# The first pass ran Opus 5 with up to three searches and cost ~15c a
+# contact. That is defensible for a one-time backlog and indefensible as a
+# standing cost: a student who contacts 200 people a week would run ~$140 a
+# month. Reading a few search results and pulling a city out of them is not
+# a task that needs the strongest model, so this runs the cheapest one, and
+# one search rather than three — the measured backlog run averaged 2.0
+# searches, but the second was almost always the same answer restated.
+#
+# Together those take a contact from ~15c to a few cents. The refusal rules
+# below do not move: a cheaper model is allowed to say "unknown" more often,
+# never to guess more often. `writable` still demands person_matched, high
+# confidence and a source URL.
+MODEL = "claude-haiku-4-5-20251001"
+MAX_SEARCHES = 1
+
+# The dynamic-filtering web-search tool is only served on the larger models
+# (Opus 5/4.8/4.7/4.6, Sonnet 5/4.6). Haiku takes the basic variant, and
+# sending the wrong one is a 400 rather than a downgrade, so the version is
+# chosen from the model instead of hardcoded.
+WEB_SEARCH_DYNAMIC = "web_search_20260209"
+WEB_SEARCH_BASIC = "web_search_20250305"
+_DYNAMIC_SEARCH_MODELS = ("opus-5", "opus-4-8", "opus-4-7", "opus-4-6",
+                          "sonnet-5", "sonnet-4-6", "fable-5")
+
+
+def web_search_tool_type(model: str) -> str:
+    name = (model or "").lower()
+    return (WEB_SEARCH_DYNAMIC if any(m in name for m in _DYNAMIC_SEARCH_MODELS)
+            else WEB_SEARCH_BASIC)
 REQUEST_TIMEOUT_SECONDS = 120.0
 
 MARKETS = frozenset({"us", "hk", "other", "unknown"})
@@ -222,7 +262,8 @@ def enrich(
 
     messages = [{"role": "user", "content": _prompt(name, email, firm, role)}]
     tools = [
-        {"type": "web_search_20260209", "name": "web_search", "max_uses": MAX_SEARCHES},
+        {"type": web_search_tool_type(model), "name": "web_search",
+         "max_uses": MAX_SEARCHES},
         RECORD_TOOL,
     ]
     try:

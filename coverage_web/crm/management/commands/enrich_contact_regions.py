@@ -15,16 +15,21 @@ market would re-place a row this command had just cleared. `region_source`
 is stamped "web" so what a model placed is a query, not a guess, and can be
 reverted as a set.
 
+It searches people who have REPLIED, not every blank row. See
+`crm.region_enrich`'s docstring for why that is the rule and not a dial;
+`--include-silent` is the override the one-time backlog used.
+
 Usage:
-    manage.py enrich_contact_regions --user founder@example.com               # dry run, all blanks
+    manage.py enrich_contact_regions --user founder@example.com               # dry run, blanks who replied
+    manage.py enrich_contact_regions --user founder@example.com --include-silent
     manage.py enrich_contact_regions --user founder@example.com --limit 5     # try a handful first
     manage.py enrich_contact_regions --user founder@example.com --ids 482,806
     manage.py enrich_contact_regions --user founder@example.com --apply
     manage.py enrich_contact_regions --user founder@example.com \\
         --revert region_enrich_undo_20260904T020000.json
 
-Each contact is one API call with web search — measured at ~15 cents at
-Opus 5, ~$14 for 94. The dry run spends it too: that is the point, to see
+Each contact is one API call with web search. The dry run spends it too:
+that is the point, to see
 what the search finds before believing it. So it does not get spent twice,
 a dry run writes everything it found to `--plan-out` (default
 region_enrich_plan_<timestamp>.json), and `--apply-plan FILE` writes those
@@ -45,8 +50,9 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
 from core.templatetags.textstyle import smart_person_name
+from crm.coverage import WARM
 from crm.models import Contact
-from crm.region_enrich import Placement, enrich
+from crm.region_enrich import MODEL, Placement, enrich
 
 
 class Command(BaseCommand):
@@ -57,6 +63,12 @@ class Command(BaseCommand):
     )
 
     def add_arguments(self, parser):
+        parser.add_argument("--include-silent", action="store_true",
+                            help="Also search contacts who have never replied. "
+                                 "Off by default: a silent contact needs no "
+                                 "region (a blank one means 'either market') "
+                                 "and is the one the search places worst. "
+                                 "This is what the one-time backlog used.")
         parser.add_argument("--user", required=True,
                             help="Email of the account whose contacts to place.")
         parser.add_argument("--apply", action="store_true",
@@ -102,6 +114,20 @@ class Command(BaseCommand):
             .select_related("firm")
             .order_by("id")
         )
+        # WHO GETS SEARCHED, and why it is a default rather than a flag you
+        # remember to pass. Searching every blank row is what made the first
+        # pass expensive: at 200 new contacts a week it is a standing bill for
+        # answers nobody is using yet. A contact who has never written back
+        # does not need a region — `firm_markets` reads a blank one as "either
+        # market", so no deadline is mis-scoped while they stay silent — and
+        # is also the contact the search is worst at, because an outbound-only
+        # row is usually just a name and a firm. The 94-row backlog ran 49
+        # placeable out of 94 for exactly that reason.
+        #
+        # Warmth is the reply marker: `crm.coverage.WARM` is the same set the
+        # cadence and the digest already treat as "has engaged back".
+        if not options["include_silent"]:
+            qs = qs.filter(warmth__in=WARM)
         if options["ids"]:
             try:
                 ids = [int(x) for x in options["ids"].split(",") if x.strip()]
@@ -112,9 +138,11 @@ class Command(BaseCommand):
         if options["limit"]:
             contacts = contacts[: options["limit"]]
 
+        pool = ("blank-region contacts" if options["include_silent"]
+                else "blank-region contacts WHO HAVE REPLIED")
         self.stdout.write(
-            f"{len(contacts)} blank-region contacts for {user.email}; "
-            f"one web-search call each."
+            f"{len(contacts)} {pool} for {user.email}; "
+            f"one web-search call each on {MODEL}."
         )
 
         placed = []      # (contact, placement)

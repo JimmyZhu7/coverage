@@ -99,7 +99,11 @@ def test_the_tools_and_prompt_hold_the_doctrine():
     enrich("A B", "a.b@ubs.com", "UBS", role="Analyst", client=fake)
     kw = fake.calls[0]
     types = [t.get("type") or t.get("name") for t in kw["tools"]]
-    assert "web_search_20260209" in types and "record_placement" in types
+    # The search tool's version tracks the model (a model that is not
+    # served the dynamic-filtering variant 400s on it), so assert the
+    # one this model actually takes rather than a fixed string.
+    from crm.region_enrich import MODEL, web_search_tool_type
+    assert web_search_tool_type(MODEL) in types and "record_placement" in types
     assert next(t for t in kw["tools"] if t.get("name") == "record_placement")["strict"] is True
     assert "headquarters" in kw["system"] and "unknown" in kw["system"]
     assert "Title on file: Analyst" in kw["messages"][0]["content"]
@@ -126,10 +130,15 @@ def board(db):
     user = _user()
     ubs = Firm.objects.create(name="UBS", slug="ubs", domains=["ubs.com"],
                               regions=["us", "hk"])
-    a = Contact.all_objects.create(user=user, name="luis.bolio", email="luis.bolio@ubs.com", firm=ubs)
-    b = Contact.all_objects.create(user=user, name="jack.paolini", email="jack.paolini@ubs.com", firm=ubs)
+    # Both are REPLIERS, because that is the pool the command searches by
+    # default now. A contact who has never written back is skipped unless
+    # --include-silent says otherwise; see the two tests for that rule.
+    a = Contact.all_objects.create(user=user, name="luis.bolio", email="luis.bolio@ubs.com",
+                                   firm=ubs, warmth="replied")
+    b = Contact.all_objects.create(user=user, name="jack.paolini", email="jack.paolini@ubs.com",
+                                   firm=ubs, warmth="replied")
     placed = Contact.all_objects.create(user=user, name="Set Already", email="s@ubs.com",
-                                        firm=ubs, region="hk")
+                                        firm=ubs, region="hk", warmth="replied")
     return user, ubs, a, b, placed
 
 
@@ -277,3 +286,93 @@ def test_apply_plan_refuses_another_accounts_plan(board, tmp_path):
     plan.write_text(json.dumps({"user": "someone@else.com", "placements": {}}))
     with pytest.raises(Exception, match="plan file is for"):
         call_command("enrich_contact_regions", "--user", user.email, "--apply-plan", str(plan))
+
+
+# ---------------------------------------------------------------------------
+# WHO GETS SEARCHED — the cost rule, pinned
+# ---------------------------------------------------------------------------
+
+def test_a_contact_who_never_replied_is_not_searched(board, monkeypatch, tmp_path):
+    """The rule that keeps this affordable at 200 new contacts a week.
+
+    A silent contact costs a paid search to answer a question nobody is
+    asking yet: `firm_markets` reads their blank region as "either market",
+    so no deadline is mis-scoped while they stay silent.
+    """
+    user, ubs, a, b, _ = board
+    cold = Contact.all_objects.create(user=user, name="Never Wrote Back",
+                                      email="silent@ubs.com", firm=ubs, warmth="cold")
+    seen = []
+
+    def spy(name, email, firm, *, role="", client=None, model=None):
+        seen.append(email)
+        return None
+
+    monkeypatch.setattr("crm.management.commands.enrich_contact_regions.enrich", spy)
+    call_command("enrich_contact_regions", "--user", user.email, "--sleep", "0",
+                 "--plan-out", str(tmp_path / "p.json"))
+    assert cold.email not in seen
+    assert set(seen) == {a.email, b.email}
+
+
+def test_include_silent_is_the_override_the_backlog_used(board, monkeypatch, tmp_path):
+    user, ubs, a, b, _ = board
+    cold = Contact.all_objects.create(user=user, name="Never Wrote Back",
+                                      email="silent@ubs.com", firm=ubs, warmth="cold")
+    seen = []
+
+    def spy(name, email, firm, *, role="", client=None, model=None):
+        seen.append(email)
+        return None
+
+    monkeypatch.setattr("crm.management.commands.enrich_contact_regions.enrich", spy)
+    call_command("enrich_contact_regions", "--user", user.email, "--sleep", "0",
+                 "--include-silent", "--plan-out", str(tmp_path / "p.json"))
+    assert cold.email in seen
+
+
+@pytest.mark.parametrize("warmth", ["replied", "chatted", "advocate"])
+def test_every_warm_state_counts_as_having_replied(board, monkeypatch, tmp_path, warmth):
+    """`crm.coverage.WARM` is the shared definition; do not fork it here."""
+    user, ubs, _, _, _ = board
+    warm = Contact.all_objects.create(user=user, name="Wrote Back",
+                                      email=f"{warmth}@ubs.com", firm=ubs, warmth=warmth)
+    seen = []
+    monkeypatch.setattr("crm.management.commands.enrich_contact_regions.enrich",
+                        lambda n, e, f, **k: seen.append(e))
+    call_command("enrich_contact_regions", "--user", user.email, "--sleep", "0",
+                 "--plan-out", str(tmp_path / "p.json"))
+    assert warm.email in seen
+
+
+# ---------------------------------------------------------------------------
+# THE CHEAP MODEL, and the search tool version that goes with it
+# ---------------------------------------------------------------------------
+
+def test_the_default_model_is_the_cheap_one():
+    """Not a style preference: at 200 contacts a week the strong model is a
+    ~$140/month standing bill for reading a city off a search result."""
+    from crm import region_enrich
+    assert "haiku" in region_enrich.MODEL.lower()
+    assert region_enrich.MAX_SEARCHES == 1
+
+
+def test_the_search_tool_version_follows_the_model():
+    """Sending the dynamic-filtering tool to a model that is not served it is
+    a 400, not a downgrade, so the version is derived rather than hardcoded."""
+    from crm.region_enrich import (WEB_SEARCH_BASIC, WEB_SEARCH_DYNAMIC,
+                                   web_search_tool_type)
+    assert web_search_tool_type("claude-haiku-4-5-20251001") == WEB_SEARCH_BASIC
+    assert web_search_tool_type("claude-opus-5") == WEB_SEARCH_DYNAMIC
+    assert web_search_tool_type("claude-sonnet-5") == WEB_SEARCH_DYNAMIC
+
+
+def test_the_request_carries_the_tool_version_for_the_model_it_uses():
+    client = FakeClient(_resp(REC_US))
+    enrich("A B", "a@ubs.com", "UBS", client=client,
+           model="claude-haiku-4-5-20251001")
+    from crm.region_enrich import WEB_SEARCH_BASIC
+    tools = client.calls[0]["tools"]
+    search = next(t for t in tools if t.get("name") == "web_search")
+    assert search["type"] == WEB_SEARCH_BASIC
+    assert search["max_uses"] == 1
