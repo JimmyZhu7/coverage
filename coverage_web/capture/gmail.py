@@ -408,15 +408,27 @@ def _match_contact(user, finding: dict) -> Contact | None:
             return match
     name = (finding.get("name") or "").strip()
     if name:
-        # Split the header first. "Guerrero, Freddy M - GCM" carries a role
-        # after the dash, and `names_equivalent` was being handed the whole
-        # string — it answers False against "Freddy Guerrero" raw and True
-        # against the split "Freddy M Guerrero". Corroborated by the address
-        # so the inversion is evidence, not a guess (see `_inverted_reading`).
-        name, _ = discovery.split_display_name(name, email=email)
+        # BOTH readings of the header, and a contact matches on either.
+        # `names_equivalent` already inverts the bare comma form on its own
+        # ("Nunley, Vanessa N" ~ "Vanessa Nunley"), with no address needed.
+        # What it cannot see through is a role riding after a dash:
+        # "Guerrero, Freddy M - GCM" answers False raw and True once
+        # `split_display_name` has taken " - GCM" off — but that split, with
+        # nothing to corroborate the inversion, reads the SAME comma form as
+        # surname + role and hands back a bare "Nunley". Feeding the rung only
+        # the split reading therefore broke the case it had always handled
+        # (2026-09-04, caught by `test_matches_inverted_last_first_display_name`).
+        # So: the raw string keeps every match it used to make, and the split
+        # one adds the role-suffixed headers on top. Refusal is unchanged —
+        # a header neither reading can equate to a stored name still matches
+        # nobody, and two matches still raise.
+        split_name, _ = discovery.split_display_name(name, email=email)
+        readings = {name, split_name} - {""}
         matches = [
             contact for contact in scoped
-            if contact.name and discovery.names_equivalent(contact.name, name)
+            if contact.name and any(
+                discovery.names_equivalent(contact.name, r) for r in readings
+            )
         ]
         if len(matches) > 1:
             raise AmbiguousContactError(name, len(matches))

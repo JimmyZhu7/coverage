@@ -51,11 +51,27 @@ def test_a_role_suffixed_inverted_header_matches_by_name(bofa):
 
 
 @pytest.mark.django_db
-def test_with_no_address_the_header_is_not_inverted_on_a_guess(bofa):
+def test_a_role_suffixed_header_with_no_address_still_matches_nobody(bofa):
+    """The raw string fails on the " - GCM" suffix; the split, with no address
+    to corroborate an inversion, yields a bare "Guerrero". Neither reading
+    equates to "Freddy Guerrero", so the rung refuses — which is correct: it
+    is the suffix that blocks this, not the comma. The bare comma form
+    without a suffix still matches with no address at all
+    (`test_matches_inverted_last_first_display_name` in test_gmail.py)."""
     user = _user()
     Contact.all_objects.create(user=user, name="Freddy Guerrero",
                                email="", firm=bofa, source="manual")
     assert _match_contact(user, {"email": "", "name": "Guerrero, Freddy M - GCM"}) is None
+
+
+@pytest.mark.django_db
+def test_the_bare_comma_form_still_matches_with_no_address(bofa):
+    """The regression this file exists to pin: the split reading must never
+    REPLACE the raw one."""
+    user = _user()
+    c = Contact.all_objects.create(user=user, name="Vanessa Nunley",
+                                   email="", firm=bofa, source="manual")
+    assert _match_contact(user, {"email": "", "name": "Nunley, Vanessa N"}) == c
 
 
 @pytest.mark.django_db
