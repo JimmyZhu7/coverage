@@ -252,6 +252,17 @@ class Command(BaseCommand):
             raise CommandError(
                 f"plan file is for {plan.get('user')!r}, not {user.email!r}"
             )
+        # A plan may name the provenance of its own evidence. Default "web",
+        # which is what a `region_enrich` dry run produces; a plan built by
+        # reading the student's own inbox says "reply", so the row is labelled
+        # for what it is and reverts with its own kind rather than being swept
+        # up in a `--revert` of a web run it was never part of.
+        source = plan.get("source", Contact.REGION_SOURCE_WEB)
+        allowed_sources = {Contact.REGION_SOURCE_WEB, Contact.REGION_SOURCE_REPLY}
+        if source not in allowed_sources:
+            raise CommandError(
+                f"plan source {source!r} is not one of {sorted(allowed_sources)}"
+            )
         wanted = plan.get("placements", {})
         rows = {
             c.id: c for c in Contact.objects.for_user(user)
@@ -261,7 +272,7 @@ class Command(BaseCommand):
             undo_file
             or f"region_enrich_undo_{datetime.now(dt_timezone.utc):%Y%m%dT%H%M%S}.json"
         )
-        undo = {"user": user.email, "written": {}, "evidence": {}}
+        undo = {"user": user.email, "source": source, "written": {}, "evidence": {}}
         skipped_placed = skipped_rules = 0
         for key, rec in wanted.items():
             c = rows.get(int(key))
@@ -278,7 +289,7 @@ class Command(BaseCommand):
                 skipped_rules += 1
                 continue
             Contact.objects.for_user(user).filter(id=c.id, region="").update(
-                region=p.market, region_source=Contact.REGION_SOURCE_WEB
+                region=p.market, region_source=source
             )
             undo["written"][str(c.id)] = p.market
             undo["evidence"][str(c.id)] = {
@@ -303,6 +314,11 @@ class Command(BaseCommand):
             raise CommandError(
                 f"undo file is for {undo.get('user')!r}, not {user.email!r}"
             )
+        # What KIND of placement this file undoes. Older undo files predate
+        # the key and are all web runs, so that is the default; without this
+        # a reply-sourced run would revert nothing at all and say so as a
+        # cheerful "Reverted 0".
+        source = undo.get("source", Contact.REGION_SOURCE_WEB)
         written = undo.get("written", {})
         rows = Contact.objects.for_user(user).filter(
             id__in=[int(k) for k in written]
@@ -310,10 +326,11 @@ class Command(BaseCommand):
         to_revert, skipped = [], 0
         for c in rows:
             # Only while it still holds exactly what this run wrote, and
-            # still says the web wrote it: a region the user corrected since
-            # is their word now.
+            # still carries this run's own source: a region the user
+            # corrected since is their word now, and a row placed by a
+            # different kind of run is that run's to undo.
             if (c.region == written[str(c.id)]
-                    and c.region_source == Contact.REGION_SOURCE_WEB):
+                    and c.region_source == source):
                 to_revert.append(c.id)
             else:
                 skipped += 1

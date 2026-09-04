@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from django.core.management.base import CommandError
 
 from crm.models import Contact
 from crm.region_enrich import Placement, enrich
@@ -376,3 +377,96 @@ def test_the_request_carries_the_tool_version_for_the_model_it_uses():
     search = next(t for t in tools if t.get("name") == "web_search")
     assert search["type"] == WEB_SEARCH_BASIC
     assert search["max_uses"] == 1
+
+
+# ---------------------------------------------------------------------------
+# WHERE THE EVIDENCE CAME FROM — "web" and "reply" are not the same thing
+# ---------------------------------------------------------------------------
+
+def test_a_plan_can_declare_its_evidence_came_from_a_reply(board, tmp_path):
+    """A placement read out of the student's own inbox is labelled `reply`,
+    not `web`. The UI string for `web` is "From their public profile", which
+    would be a lie over an email, and a `--revert` of a web run would sweep
+    up rows that were never part of it."""
+    user, _, a, _, _ = board
+    plan = tmp_path / "replies.json"
+    plan.write_text(json.dumps({
+        "user": user.email,
+        "source": "reply",
+        "placements": {str(a.id): {**REC_US, "name": a.name}},
+    }))
+    call_command("enrich_contact_regions", "--user", user.email,
+                 "--apply-plan", str(plan), "--undo-file", str(tmp_path / "u.json"))
+    a.refresh_from_db()
+    assert (a.region, a.region_source) == ("us", "reply")
+
+
+def test_a_plan_with_no_source_is_still_a_web_run(board, tmp_path):
+    """Every plan written before the key existed is a `region_enrich` dry run."""
+    user, _, a, _, _ = board
+    plan = tmp_path / "old.json"
+    plan.write_text(json.dumps({
+        "user": user.email,
+        "placements": {str(a.id): {**REC_US, "name": a.name}},
+    }))
+    call_command("enrich_contact_regions", "--user", user.email,
+                 "--apply-plan", str(plan), "--undo-file", str(tmp_path / "u.json"))
+    a.refresh_from_db()
+    assert a.region_source == "web"
+
+
+def test_an_unknown_plan_source_is_refused(board, tmp_path):
+    user, _, a, _, _ = board
+    plan = tmp_path / "bad.json"
+    plan.write_text(json.dumps({
+        "user": user.email, "source": "vibes",
+        "placements": {str(a.id): {**REC_US, "name": a.name}},
+    }))
+    with pytest.raises(CommandError):
+        call_command("enrich_contact_regions", "--user", user.email,
+                     "--apply-plan", str(plan), "--undo-file", str(tmp_path / "u.json"))
+    a.refresh_from_db()
+    assert a.region == ""
+
+
+def test_revert_undoes_a_reply_run_rather_than_reporting_zero(board, tmp_path):
+    """The revert guard used to hardcode `web`, so a reply run's undo file
+    would match nothing and say "Reverted 0" as though it had worked."""
+    user, _, a, _, _ = board
+    plan = tmp_path / "replies.json"
+    undo = tmp_path / "undo.json"
+    plan.write_text(json.dumps({
+        "user": user.email, "source": "reply",
+        "placements": {str(a.id): {**REC_US, "name": a.name}},
+    }))
+    call_command("enrich_contact_regions", "--user", user.email,
+                 "--apply-plan", str(plan), "--undo-file", str(undo))
+    a.refresh_from_db()
+    assert a.region_source == "reply"
+
+    call_command("enrich_contact_regions", "--user", user.email, "--revert", str(undo))
+    a.refresh_from_db()
+    assert (a.region, a.region_source) == ("", "")
+
+
+def test_a_reply_run_does_not_revert_a_web_row(board, tmp_path):
+    """Each kind of run undoes only its own rows."""
+    user, _, a, _, _ = board
+    web_plan = tmp_path / "web.json"
+    web_plan.write_text(json.dumps({
+        "user": user.email,
+        "placements": {str(a.id): {**REC_US, "name": a.name}},
+    }))
+    call_command("enrich_contact_regions", "--user", user.email,
+                 "--apply-plan", str(web_plan), "--undo-file", str(tmp_path / "w.json"))
+    a.refresh_from_db()
+    assert a.region_source == "web"
+
+    # An undo file claiming the same row was a reply placement must not touch it.
+    forged = tmp_path / "forged.json"
+    forged.write_text(json.dumps({
+        "user": user.email, "source": "reply", "written": {str(a.id): "us"},
+    }))
+    call_command("enrich_contact_regions", "--user", user.email, "--revert", str(forged))
+    a.refresh_from_db()
+    assert (a.region, a.region_source) == ("us", "web")

@@ -100,11 +100,28 @@ class Contact(PrivateModel):
     # "assistant": what a model wrote must be permanently distinguishable
     # from what a person said, and reversible as a set.
     REGION_SOURCE_WEB = "web"
+    # "reply": the person SAID where they are, in a message to this student.
+    # Added 2026-09-04, and it is a separate value from "web" because the two
+    # are different evidence with different lifetimes. "web" is a page that
+    # can be edited or deleted by someone else; "reply" is a sentence in the
+    # student's own mailbox, quoted in the undo file, that will read the same
+    # in a year. Labelling one as the other would put "From their public
+    # profile" under a placement whose only source is an email, and would
+    # sweep it up in a `--revert` of a web run it was never part of.
+    #
+    # It is still not a probabilistic signal, so `resolve_region`'s ban holds:
+    # what counts is a FIRST-PERSON statement of the person's own location or
+    # working clock ("I'm in HK today", "anytime after 11am PT"), never the
+    # signature block, the phone country code or the Date header offset that
+    # `region_enrich`'s docstring rules out. Those are firm-wide templates;
+    # a sentence someone typed about themselves is not.
+    REGION_SOURCE_REPLY = "reply"
     REGION_SOURCE_CHOICES = [
         ("user", "Set by you"),
         ("declared", "From your target regions"),
         ("firm", "From the firm's markets"),
         ("web", "From their public profile"),
+        ("reply", "They told you in an email"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
