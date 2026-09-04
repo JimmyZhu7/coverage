@@ -419,11 +419,19 @@
       if (!button) return;
       var lane = button.closest(".lane");
       if (!lane) return;
-      // The card's own name node, so what is copied is what is on screen.
-      var names = Array.prototype.map.call(
-        lane.querySelectorAll(".act-name"),
-        function (n) { return n.textContent.trim(); }
-      ).filter(Boolean);
+      // EVERY name in the lane, not the slice the cap left on screen. This
+      // used to walk the lane's rendered card headings, which on a lane
+      // headed "2 of 29 today" copied two people and dropped the
+      // twenty-seven held under "Up next" — those sit outside this section,
+      // so no query rooted here could ever have reached them.
+      // `data-lane-names` is the lane's full membership, newline separated,
+      // already carrying the page's own name treatment; the cockpit swap
+      // rebuilds it alongside the cards, so it cannot go stale behind a
+      // Snooze.
+      var names = (lane.getAttribute("data-lane-names") || "")
+        .split("\n")
+        .map(function (n) { return n.trim(); })
+        .filter(Boolean);
       if (!names.length) return;
       var label = button.querySelector(".lane-copy-label");
       copyText(names.join("\n")).then(function () {

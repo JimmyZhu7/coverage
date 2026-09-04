@@ -245,26 +245,38 @@ copy exactly once, and this is the once.
       </div>
     {% endif %}
     {% for lane in lanes %}
-      <section class="lane lane-{{ lane.key }}">
+      <section class="lane lane-{{ lane.key }}"
+               data-lane-names="{% for a in lane.all_items %}{{ a.contact.name|smart_person_name|smart_title }}{% if not forloop.last %}&#10;{% endif %}{% endfor %}">
         {% comment %}
         COPY THE NAMES (2026-09-02, the founder's own ask). A lane is a list
         of people he is about to write to somewhere else, and retyping six
         names out of a queue is the kind of transcription a page holding the
         names should not make anybody do.
 
-        The button copies THIS lane's names only, read out of the rendered
-        cards at click time rather than from a data attribute built here.
-        That is deliberate: the cards are what the swap rebuilds, so reading
-        them means the copy can never be a stale snapshot of a lane that has
-        since lost a card to a Snooze. `crm/week.html` carries the handler,
-        beside the lane-count animation that already reads these same nodes.
+        THE WHOLE LANE, NOT THE VISIBLE SLICE (2026-09-03). The button used
+        to read `.act-name` out of the rendered cards at click time. On a
+        capped lane that is a lie by omission: the heading says "2 of 29
+        today", two cards render, and the other 27 sit under "Up next" —
+        outside this section, so the query never saw them. Copy names handed
+        over two people and said nothing about the twenty-seven. It now
+        copies `data-lane-names`, which `crm.today` builds from the plan plus
+        the held remainder in the lane's own order.
+
+        An attribute rather than the DOM, and it is not the stale snapshot
+        the earlier note feared. Every quick action swaps this whole cockpit,
+        so this attribute is re-rendered in the same response as the cards
+        beside it — a lane that just lost someone to a Snooze rebuilds both.
+        Names carry the same `smart_person_name|smart_title` treatment the
+        cards do, so what lands in the clipboard is what is on the page: a
+        contact capture stored as "jude.yoon" copies as "Jude Yoon", the way
+        it renders. `crm/week.html` has the handler.
         {% endcomment %}
         <h2 class="lane-title">
           {% if lane.key == "critical" %}<span class="lane-dot"></span>{% endif %}
           {{ lane.label }}
           <span class="lane-count" aria-live="polite">{% if lane.capped %}{{ lane.count }} of {{ lane.total }} today{% else %}{{ lane.count }}{% endif %}</span>
           <button type="button" class="btn lane-copy" data-lane-copy
-                  aria-label="Copy the {{ lane.count }} name{{ lane.count|pluralize }} in {{ lane.label }}">
+                  aria-label="Copy the {{ lane.total }} name{{ lane.total|pluralize }} in {{ lane.label }}">
             <span class="lane-copy-label">Copy names</span>
           </button>
         </h2>

@@ -3709,22 +3709,33 @@ def _cockpit_context(user) -> dict:
         planned_lanes["critical" if _is_critical(a) else
                       ("cold" if _today_class(a) == CLASS_COLD
                        else "momentum")].append(a)
-    held_by_lane: dict[str, int] = {key: 0 for key, _ in _TODAY_LANES}
+    # The held remainder, KEPT AS ROWS rather than counted. It used to be a
+    # per-lane integer, which was everything the "2 of 29 today" heading
+    # needed and one thing short of what Copy names needs: the 27 rows the
+    # cap is holding are the same people, and a copy that could only reach
+    # the rendered two was quietly handing over a third of the lane. Held
+    # rows keep `ordered`'s ranking, so `items + held` is the lane read top
+    # to bottom — what is on screen first, then the rest in the order it
+    # will arrive.
+    held_by_lane: dict[str, list[dict]] = {key: [] for key, _ in _TODAY_LANES}
     for a in held:
-        held_by_lane["cold" if _today_class(a) == CLASS_COLD else "momentum"] += 1
+        held_by_lane["cold" if _today_class(a) == CLASS_COLD else "momentum"].append(a)
 
     lanes = []
     for key, label in _TODAY_LANES:
         items = planned_lanes[key]
         if not items:
             continue
-        total = len(items) + held_by_lane[key]
+        total = len(items) + len(held_by_lane[key])
         lanes.append({
             "key": key,
             "label": _lane_label(key, items, label),
             "items": items,
             "count": len(items),
             "total": total,
+            # Everyone in the lane, rendered or held, for Copy names. The
+            # cards render `items`; this is the list the button copies.
+            "all_items": items + held_by_lane[key],
             # E2: a capped lane never renders a bare number. It says "2 of 29
             # today" or it says nothing but its own count.
             "capped": total > len(items),
