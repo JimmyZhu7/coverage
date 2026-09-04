@@ -1955,6 +1955,22 @@ def _is_critical(a: dict) -> bool:
 CRITICAL_STALE_BUSINESS_DAYS = 15
 
 
+def _lane_of(a: dict) -> str:
+    """Which of the three cockpit lanes a row belongs to.
+
+    ONE definition, because the plan and the held remainder both need it and
+    a row must not be able to answer differently in the two places. They were
+    two separate ternaries, and the held one was two-way: it could only say
+    cold or momentum, which was true only because `plan_split` never holds a
+    critical row. Copy names now reads the held rows, so a disagreement here
+    would put someone in another lane's clipboard rather than merely off a
+    heading by one.
+    """
+    if _is_critical(a):
+        return "critical"
+    return "cold" if _today_class(a) == CLASS_COLD else "momentum"
+
+
 def _stale_critical(a: dict, today) -> bool:
     """Has this critical card stopped earning its never-capped exemption?
 
@@ -3706,9 +3722,7 @@ def _cockpit_context(user) -> dict:
 
     planned_lanes = {key: [] for key, _ in _TODAY_LANES}
     for a in planned:
-        planned_lanes["critical" if _is_critical(a) else
-                      ("cold" if _today_class(a) == CLASS_COLD
-                       else "momentum")].append(a)
+        planned_lanes[_lane_of(a)].append(a)
     # The held remainder, KEPT AS ROWS rather than counted. It used to be a
     # per-lane integer, which was everything the "2 of 29 today" heading
     # needed and one thing short of what Copy names needs: the 27 rows the
@@ -3719,7 +3733,18 @@ def _cockpit_context(user) -> dict:
     # will arrive.
     held_by_lane: dict[str, list[dict]] = {key: [] for key, _ in _TODAY_LANES}
     for a in held:
-        held_by_lane["cold" if _today_class(a) == CLASS_COLD else "momentum"].append(a)
+        # The SAME three-way classification the planned loop above uses, not
+        # a two-way one. `plan_split` builds `held` out of `rest`, and `rest`
+        # excludes the critical rows, so today no held row can be critical
+        # and the two spellings agree. They agree by luck rather than by
+        # construction, though, and the luck is one edit deep: the moment
+        # anything lets a critical row be held, a two-way ternary files it
+        # under cold or momentum and Copy names hands that lane a person who
+        # belongs to another. That was survivable while this held an integer
+        # and only a heading could be off by one. It now carries the rows the
+        # button copies, so let the classification be the same expression in
+        # both places and the question stops existing.
+        held_by_lane[_lane_of(a)].append(a)
 
     lanes = []
     for key, label in _TODAY_LANES:

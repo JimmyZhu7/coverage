@@ -248,3 +248,47 @@ def test_the_handler_is_delegated_so_it_survives_a_queue_swap(client):
 
     assert 'cockpit.addEventListener("click"' in body
     assert 'closest("[data-lane-copy]")' in body
+
+
+# ---------------------------------------------------------------------------
+# ONE lane classifier, shared by the plan and the held remainder
+# ---------------------------------------------------------------------------
+
+def test_the_lane_classifier_is_three_way_for_held_rows_too():
+    """The plan loop and the held loop must answer the same question the same
+    way.
+
+    They used to be two separate ternaries and the held one could only say
+    "cold" or "momentum" — correct only because `plan_split` builds `held`
+    out of `rest`, which excludes critical rows. That made the held loop
+    right by luck rather than by construction. While it carried an integer
+    the cost of the luck running out was a heading off by one; now that it
+    carries the rows Copy names hands over, the cost is a person appearing in
+    another lane's clipboard. So both call `_lane_of`.
+    """
+    from crm.today import _lane_of
+
+    # `_today_class` reads the row's `action`, so these are real actions
+    # rather than a hand-set class: "reping" is CLASS_CRITICAL,
+    # "first_outreach" is CLASS_COLD, "thank_you" is CLASS_ENGAGED.
+    assert _lane_of({"action": "reping", "priority": 5}) == "critical"
+    assert _lane_of({"action": "first_outreach", "priority": 5}) == "cold"
+    assert _lane_of({"action": "thank_you", "priority": 5}) == "momentum"
+
+    # priority 0 is the other road into critical, whatever the action says.
+    assert _lane_of({"action": "first_outreach", "priority": 0}) == "critical"
+
+
+def test_both_cockpit_loops_call_the_shared_classifier():
+    """A regression guard with teeth only as long as it names the mechanism:
+    if either loop goes back to spelling the ternary out inline, the two can
+    drift apart again silently."""
+    import inspect
+
+    from crm.today import _cockpit_context
+
+    src = inspect.getsource(_cockpit_context)
+    assert src.count("_lane_of(a)") == 2, (
+        "both planned_lanes and held_by_lane must classify through _lane_of"
+    )
+    assert 'planned_lanes["critical" if' not in src
