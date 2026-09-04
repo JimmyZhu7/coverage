@@ -83,10 +83,28 @@ class Contact(PrivateModel):
     REGION_SOURCE_USER = "user"
     REGION_SOURCE_DECLARED = "declared"
     REGION_SOURCE_FIRM = "firm"
+    # "web": a placement read off the PERSON'S OWN public record — their
+    # profile, a firm bio page, a FINRA BrokerCheck registration — by
+    # `crm.region_enrich`, always with the URL it came from. Added 2026-09-04
+    # on the founder's explicit call ("i need ai to sort them into accurate
+    # placements"), for the 94 contacts at Citi, Goldman, JPM, Morgan Stanley,
+    # UBS and Jefferies whose firms recruit in BOTH markets and whose rows
+    # hold nothing else: all outbound-only, no reply, no signature, no
+    # LinkedIn URL. `resolve_region`'s ban on probabilistic signals is kept
+    # whole — that ban is about inferring a desk from firm-wide templates
+    # (signature cities, phone codes, Date offsets), and `region_enrich`
+    # refuses exactly those: it takes only a location stated about the
+    # person, on a page that names both the person and the firm, and it
+    # says "unknown" rather than pick between two people with one name. It
+    # is its own value, never "user", for the same reason Touch.source has
+    # "assistant": what a model wrote must be permanently distinguishable
+    # from what a person said, and reversible as a set.
+    REGION_SOURCE_WEB = "web"
     REGION_SOURCE_CHOICES = [
         ("user", "Set by you"),
         ("declared", "From your target regions"),
         ("firm", "From the firm's markets"),
+        ("web", "From their public profile"),
     ]
 
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)

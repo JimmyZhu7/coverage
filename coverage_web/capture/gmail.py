@@ -393,8 +393,27 @@ def _match_contact(user, finding: dict) -> Contact | None:
         )
         if match:
             return match
+        # THE THIRD EMAIL RUNG (2026-09-04): the same localpart on another
+        # domain the SAME firm owns. Freddy Guerrero is stored at
+        # freddy.guerrero@baml.com and writes from freddy.guerrero@bofa.com;
+        # Bank of America rewrites the legacy Merrill address outbound.
+        # `routing_variant` cannot see it — bofa.com is a sibling of
+        # baml.com, not a child — and this function fed the live path's
+        # answer nothing, so `apply_findings` (which is where a scheduled
+        # chat becomes a CalendarEvent) skipped his thread as unmatched
+        # while the live resolver next door had already learned the rule.
+        # One helper, both paths: `mailfacts._same_firm_alias_match`.
+        match = mailfacts._same_firm_alias_match(user, email)
+        if match:
+            return match
     name = (finding.get("name") or "").strip()
     if name:
+        # Split the header first. "Guerrero, Freddy M - GCM" carries a role
+        # after the dash, and `names_equivalent` was being handed the whole
+        # string — it answers False against "Freddy Guerrero" raw and True
+        # against the split "Freddy M Guerrero". Corroborated by the address
+        # so the inversion is evidence, not a guess (see `_inverted_reading`).
+        name, _ = discovery.split_display_name(name, email=email)
         matches = [
             contact for contact in scoped
             if contact.name and discovery.names_equivalent(contact.name, name)

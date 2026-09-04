@@ -92,3 +92,8 @@ scripts/seed_founder.py
 
 # Legal drafts. Never tracked: this is a public repo.
 docs/liam-safe-draft-*.md
+
+# enrich_contact_regions / backfill_contact_regions: per-run plan and undo files (contain real names + URLs)
+region_enrich_plan_*.json
+region_enrich_undo_*.json
+region_backfill_undo_*.json
