@@ -68,6 +68,7 @@ from django.utils.dateparse import parse_datetime
 
 from analytics.events import record_event
 from capture import appmail, discovery, mailfacts
+from core.templatetags.textstyle import smart_person_name
 from capture.providers import (
     AmbiguousContactError,
     CaptureProvider,
@@ -115,6 +116,7 @@ class SyncResult:
     # and the primary address is left alone. Lumping the two together is
     # exactly how "backfill" quietly came to mean "overwrite".
     alternate_emails_noted: int = 0
+    names_upgraded: int = 0
     outreach_logged: int = 0
     # A SECOND outbound send to a contact whose first note is already on
     # record — logged as kind `follow_up`, the kind the cadence engine's
@@ -1289,6 +1291,44 @@ def apply_findings(user, findings: list[dict], *, dry_run: bool = False) -> Sync
                     "(unarchive by hand if they should come back)"
                 )
             continue
+
+        # THE NAME THEY SIGN WITH BEATS THE ADDRESS WE GUESSED FROM.
+        #
+        # `capture` stores exactly what it observed, and for a contact first
+        # seen in the founder's own SENT mail that is the recipient's
+        # localpart: 86 of his 282 live contacts (30%) are named
+        # `garrett.roach`, `nate.mathew`, `kevin.lee`. That is honest, and
+        # `smart_person_name` renders it readably on the card, so the row was
+        # never wrong — but it is a placeholder, and it stops being the best
+        # thing known the moment the person replies with a display name of
+        # their own. Garrett Roach did exactly that: "Roach, Garrett - GCIB
+        # LA" arrived in a From header, `split_display_name` reads it
+        # correctly (it returns ('Garrett Roach', 'GCIB LA') — the ROLE half
+        # was even kept), and the name half was dropped on the floor because
+        # nothing here ever revisits a name.
+        #
+        # ONLY OVER A PLACEHOLDER, never over a person's own words. The guard
+        # is `smart_person_name` itself: it fires only on a string shaped like
+        # a localpart and returns the input unchanged otherwise, so "changed
+        # it" is precisely "the stored name was the machine one". A name a
+        # human typed, in Coverage or in an earlier header, is left alone —
+        # the same explicit-wins posture the email block below takes when it
+        # notes an alternate address rather than substituting it.
+        raw_display = (finding.get("name") or "").strip()
+        if raw_display and contact.name and not dry_run:
+            stored = contact.name.strip()
+            if smart_person_name(stored) != stored:
+                better, _ = discovery.split_display_name(
+                    raw_display, email=(contact.email or finding.get("email") or "")
+                )
+                better = (better or "").strip()
+                if better and smart_person_name(better) == better and better != stored:
+                    contact.name = better[:255]
+                    contact.save(update_fields=["name"])
+                    result.names_upgraded += 1
+                    result.details.append(
+                        f"{stored}: signs their mail {better!r} — name updated"
+                    )
 
         # When this finding's underlying message actually happened — None
         # for the daily sync's findings (no such field), a real past instant

@@ -689,7 +689,26 @@
                    data-name="{{ card.c.name }}"
                    data-firm="{% if card.c.firm %}{{ card.c.firm.name }}{% else %}{{ card.c.firm_text }}{% endif %}"
                    data-touch="{% if card.c.last_touch_ts %}{{ card.c.last_touch_ts|date:'U' }}{% endif %}"
-                   data-search="{{ card.c.name }} {% if card.c.firm %}{{ card.c.firm.name }}{% else %}{{ card.c.firm_text }}{% endif %} {{ card.c.role }} {{ card.school }}">
+                   {% comment %}
+                   THE HAYSTACK IS WHAT THE READER CAN SEE, PLUS THE ADDRESS.
+                   Two things were missing and both made the bar look broken.
+
+                   `card.c.name` is the RAW stored name, and for 86 of the
+                   founder's 282 live contacts (30%) that is the email
+                   localpart — `garrett.roach`, `nate.mathew` — because
+                   `capture` stores exactly what it observed. The card renders
+                   those through `smart_person_name`, so the screen says
+                   "Garrett Roach" while the thing being searched said
+                   "garrett.roach": typing the name you could read found
+                   nothing. The filter goes in the haystack too, and BOTH
+                   spellings stay in it, so the localpart keeps working for
+                   anyone who learned to type it.
+
+                   The email was never in here at all. It is on the card, it
+                   is the most unambiguous handle a contact has, and searching
+                   a CRM by address is not an exotic thing to try.
+                   {% endcomment %}
+                   data-search="{{ card.c.name }} {{ card.c.name|smart_person_name }} {{ card.c.email }} {% if card.c.firm %}{{ card.c.firm.name }}{% else %}{{ card.c.firm_text }}{% endif %} {{ card.c.role }} {{ card.school }}">
                 <div class="cc-head">
                   {% comment %}
                   The card's own checkbox, not a wrapping <label>: unlike

@@ -55,10 +55,23 @@ Archived has no groups and the script quietly treats the whole list as one.
 
     function applySearch() {
       var q = input.value.trim().toLowerCase();
+      // EVERY WORD, IN ANY ORDER — not one contiguous run of characters.
+      // `indexOf` meant the query had to appear exactly as typed, so a
+      // haystack reading "Garrett Roach Bank of America" answered "garrett
+      // roach" and refused "roach garrett", refused "garrett bofa", and
+      // refused "garrett  roach" on the double space. Nobody types a CRM
+      // search expecting to reproduce a word order they cannot see. Splitting
+      // on whitespace and requiring every term keeps the filter as strict as
+      // it was — more terms still narrow — while letting the terms arrive in
+      // whatever order the person thought of them.
+      var terms = q.split(/\s+/).filter(Boolean);
       var counts = new Map();
       var totalVisible = 0;
       items.forEach(function (el) {
-        var match = !q || (el.dataset.search || "").toLowerCase().indexOf(q) !== -1;
+        var hay = (el.dataset.search || "").toLowerCase();
+        var match = !terms.length || terms.every(function (term) {
+          return hay.indexOf(term) !== -1;
+        });
         el.classList.toggle("is-csearch-hidden", !match);
         if (match) totalVisible++;
         var g = groupOf(el);
