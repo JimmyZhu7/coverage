@@ -386,11 +386,57 @@ def _detect_auto(text: str) -> list[Detected]:
 # --------------------------------------------------------------------------- #
 
 def _contact_for(user, email: str) -> Contact | None:
-    return (
+    exact = (
         Contact.objects.for_user(user)
         .filter(archived=False, email__iexact=email)
         .first()
     )
+    if exact is not None:
+        return exact
+    return _same_firm_alias_match(user, email)
+
+
+def _same_firm_alias_match(user, email: str) -> Contact | None:
+    """The contact at the SAME localpart on another domain the SAME firm owns.
+
+    A bank that has swallowed another bank writes from both. The founder
+    emailed `freddy.guerrero@baml.com` twice and Freddy replied twice from
+    `freddy.guerrero@bofa.com` — Bank of America rewrites the legacy Merrill
+    address on the way out, and says so in the subject it stamps
+    ("[Sent To: freddy.guerrero@baml.com]"). An exact-address lookup finds
+    nobody, so neither reply was ever attached to a contact: the row sat at
+    `warmth=cold, thread_state=no_reply` while the two of them had agreed a
+    time and got on a call. That is the worst direction for this bug to fail
+    in — the queue kept asking him to chase the one person who had answered.
+
+    `_routing_match` below cannot cover it. That rule is subdomain expansion
+    (`noah.bauld@ny.ibd.email.gs.com` -> `noah.bauld@gs.com`), and `bofa.com`
+    is not a subdomain of `baml.com`; they are siblings. What relates them is
+    the firm, and Coverage already holds that: `Firm.domains` on the founder's
+    own Bank of America row reads
+    `['bankofamerica.com', 'bofaml.com', 'bofa.com', 'baml.com']`, seeded by
+    `directory/_mail_domains.py`. The resolver simply never asked.
+
+    Deliberately narrow, in the same spirit as `_routing_match`: identical
+    localpart, and BOTH domains listed on one firm the contact is already
+    attached to. It never invents a firm link, never matches across firms, and
+    an ambiguous result refuses rather than picking — refusing beats guessing.
+    """
+    email = normalize_email(email)
+    if "@" not in email:
+        return None
+    localpart, domain = email.split("@", 1)
+    hits = [
+        c
+        for c in Contact.objects.for_user(user)
+        .filter(archived=False, email__istartswith=f"{localpart}@")
+        .select_related("firm")
+        if c.firm_id
+        and (stored := normalize_email(c.email)).count("@") == 1
+        and domain in (c.firm.domains or [])
+        and stored.split("@", 1)[1] in (c.firm.domains or [])
+    ]
+    return hits[0] if len(hits) == 1 else None
 
 
 def _routing_match(user, routing_email: str):
